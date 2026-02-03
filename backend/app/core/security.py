@@ -28,10 +28,3 @@ class PasswordHash:
         return cls(value.encode("utf-8"))
     
 
-password = "boboboys6967"
-password2 = "boboboys6967"
-hashed = PasswordHash.from_password(password)
-hashed2 = PasswordHash.from_password(password)
-print(PasswordHash.to_str(hashed))
-print(PasswordHash.to_str(hashed2))
-print(hashed.verify(password2))
