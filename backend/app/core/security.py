@@ -28,17 +28,10 @@ class PasswordHash:
         return cls(value.encode("utf-8"))
     
 
-pwd_hash = PasswordHash.from_password("my_secret_password")
-
-
-stored_value = pwd_hash.to_str()
-
-print("Stored hash:", stored_value)
-
-
-loaded_hash = PasswordHash.from_str(stored_value)
-
-print("Correct password:",
-      loaded_hash.verify("my_secret_password"))  
-print("Wrong password:",
-      loaded_hash.verify("wrong_password")) 
+password = "boboboys6967"
+password2 = "boboboys6967"
+hashed = PasswordHash.from_password(password)
+hashed2 = PasswordHash.from_password(password)
+print(PasswordHash.to_str(hashed))
+print(PasswordHash.to_str(hashed2))
+print(hashed.verify(password2))
