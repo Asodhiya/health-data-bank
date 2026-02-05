@@ -1,8 +1,10 @@
 fastapi
 uvicorn
 psycopg[binary]
+psycopg-pool
 python-dotenv
 pydantic
+pydantic-settings
 bcrypt
 "python-jose[cryptography]"
 pydantic[email]
