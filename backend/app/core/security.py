@@ -1,4 +1,7 @@
 import bcrypt
+from datetime import datetime, timedelta, timezone
+from jose import jwt, JWTError
+from app.core.config import settings
 
 class PasswordHash:
     __slots__ = ("_value",)
@@ -27,11 +30,19 @@ class PasswordHash:
     def from_str(cls, value: str):
         return cls(value.encode("utf-8"))
     
+# ── JWT Tokens (added for session management) ────────────────────────
 
-password = "boboboys6967"
-password2 = "boboboys6967"
-hashed = PasswordHash.from_password(password)
-hashed2 = PasswordHash.from_password(password)
-print(PasswordHash.to_str(hashed))
-print(PasswordHash.to_str(hashed2))
-print(hashed.verify(password2))
+def create_access_token(data: dict, expires_minutes: int | None = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=expires_minutes or settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
+    return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_access_token(token: str) -> dict | None:
+    try:
+        return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+    except JWTError:
+        return None
