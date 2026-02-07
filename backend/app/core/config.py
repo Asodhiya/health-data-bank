@@ -18,14 +18,14 @@ class Settings(BaseSettings):
     APP_NAME: str = "Health Data Bank"
     APP_ENV: str = "development"
     DEBUG: bool = True
-    
+
     # Supabase
     SUPABASE_URL: str = Field(..., description="Supabase Project URL")
     SUPABASE_ANON_KEY: str = Field(..., description="Supabase Anon/Public Key")
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
     
     # Database
-    DATABASE_URL: Optional[str] = None
+    DATABASE_URL: str
     
     # Authentication
     JWT_SECRET: str
@@ -36,7 +36,6 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
     
     class Config:
-        # Force it to look for .env in the backend root directory
         env_file = str(BASE_DIR / ".env")
         env_file_encoding = 'utf-8'
         case_sensitive = True
