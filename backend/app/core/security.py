@@ -1,5 +1,9 @@
 import bcrypt
-
+from datetime import datetime, timedelta, timezone
+from jose import jwt, JWTError
+import os
+from dotenv import load_dotenv
+load_dotenv()
 class PasswordHash:
     __slots__ = ("_value",)
 
@@ -28,10 +32,18 @@ class PasswordHash:
         return cls(value.encode("utf-8"))
     
 
-password = "boboboys6967"
-password2 = "boboboys6967"
-hashed = PasswordHash.from_password(password)
-hashed2 = PasswordHash.from_password(password)
-print(PasswordHash.to_str(hashed))
-print(PasswordHash.to_str(hashed2))
-print(hashed.verify(password2))
+
+def create_access_token(data: dict, expires_minutes: int | None = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=expires_minutes or int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+    )
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
+    return jwt.encode(to_encode, os.getenv("JWT_SECRET"), algorithm=os.getenv("JWT_ALGORITHM"))
+
+
+def decode_access_token(token: str) -> dict | None:
+    try:
+        return jwt.decode(token, os.getenv("JWT_SECRET"), algorithms=[os.getenv("JWT_ALGORITHM")])
+    except JWTError:
+        return None

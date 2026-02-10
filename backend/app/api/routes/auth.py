@@ -1,24 +1,38 @@
 """
 Authentication Routes
 """
-from fastapi import APIRouter, HTTPException, status
-
+from fastapi import APIRouter, HTTPException, status,Response,Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.models import User
+from sqlalchemy import select
+from app.db.session import get_db
+from app.core.security import PasswordHash,create_access_token
+from app.api.routes.val import UserSignup
+from app.services.cookies import _set_cookie
+from app.services.auth_service import authenticate_user,create_user
+from app.schemas.schemas import LoginRequest,UserResponse
 router = APIRouter()
 
 
-@router.post("/login")
-async def login():
-    """User login endpoint"""
-    # TODO: Implement authentication with Supabase
-    return {"message": "Login endpoint - To be implemented"}
+@router.post("/login",response_model=UserResponse)
 
+async def login(data: LoginRequest, response: Response,db: AsyncSession = Depends(get_db)):
+    """authenticates user by checking email and hashed password in the dummy db"""
+    user = await authenticate_user(data.email, data.password,db)
+    token = create_access_token({"sub": str(user.user_id)})
+    _set_cookie(response, token)
+    return {
+    "id": str(user.user_id),
+    "email": user.email,
+    "created_at": user.created_at,
+}
 
-@router.post("/register")
-async def register():
+#fix the queries over here
+@router.post("/register",response_model=UserResponse)
+async def register(payload: UserSignup, db: AsyncSession = Depends(get_db)):
     """User registration endpoint"""
-    # TODO: Implement registration with Supabase
-    return {"message": "Register endpoint - To be implemented"}
-
+    new_user = await create_user(payload,db)
+    return {"id": str(new_user.user_id), "email": new_user.email, "created_at": new_user.created_at}
 
 @router.post("/logout")
 async def logout():
@@ -32,3 +46,7 @@ async def get_current_user():
     """Get current authenticated user"""
     # TODO: Implement with JWT validation
     return {"message": "Current user endpoint - To be implemented"}
+
+
+
+    
