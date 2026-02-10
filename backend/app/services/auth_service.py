@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.db.models import User
 from sqlalchemy.exc import IntegrityError
 
-async def authenticate_user(email: str, password: str, db: AsyncSession = Depends(get_db)):
+async def authenticate_user(email: str, password: str, db: AsyncSession):
     """
     For the table columns are just a test that will be changed in the future.
     (for connecting db, check .env file) --needs config.py (should be edited in next sprints)

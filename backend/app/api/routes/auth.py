@@ -7,7 +7,7 @@ from app.db.models import User
 from sqlalchemy import select
 from app.db.session import get_db
 from app.core.security import PasswordHash,create_access_token
-from app.api.routes.val import UserSignup
+from app.schemas.schemas import UserSignup
 from app.services.cookies import _set_cookie
 from app.services.auth_service import authenticate_user,create_user
 from app.schemas.schemas import LoginRequest,UserResponse
