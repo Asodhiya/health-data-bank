@@ -9,6 +9,9 @@ import AdminRoute from "./components/AdminRoute";
 import CaretakerRoute from "./components/CaretakerRoute";
 import ResearcherRoute from "./components/ResearcherRoute";
 import DefaultRoute from "./components/DefaultRoute";
+import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
+import DashboardPage from "./pages/DashboardPage";
 
 function App() {
   const [userRole, setUserRole] = useState("participant");
@@ -16,9 +19,19 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* We pass the state variable 'userRole' down using a prop we named 'role' */}
+        {/* Public auth routes */}
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+
+        {/* Role-based redirect */}
         <Route path="/" element={<DefaultRoute userRole={userRole} />} />
 
+        {/* Participant routes — DashboardPage has its own layout */}
+        <Route element={<ParticipantRoute userRole={userRole} />}>
+          <Route path="/participant" element={<DashboardPage />} />
+        </Route>
+
+        {/* Admin routes */}
         <Route element={<AdminRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route
@@ -35,15 +48,7 @@ function App() {
           </Route>
         </Route>
 
-        <Route element={<ParticipantRoute userRole={userRole} />}>
-          <Route element={<NoSideDashboardLayout role={userRole} />}>
-            <Route
-              path="/participant"
-              element={<div>Welcome back, Josh! (Participant Dashboard)</div>}
-            />
-          </Route>
-        </Route>
-
+        {/* Caretaker routes */}
         <Route element={<CaretakerRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route
@@ -53,6 +58,7 @@ function App() {
           </Route>
         </Route>
 
+        {/* Researcher routes */}
         <Route element={<ResearcherRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route
