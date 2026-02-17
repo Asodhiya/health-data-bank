@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: true, // Listen on all network interfaces
-    port: 5173, // Ensure this matches your Docker EXPOSE and ports
+    port: 3000, // Ensure this matches your Docker EXPOSE and ports
     watch: {
       usePolling: true, // Vital for hot-reload to work in Docker
     },

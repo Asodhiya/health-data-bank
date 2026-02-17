@@ -1,7 +1,7 @@
 import { Outlet, Link } from "react-router-dom";
 import { useState } from "react";
 
-export default function NoSideDashboardLayout() {
+export default function NoSideDashboardLayout({ role }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   return (
     <div className="min-h-screen bg-blue-50/50 font-sans text-slate-900 flex flex-col">
