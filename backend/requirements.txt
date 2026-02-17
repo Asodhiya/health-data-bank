@@ -3,9 +3,9 @@ uvicorn
 psycopg[binary]
 python-dotenv
 pydantic
+pydantic-settings
 bcrypt
 python-jose[cryptography]
 email-validator
 sqlalchemy[asyncio]
 asyncpg
-
