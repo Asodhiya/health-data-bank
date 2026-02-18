@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import AuthLayout from '../components/AuthLayout';
 import { UserIcon, LockIcon, EyeIcon, EyeOffIcon } from '../components/Icons';
 import { api } from '../services/api';
 
@@ -28,7 +27,7 @@ export default function LoginPage() {
   };
 
   return (
-    <AuthLayout>
+    <>
       {/* Heading */}
       <div className="text-center mb-8">
         <h2
@@ -117,6 +116,6 @@ export default function LoginPage() {
           Register!
         </Link>
       </p>
-    </AuthLayout>
+    </>
   );
 }
