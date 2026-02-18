@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.models import User
 from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timezone
 
 async def authenticate_user(email: str, password: str, db: AsyncSession):
     """Checks email and password if in db or not"""
@@ -25,6 +26,10 @@ async def authenticate_user(email: str, password: str, db: AsyncSession):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
+
+    user.last_login_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(user)
 
     return user
 
