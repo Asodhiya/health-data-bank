@@ -1,4 +1,6 @@
-export default function AuthLayout({ children }) {
+import { Outlet } from 'react-router-dom';
+
+export default function AuthLayout() {
   return (
     <div className="auth-bg" style={{ padding: '2rem 1rem' }}>
       <div style={{ width: '100%', maxWidth: '420px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -23,7 +25,7 @@ export default function AuthLayout({ children }) {
           className="glass-card animate-fade-up-delay-1"
           style={{ width: '100%', padding: '2rem 2.25rem' }}
         >
-          {children}
+          <Outlet />
         </div>
 
         {/* Footer */}

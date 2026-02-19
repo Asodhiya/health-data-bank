@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import AuthLayout from '../components/AuthLayout';
 import {
   UserIcon, LockIcon, EyeIcon, EyeOffIcon,
   MailIcon, AtSignIcon, ShieldIcon, PhoneIcon,
@@ -91,7 +90,7 @@ export default function RegisterPage() {
         password: form.password,
         confirm_password: form.confirm_password,
       });
-      navigate('/login', { state: { registered: true } });
+      navigate('/onboarding/background');
     } catch (err) {
       setError(err.message || 'Registration failed');
     } finally {
@@ -102,7 +101,7 @@ export default function RegisterPage() {
   const phoneHint = getPhoneHint(form.phone);
 
   return (
-    <AuthLayout>
+    <>
       <div className="text-center mb-6">
         <h2
           className="text-2xl font-bold mb-2"
@@ -286,6 +285,6 @@ export default function RegisterPage() {
           Login!
         </Link>
       </p>
-    </AuthLayout>
+    </>
   );
 }
