@@ -95,7 +95,9 @@ export default function LoginPage() {
             className="text-sm font-medium hover:underline"
             style={{ color: 'var(--color-primary-600)' }}
           >
-            Forgot password?
+            <Link to="/forgot-password" className="auth-link" style={{ fontSize: '13px', display: 'block', textAlign: 'right', marginBottom: '16px' }}>
+            Forgot Password?
+            </Link>
           </a>
         </div>
 

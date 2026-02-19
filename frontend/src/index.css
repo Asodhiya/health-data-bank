@@ -185,6 +185,53 @@
     border-color: rgba(239, 68, 68, 0.15);
   }
 
+  /* ── Auth input icon positioning ── */
+
+  .auth-input-wrapper {
+    position: relative;
+  }
+
+  .auth-input-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-text-muted);
+    pointer-events: none;
+  }
+
+  .auth-input-with-icon {
+    padding-left: 44px;
+  }
+
+  /* ── Auth footer link ── */
+
+  .auth-footer-text {
+    text-align: center;
+    margin-top: 20px;
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+  }
+
+  .auth-link {
+    color: var(--color-primary-600);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .auth-link:hover {
+    color: var(--color-primary-700);
+    text-decoration: underline;
+  }
+
+  .auth-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    display: block;
+    margin-bottom: 6px;
+  }
+
   /* Name row — side by side on desktop, stacked on mobile */
   .name-row {
     display: flex;
@@ -201,6 +248,64 @@
 
   .field-hint-error { color: #dc2626; }
   .field-hint-success { color: #16a34a; }
+
+  /* ── Forgot Password page ── */
+
+  .forgot-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    margin: 0 auto 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .forgot-icon-lock {
+    background: rgba(59, 130, 246, 0.08);
+    border: 1.5px solid rgba(59, 130, 246, 0.2);
+  }
+
+  .forgot-icon-success {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    background: rgba(22, 163, 74, 0.1);
+    border: 2px solid var(--color-green, #16a34a);
+  }
+
+  .forgot-heading {
+    font-size: 1.375rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    text-align: center;
+    margin: 0 0 6px;
+    font-family: var(--font-body);
+  }
+
+  .forgot-subtitle {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    text-align: center;
+    margin: 0 0 24px;
+    line-height: 1.5;
+  }
+
+  .forgot-email-display {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-primary-700);
+    text-align: center;
+    margin: 0 0 20px;
+  }
+
+  .forgot-hint {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    text-align: center;
+    line-height: 1.5;
+    margin: 0 0 24px;
+  }
 
   /* ── Dashboard Styles ── */
 

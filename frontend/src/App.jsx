@@ -13,6 +13,7 @@ import ResearcherRoute from "./components/ResearcherRoute";
 import DefaultRoute from "./components/DefaultRoute";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
 import BackgroundInfoPage from "./pages/onboarding/BackgroundInfoPage";
 import ConsentPage from "./pages/onboarding/ConsentPage";
@@ -28,6 +29,7 @@ function App() {
         <Route element={<AuthLayout />}>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         </Route>
 
         {/* Onboarding flow — share OnboardingLayout (wider card + stepper) */}
