@@ -3,7 +3,7 @@ API Routes
 """
 from fastapi import APIRouter
 
-from app.api.routes import auth, health, survey, form_management , admin_only
+from app.api.routes import auth, health, form_management , admin_only
 
 router = APIRouter()
 
