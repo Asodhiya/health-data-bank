@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import DashboardLayout from "./layouts/DashboardLayout";
+import AuthLayout from "./components/AuthLayout";
+import OnboardingLayout from "./layouts/OnboardingLayout";
 import reactLogo from "./assets/react.svg";
 import viteLogo from "/vite.svg";
 import NoSideDashboardLayout from "./layouts/NoSideDashboardLayout";
@@ -57,6 +59,12 @@ function App() {
         <Route path="/dashboard" element={<DefaultRoute userRole={userRole} />} />
         <Route path="/logout" element={<Navigate to="/login" replace />} />
 
+        {/* Participant routes — DashboardPage has its own layout */}
+        <Route element={<ParticipantRoute userRole={userRole} />}>
+          <Route path="/participant" element={<DashboardPage />} />
+        </Route>
+
+        {/* Admin routes */}
         <Route element={<AdminRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/admin" element={<AdminDashboard />} />
@@ -79,6 +87,7 @@ function App() {
           </Route>
         </Route>
 
+        {/* Researcher routes */}
         <Route element={<ResearcherRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/researcher" element={<ResearcherDashboard />} />
