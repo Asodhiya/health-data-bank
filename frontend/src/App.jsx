@@ -9,9 +9,13 @@ import AdminRoute from "./components/AdminRoute";
 import CaretakerRoute from "./components/CaretakerRoute";
 import ResearcherRoute from "./components/ResearcherRoute";
 import DefaultRoute from "./components/DefaultRoute";
+import ParticipantDashboard from "./pages/participant/ParticipantDashboard";
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import CaretakerDashboard from "./pages/caretaker/CaretakerDashboard";
+import ResearcherDashboard from "./pages/researcher/ResearcherDashboard";
 
 function App() {
-  const [userRole, setUserRole] = useState("participant");
+  const [userRole, setUserRole] = useState("admin");
 
   return (
     <BrowserRouter>
@@ -21,44 +25,25 @@ function App() {
 
         <Route element={<AdminRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
-            <Route
-              path="/admin"
-              element={
-                <div>
-                  <h1 className="text-2xl font-bold mb-4">
-                    Welcome to Health Data Bank
-                  </h1>
-                  <p>Your current role is: {userRole}</p>
-                </div>
-              }
-            />
+            <Route path="/admin" element={<AdminDashboard />} />
           </Route>
         </Route>
 
         <Route element={<ParticipantRoute userRole={userRole} />}>
           <Route element={<NoSideDashboardLayout role={userRole} />}>
-            <Route
-              path="/participant"
-              element={<div>Welcome back, Josh! (Participant Dashboard)</div>}
-            />
+            <Route path="/participant" element={<ParticipantDashboard />} />
           </Route>
         </Route>
 
         <Route element={<CaretakerRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
-            <Route
-              path="/caretaker"
-              element={<div>Caretaker Dashboard</div>}
-            />
+            <Route path="/caretaker" element={<CaretakerDashboard />} />
           </Route>
         </Route>
 
         <Route element={<ResearcherRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
-            <Route
-              path="/researcher"
-              element={<div>Researcher Dashboard</div>}
-            />
+            <Route path="/researcher" element={<ResearcherDashboard />} />
           </Route>
         </Route>
       </Routes>
