@@ -67,3 +67,4 @@ async def get_user_by_id(user_id: str, db: AsyncSession):
     """get user if found in db"""
     result = await db.execute(select(User).where(User.user_id == user_id))
     return result.scalar_one_or_none()
+
