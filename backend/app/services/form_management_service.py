@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import List, Optional
 
-from app.db.models import SurveyForm, FormField, FieldOption, User
+from app.db.models import SurveyForm, FormField, FieldOption, FormDeployment, Group
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
 
 async def create_survey_form(form_data: SurveyCreate, user_id: UUID, db: AsyncSession) -> SurveyForm:
@@ -77,8 +77,8 @@ async def update_survey_form(form_id: UUID,form_data: SurveyCreate,user_id: UUID
     if form.created_by != user_id:
         raise PermissionError("Not authorized to update this form")
 
-    if form.status == "PUBLISHED" and form.status == "ARCHIVED":
-        raise ValueError("Cannot edit a published/archived form")
+    if form.status == "PUBLISHED":
+        raise ValueError("Cannot edit a published form")
 
     form.fields = []
     await db.flush()
@@ -123,7 +123,7 @@ async def delete_survey_form(form_id: UUID,user_id: UUID,db: AsyncSession):
     return {"msg": "form deleted"}
 
 
-async def publish_survey_form(form_id: UUID,user_id: UUID,db: AsyncSession):
+async def publish_survey_form(form_id: UUID,group_id: UUID, user_id: UUID,db: AsyncSession):
     """Publish form"""
     form = await get_form_by_id(form_id, db)
     if not form:
@@ -131,6 +131,18 @@ async def publish_survey_form(form_id: UUID,user_id: UUID,db: AsyncSession):
 
     if form.created_by != user_id:
         raise PermissionError("Not authorized to publish this form")
+
+    group_query = select(Group).where(Group.group_id == group_id)
+    group_result = await db.execute(group_query)
+    if not group_result.scalar_one_or_none():
+        raise ValueError("Group not found")
+
+    deployment = FormDeployment(
+        form_id=form_id,
+        group_id=group_id,
+        deployed_by=user_id
+    )
+    db.add(deployment)
 
     form.status = "PUBLISHED"
     await db.commit()

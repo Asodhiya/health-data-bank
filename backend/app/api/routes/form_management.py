@@ -7,7 +7,7 @@ from typing import List
 from uuid import UUID
 
 from app.db.session import get_db
-from app.core.dependency import check_current_user
+from app.core.dependency import check_current_user, require_permissions
 from app.db.models import User
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
 from app.services.form_management_service import list_researcher_forms, create_survey_form, get_form_by_id, update_survey_form, \
@@ -16,7 +16,7 @@ from app.services.form_management_service import list_researcher_forms, create_s
 router = APIRouter()
 # TODO: replace check_current_user param dependency to a researcher role only
 
-@router.get("/list", response_model=List[SurveyListItem])
+@router.get("/list", response_model=List[SurveyListItem], dependencies=[Depends(require_permissions("form:view"))])
 async def list_all_forms(db: AsyncSession = Depends(get_db)):
     """List all surveys created by researcher""" # TODO:
     forms = await list_researcher_forms(db)
@@ -24,7 +24,7 @@ async def list_all_forms(db: AsyncSession = Depends(get_db)):
         return [] #empty
     return forms
 
-@router.post("/create", response_model=SurveyDetailOut)
+@router.post("/create", response_model=SurveyDetailOut, dependencies=[Depends(require_permissions("form:create"))])
 async def create_form(form_data: SurveyCreate, db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
     """Create new survey form"""
     try:
@@ -33,7 +33,7 @@ async def create_form(form_data: SurveyCreate, db: AsyncSession = Depends(get_db
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail=str(e))
 
-@router.get("/detail/{form_id}", response_model=SurveyDetailOut)
+@router.get("/detail/{form_id}", response_model=SurveyDetailOut, dependencies=[Depends(require_permissions("form:get"))])
 async def get_form_detail(form_id: UUID,db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
     """Get full details of form (questions and choices, etc.)"""
     try:
@@ -44,7 +44,7 @@ async def get_form_detail(form_id: UUID,db: AsyncSession = Depends(get_db),curre
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=str(e))
 
-@router.put("/update/{form_id}")
+@router.put("/update/{form_id}", dependencies=[Depends(require_permissions("form:update"))])
 async def update_form(form_id: UUID,form_data: SurveyCreate, db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
     """Update existing form"""
     try:
@@ -53,7 +53,7 @@ async def update_form(form_id: UUID,form_data: SurveyCreate, db: AsyncSession = 
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=str(e))
 
-@router.delete("/delete/{form_id}", status_code=status.HTTP_200_OK)
+@router.delete("/delete/{form_id}", status_code=status.HTTP_200_OK, dependencies=[Depends(require_permissions("form:delete"))])
 async def delete_form(form_id: UUID,db: AsyncSession = Depends(get_db), current_user: User = Depends(check_current_user)):
     """Delete form"""
     try:
@@ -62,16 +62,16 @@ async def delete_form(form_id: UUID,db: AsyncSession = Depends(get_db), current_
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=str(e))
 
-@router.post("/{form_id}/publish")
-async def publish_form(form_id: UUID,db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
+@router.post("/{form_id}/publish", dependencies=[Depends(require_permissions("form:publish"))])
+async def publish_form(form_id: UUID,group_id: UUID, db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
     """Publish a form (make it available to participants)""" #TODO: make it available for caretakers
     try:
-        publish = await publish_survey_form(form_id, current_user.user_id, db)
+        publish = await publish_survey_form(form_id,group_id, current_user.user_id, db)
         return  publish
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=str(e))
 
-@router.post("/{form_id}/unpublish")
+@router.post("/{form_id}/unpublish", dependencies=[Depends(require_permissions("form:unpublish"))])
 async def unpublish_form(form_id: UUID,db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
     """unpublish a form (return DRAFT status)"""
     try:
