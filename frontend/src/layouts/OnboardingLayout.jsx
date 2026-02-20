@@ -13,33 +13,47 @@ const STEPS = [
 
 function Stepper({ currentStep }) {
   return (
-    <div className="onboarding-stepper animate-fade-up-delay-1">
+    <div className="flex items-center gap-0 mb-6">
       {STEPS.map((step, i) => {
         const isDone = currentStep > step.num;
         const isActive = currentStep === step.num;
 
         return (
-          <div key={step.num} className="onboarding-stepper-row">
-            {/* Step circle */}
-            <div className="onboarding-step-group">
+          <div key={step.num} className="flex items-center">
+            {/* Step circle + label */}
+            <div className="flex flex-col items-center gap-1">
               <div
-                className={`onboarding-step-circle ${
-                  isDone ? 'onboarding-step-done' : ''
-                } ${isActive ? 'onboarding-step-active' : ''}`}
+                className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-colors ${
+                  isDone
+                    ? 'bg-blue-600 border-blue-600 text-white'
+                    : isActive
+                      ? 'bg-white border-blue-600 text-blue-600'
+                      : 'bg-white border-slate-200 text-slate-400'
+                }`}
               >
                 {isDone ? (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                    stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                  >
+                    <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 ) : (
                   step.num
                 )}
               </div>
               <span
-                className={`onboarding-step-label ${
-                  isActive ? 'onboarding-step-label-active' : ''
-                } ${isDone ? 'onboarding-step-label-done' : ''}`}
+                className={`text-xs font-medium whitespace-nowrap ${
+                  isActive
+                    ? 'text-blue-600'
+                    : isDone
+                      ? 'text-slate-500'
+                      : 'text-slate-400'
+                }`}
               >
                 {step.label}
               </span>
@@ -48,8 +62,8 @@ function Stepper({ currentStep }) {
             {/* Connector line between steps */}
             {i < STEPS.length - 1 && (
               <div
-                className={`onboarding-step-connector ${
-                  isDone ? 'onboarding-step-connector-done' : ''
+                className={`w-12 sm:w-20 h-0.5 mx-2 mb-5 ${
+                  isDone ? 'bg-blue-600' : 'bg-slate-200'
                 }`}
               />
             )}
@@ -68,68 +82,28 @@ export default function OnboardingLayout() {
     STEPS.find((s) => location.pathname === s.path)?.num || 1;
 
   return (
-    <div className="auth-bg" style={{ padding: '2rem 1rem' }}>
-      <div
-        style={{
-          width: '100%',
-          maxWidth: '680px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-        }}
-      >
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-slate-100 flex justify-center p-4 sm:p-8">
+      <div className="w-full max-w-2xl flex flex-col items-center">
         {/* Brand — same as AuthLayout */}
-        <h1
-          className="animate-fade-up"
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: 'clamp(1.75rem, 6vw, 2.75rem)',
-            fontWeight: 800,
-            color: 'var(--color-primary-800)',
-            letterSpacing: '-0.02em',
-            marginBottom: '1.5rem',
-            textAlign: 'center',
-          }}
-        >
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-800 tracking-tight mb-5 text-center">
           Health Data Bank
         </h1>
 
         {/* Step indicator */}
         <Stepper currentStep={currentStep} />
 
-        {/* Card — wider than AuthLayout's 420px */}
-        <div
-          className="glass-card animate-fade-up-delay-2"
-          style={{ width: '100%', padding: '2rem 2.25rem' }}
-        >
+        {/* Card — wider than AuthLayout's max-w-md */}
+        <div className="w-full bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-slate-200/60 p-6 sm:p-8">
           <Outlet />
         </div>
 
         {/* Footer — same as AuthLayout */}
-        <div
-          className="animate-fade-up-delay-3"
-          style={{
-            marginTop: '1.5rem',
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.8125rem',
-            color: 'var(--color-text-muted)',
-          }}
-        >
-          <a href="#" style={{ color: 'inherit', textDecoration: 'none' }}>
-            Terms &amp; Conditions
-          </a>
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs text-slate-400">
+          <a href="#" className="hover:text-slate-500 transition-colors">Terms &amp; Conditions</a>
           <span>|</span>
-          <a href="#" style={{ color: 'inherit', textDecoration: 'none' }}>
-            About Us
-          </a>
+          <a href="#" className="hover:text-slate-500 transition-colors">About Us</a>
           <span>|</span>
-          <a href="#" style={{ color: 'inherit', textDecoration: 'none' }}>
-            Copyright
-          </a>
+          <a href="#" className="hover:text-slate-500 transition-colors">Copyright</a>
         </div>
       </div>
     </div>

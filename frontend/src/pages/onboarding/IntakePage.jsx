@@ -14,14 +14,18 @@ function ChipSelect({ options, value, onChange, multi = false }) {
   };
 
   return (
-    <div className="intake-chip-group">
+    <div className="flex flex-wrap gap-2">
       {options.map((opt) => {
         const selected = multi ? (value || []).includes(opt) : value === opt;
         return (
           <button
             key={opt}
             type="button"
-            className={`intake-chip ${selected ? 'intake-chip-selected' : ''}`}
+            className={`px-3.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+              selected
+                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+            }`}
             onClick={() => toggle(opt)}
           >
             {opt}
@@ -35,11 +39,11 @@ function ChipSelect({ options, value, onChange, multi = false }) {
 /* ── Question card wrapper ── */
 function Q({ num, label, required = true, children }) {
   return (
-    <div className="intake-question-card">
-      <p className="intake-question-label">
-        <span className="intake-question-num">{num}.</span>
+    <div className="border border-slate-100 rounded-xl p-4 mb-4">
+      <p className="text-sm font-medium text-slate-700 mb-2">
+        <span className="text-blue-600 font-bold mr-1">{num}.</span>
         {label}
-        {required && <span className="intake-required-star">*</span>}
+        {required && <span className="text-rose-500 ml-0.5">*</span>}
       </p>
       {children}
     </div>
@@ -169,70 +173,74 @@ export default function IntakePage() {
     navigate('/participant');
   };
 
+  /* Shared Tailwind input classes */
+  const inputClass = 'w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow';
+
   return (
     <>
       {/* Page heading */}
-      <div className="text-center" style={{ marginBottom: '1.25rem' }}>
-        <h2
-          className="text-2xl font-bold"
-          style={{
-            fontFamily: 'var(--font-body)',
-            color: 'var(--color-text-primary)',
-            marginBottom: '0.25rem',
-          }}
-        >
+      <div className="text-center mb-5">
+        <h2 className="text-2xl font-bold text-slate-800 mb-1">
           Intake Questionnaire
         </h2>
-        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+        <p className="text-sm text-slate-400">
           Appendix D — Connections for Healthy Living
         </p>
       </div>
 
       {/* Error */}
-      {error && <div className="auth-error">{error}</div>}
+      {error && (
+        <div className="bg-rose-50 border border-rose-100 text-rose-700 text-sm px-4 py-2.5 rounded-lg mb-4">
+          {error}
+        </div>
+      )}
 
       {/* ═══════════════════════════════════════════════
           SECTION 1: DEMOGRAPHICS
       ═══════════════════════════════════════════════ */}
-      <p className="onboarding-section-label">Personal Information</p>
+      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+        Personal Information
+      </p>
 
       {/* Name — auto-filled from registration, read-only */}
-      <div style={{ marginBottom: '14px' }}>
-        <label className="consent-field-label">Name</label>
+      <div className="mb-3.5">
+        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+          Name
+        </label>
         <input
           type="text"
-          className="intake-input intake-input-readonly"
+          className={`${inputClass} bg-slate-100 cursor-not-allowed text-slate-400`}
           value="Auto-filled from registration"
           readOnly
         />
-        <p className="intake-hint">Auto-filled from your account</p>
+        <p className="text-xs text-slate-400 mt-1">Auto-filled from your account</p>
       </div>
 
       {/* Row: DOB + Sex */}
-      <div className="intake-row" style={{ marginBottom: '14px' }}>
-        <div style={{ flex: '1 1 200px' }}>
-          <label className="consent-field-label">
-            Date of Birth <span className="intake-required-star">*</span>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
+        <div>
+          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            Date of Birth <span className="text-rose-500">*</span>
           </label>
           <input
             type="date"
-            className="intake-input"
+            className={inputClass}
             value={dob}
             onChange={(e) => setDob(e.target.value)}
           />
         </div>
-        <div style={{ flex: '1 1 200px' }}>
-          <label className="consent-field-label">
-            Sex <span className="intake-required-star">*</span>
+        <div>
+          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            Sex <span className="text-rose-500">*</span>
           </label>
           <ChipSelect options={['Male', 'Female']} value={sex} onChange={setSex} />
         </div>
       </div>
 
       {/* Pronouns — "Other" reveals a text input */}
-      <div style={{ marginBottom: '14px' }}>
-        <label className="consent-field-label">
-          Preferred Pronouns <span className="intake-required-star">*</span>
+      <div className="mb-3.5">
+        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+          Preferred Pronouns <span className="text-rose-500">*</span>
         </label>
         <ChipSelect
           options={['He/Him', 'She/Her', 'They/Them', 'Ze/Zir', 'Other']}
@@ -242,8 +250,7 @@ export default function IntakePage() {
         {pronouns === 'Other' && (
           <input
             type="text"
-            className="intake-input"
-            style={{ marginTop: '10px' }}
+            className={`${inputClass} mt-2.5`}
             placeholder="Enter your pronouns..."
             maxLength={50}
             value={pronounsOther}
@@ -253,44 +260,44 @@ export default function IntakePage() {
       </div>
 
       {/* International Student — "Yes" reveals optional country field */}
-      <div style={{ marginBottom: '14px' }}>
-        <label className="consent-field-label">
-          International Student <span className="intake-required-star">*</span>
+      <div className="mb-3.5">
+        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+          International Student <span className="text-rose-500">*</span>
         </label>
         <ChipSelect options={['Yes', 'No']} value={international} onChange={setInternational} />
         {international === 'Yes' && (
-          <div style={{ marginTop: '10px' }}>
+          <div className="mt-2.5">
             <input
               type="text"
-              className="intake-input"
+              className={inputClass}
               placeholder="Which country are you from? (optional)"
               maxLength={100}
               value={country}
               onChange={onText(setCountry, 100)}
             />
-            <p className="intake-hint">This is optional — you don't have to share this</p>
+            <p className="text-xs text-slate-400 mt-1">This is optional — you don't have to share this</p>
           </div>
         )}
       </div>
 
       {/* Row: Program + Year of Study */}
-      <div className="intake-row" style={{ marginBottom: '14px' }}>
-        <div style={{ flex: '1 1 260px' }}>
-          <label className="consent-field-label">
-            Undergraduate Program <span className="intake-required-star">*</span>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
+        <div>
+          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            Undergraduate Program <span className="text-rose-500">*</span>
           </label>
           <input
             type="text"
-            className="intake-input"
+            className={inputClass}
             placeholder="e.g. Computer Science"
             maxLength={200}
             value={program}
             onChange={onText(setProgram, 200)}
           />
         </div>
-        <div style={{ flex: '1 1 140px' }}>
-          <label className="consent-field-label">
-            Year of Study <span className="intake-required-star">*</span>
+        <div>
+          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            Year of Study <span className="text-rose-500">*</span>
           </label>
           <ChipSelect options={['1', '2', '3', '4', '5+']} value={yearOfStudy} onChange={setYearOfStudy} />
         </div>
@@ -298,12 +305,12 @@ export default function IntakePage() {
 
       {/* Language */}
       <div>
-        <label className="consent-field-label">
-          Language Spoken at Home <span className="intake-required-star">*</span>
+        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+          Language Spoken at Home <span className="text-rose-500">*</span>
         </label>
         <input
           type="text"
-          className="intake-input"
+          className={inputClass}
           placeholder="e.g. English"
           maxLength={100}
           value={language}
@@ -311,18 +318,20 @@ export default function IntakePage() {
         />
       </div>
 
-      <hr className="onboarding-divider" />
+      <hr className="border-slate-100 my-5" />
 
       {/* ═══════════════════════════════════════════════
           SECTION 2: LIFESTYLE QUESTIONS (1–13)
       ═══════════════════════════════════════════════ */}
-      <p className="onboarding-section-label">Lifestyle &amp; Wellness Questions</p>
+      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+        Lifestyle &amp; Wellness Questions
+      </p>
 
       {/* Q1 */}
       <Q num={1} label="Where do you live?">
         <ChipSelect options={['On campus', 'With Friends', 'With Family', 'Other']} value={q1} onChange={setQ1} />
         {q1 === 'Other' && (
-          <input type="text" className="intake-input" style={{ marginTop: 10 }} placeholder="Please specify..." maxLength={200} value={q1Other} onChange={onText(setQ1Other, 200)} />
+          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify..." maxLength={200} value={q1Other} onChange={onText(setQ1Other, 200)} />
         )}
       </Q>
 
@@ -330,7 +339,7 @@ export default function IntakePage() {
       <Q num={2} label="Do you have any dependents?">
         <ChipSelect options={['No', 'Yes']} value={q2} onChange={setQ2} />
         {q2 === 'Yes' && (
-          <input type="text" className="intake-input" style={{ marginTop: 10 }} placeholder="Please specify..." maxLength={200} value={q2Specify} onChange={onText(setQ2Specify, 200)} />
+          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify..." maxLength={200} value={q2Specify} onChange={onText(setQ2Specify, 200)} />
         )}
       </Q>
 
@@ -338,7 +347,7 @@ export default function IntakePage() {
       <Q num={3} label="What access to transportation do you have? (Select all that apply)">
         <ChipSelect options={['Bus', 'Walking', 'Car', 'Bike', 'Other']} value={q3} onChange={setQ3} multi />
         {q3.includes('Other') && (
-          <input type="text" className="intake-input" style={{ marginTop: 10 }} placeholder="Please specify..." maxLength={200} value={q3Other} onChange={onText(setQ3Other, 200)} />
+          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify..." maxLength={200} value={q3Other} onChange={onText(setQ3Other, 200)} />
         )}
       </Q>
 
@@ -356,7 +365,7 @@ export default function IntakePage() {
       <Q num={6} label="In the past month, which of these substances have you consumed? (Select all that apply)">
         <ChipSelect options={['Alcohol', 'THC / Cannabis', 'Cigarettes / Tobacco / Vaping', 'Other drugs', 'None']} value={q6} onChange={setQ6} multi />
         {q6.includes('Other drugs') && (
-          <input type="text" className="intake-input" style={{ marginTop: 10 }} placeholder="Please specify which substance(s)..." maxLength={200} value={q6Other} onChange={onText(setQ6Other, 200)} />
+          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify which substance(s)..." maxLength={200} value={q6Other} onChange={onText(setQ6Other, 200)} />
         )}
       </Q>
 
@@ -364,7 +373,7 @@ export default function IntakePage() {
       <Q num={7} label="Do you have any barriers to eating the foods that you want to? (Select all that apply)">
         <ChipSelect options={['Income', 'Transportation', 'Lack of variety/choice', 'Lack of storage', 'Lack of kitchen access', 'Lack of food skills', 'Loneliness', 'Health conditions', 'None', 'Other']} value={q7} onChange={setQ7} multi />
         {q7.includes('Other') && (
-          <input type="text" className="intake-input" style={{ marginTop: 10 }} placeholder="Please specify..." maxLength={200} value={q7Other} onChange={onText(setQ7Other, 200)} />
+          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify..." maxLength={200} value={q7Other} onChange={onText(setQ7Other, 200)} />
         )}
       </Q>
 
@@ -372,7 +381,7 @@ export default function IntakePage() {
       <Q num={8} label="Where do you eat most of your meals? (Select all that apply)">
         <ChipSelect options={['At home', 'On campus (cafeteria)', 'On campus (brought from home)', 'Restaurants', 'Other']} value={q8} onChange={setQ8} multi />
         {q8.includes('Other') && (
-          <input type="text" className="intake-input" style={{ marginTop: 10 }} placeholder="Please specify..." maxLength={200} value={q8Other} onChange={onText(setQ8Other, 200)} />
+          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify..." maxLength={200} value={q8Other} onChange={onText(setQ8Other, 200)} />
         )}
       </Q>
 
@@ -383,33 +392,33 @@ export default function IntakePage() {
 
       {/* Q10 — Days per week: 0–7 only */}
       <Q num={10} label="In a typical week, how many days do you perform moderate (brisk walking) to vigorous (running) aerobic activity?">
-        <div className="intake-number-row">
+        <div className="flex items-center gap-2">
           <input
             type="number"
             min="0"
             max="7"
-            className="intake-input intake-number-input"
+            className={`${inputClass} w-20 text-center`}
             placeholder="0"
             value={q10}
             onChange={onNumber(setQ10, 0, 7)}
           />
-          <span className="intake-number-unit">days per week</span>
+          <span className="text-sm text-slate-500">days per week</span>
         </div>
       </Q>
 
       {/* Q11 — Minutes: 0–1440 (max 24 hrs in a day) */}
       <Q num={11} label="On average, for those days, how many minutes of moderate-to-vigorous aerobic activity do you do?">
-        <div className="intake-number-row">
+        <div className="flex items-center gap-2">
           <input
             type="number"
             min="0"
             max="1440"
-            className="intake-input intake-number-input"
+            className={`${inputClass} w-20 text-center`}
             placeholder="0"
             value={q11}
             onChange={onNumber(setQ11, 0, 1440)}
           />
-          <span className="intake-number-unit">minutes</span>
+          <span className="text-sm text-slate-500">minutes</span>
         </div>
       </Q>
 
@@ -423,21 +432,24 @@ export default function IntakePage() {
         <ChipSelect options={['< 1 hour', '1–3 hours', '3–5 hours', '> 5 hours']} value={q13} onChange={setQ13} />
       </Q>
 
-      <hr className="onboarding-divider" />
+      <hr className="border-slate-100 my-5" />
 
       {/* ── Navigation ── */}
-      <div className="consent-nav-row">
+      <div className="flex gap-3">
         <button
           type="button"
-          className="btn-secondary"
+          className="px-5 py-3 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
           onClick={() => navigate('/onboarding/consent')}
         >
           ← Back
         </button>
         <button
           type="button"
-          className="btn-primary"
-          style={{ flex: 1 }}
+          className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-colors ${
+            isValid()
+              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+          }`}
           disabled={!isValid()}
           onClick={handleSubmit}
         >

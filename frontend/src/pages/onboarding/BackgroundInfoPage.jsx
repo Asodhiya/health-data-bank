@@ -31,33 +31,28 @@ export default function BackgroundInfoPage() {
   return (
     <>
       {/* Page heading */}
-      <div className="text-center" style={{ marginBottom: '1.25rem' }}>
-        <h2
-          className="text-2xl font-bold"
-          style={{
-            fontFamily: 'var(--font-body)',
-            color: 'var(--color-text-primary)',
-            marginBottom: '0.25rem',
-          }}
-        >
+      <div className="text-center mb-5">
+        <h2 className="text-2xl font-bold text-slate-800 mb-1">
           Background Information Sheet
         </h2>
-        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+        <p className="text-sm text-slate-400">
           Appendix A — Please read carefully before proceeding
         </p>
       </div>
 
       {/* Scrollable content area */}
-      <div className="onboarding-scroll-area" ref={scrollRef}>
-
+      <div
+        className="max-h-96 overflow-y-auto border border-slate-100 rounded-xl p-5 bg-slate-50/50 mb-4"
+        ref={scrollRef}
+      >
         {/* Study title */}
-        <h3 className="onboarding-study-title">Connections for Healthy Living</h3>
-        <p className="onboarding-study-subtitle">Title of Study</p>
+        <h3 className="text-lg font-bold text-slate-800 mb-1">Connections for Healthy Living</h3>
+        <p className="text-xs text-slate-400 uppercase tracking-wider mb-4">Title of Study</p>
 
         {/* Principal Investigator card */}
-        <div className="onboarding-info-card">
-          <p className="onboarding-info-card-label">Principal Investigator</p>
-          <p className="onboarding-info-card-text">
+        <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 mb-4">
+          <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Principal Investigator</p>
+          <p className="text-sm text-slate-700">
             Dr. William Montelpare<br />
             Professor, Dept. of Applied Human Sciences<br />
             University of Prince Edward Island<br />
@@ -67,14 +62,14 @@ export default function BackgroundInfoPage() {
         </div>
 
         {/* Introduction */}
-        <p className="onboarding-para">
+        <p className="text-sm text-slate-600 mb-3">
           You have been invited to participate in a research study. You are eligible to participate
           in the study because you are an undergraduate student at the University of Prince Edward
           Island, that must be available for the next 10 weeks, beginning from when you join the
           study. The Connections program is a ten week wellness program for students enrolled at
           the University of Prince Edward Island.
         </p>
-        <p className="onboarding-para">
+        <p className="text-sm text-slate-600 mb-3">
           Before you decide whether or not you would like to participate in the research study,
           please read this background information sheet so that you can learn about the study and
           what is involved in your participation. Once you review this background information
@@ -83,7 +78,7 @@ export default function BackgroundInfoPage() {
           informed consent. Please take as much time as you need to decide whether or not you
           would like to participate in the study.
         </p>
-        <p className="onboarding-para">
+        <p className="text-sm text-slate-600 mb-3">
           Your participation in this research study is completely voluntary. You have the right to
           withdraw from the research study by February 28, 2023. If you choose to withdraw from
           the study, you will not receive any type of penalty. You have the right to refuse to any
@@ -91,8 +86,8 @@ export default function BackgroundInfoPage() {
         </p>
 
         {/* Why is this research being done? */}
-        <h4 className="onboarding-section-heading">Why Is This Research Being Done?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">Why Is This Research Being Done?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           Our intention is to develop a health education and promotion program for undergraduate
           students enrolled at UPEI. This model of healthcare programming will provide education
           on topics that contribute to the health and wellbeing of the student population, along
@@ -103,20 +98,20 @@ export default function BackgroundInfoPage() {
         </p>
 
         {/* What is the purpose? */}
-        <h4 className="onboarding-section-heading">What Is The Purpose Of This Research?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">What Is The Purpose Of This Research?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           The purpose of this specific research study is to determine the effectiveness of an
           8-week educational and exercise program in a cohort of university undergraduate students.
         </p>
 
         {/* Why have I been asked? */}
-        <h4 className="onboarding-section-heading">Why Have I Been Asked To Participate?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">Why Have I Been Asked To Participate?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           You have been invited to participate in this research project because you fit the
           eligibility criteria for the study. This means that you are currently a University of
           Prince Edward Island undergraduate student, lasting the duration of the study.
         </p>
-        <p className="onboarding-para">
+        <p className="text-sm text-slate-600 mb-3">
           Individuals that are interested in participating in the Connections program will be
           invited to attend an information session to be held both virtually and in-person at
           UPEI. Health Centered Research Clinic staff will explain the program and the various
@@ -129,8 +124,8 @@ export default function BackgroundInfoPage() {
         </p>
 
         {/* Responsibilities */}
-        <h4 className="onboarding-section-heading">What Will My Responsibilities Be?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">What Will My Responsibilities Be?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           If you choose to participate in this research project you will first be asked to sign
           the letter of informed consent. Once the consent has been signed the next form you will
           need to fill out is the PAR-Q form which assesses your physical readiness. You will
@@ -139,14 +134,14 @@ export default function BackgroundInfoPage() {
           one mile walk, half kneeling ankle flexion, back scratch test, resting heart rate,
           height/weight measurement and endurance of extensors.
         </p>
-        <p className="onboarding-para">
+        <p className="text-sm text-slate-600 mb-3">
           In addition to the physical tests, you will be asked to complete a number of surveys
           about perceived stress, loneliness, willingness to change, physical activity readiness,
           and a confidence questionnaire. All testing and sessions will take place at the Health
           Centred Research Clinic, located in the lower level of the Steel Building on the UPEI
           campus.
         </p>
-        <p className="onboarding-para">
+        <p className="text-sm text-slate-600 mb-3">
           Once you have completed your initial intake day, you may attend your first session.
           Both groups will receive all of the education and exercise sessions. Education sessions
           will cover various topics related to health, well-being and skills development. Exercise
@@ -155,25 +150,25 @@ export default function BackgroundInfoPage() {
         </p>
 
         {/* Time commitment */}
-        <h4 className="onboarding-section-heading">Time Commitment</h4>
-        <div className="onboarding-info-card">
-          <div className="onboarding-time-grid">
-            <span className="onboarding-time-label">Initial intake day</span>
-            <span className="onboarding-time-value">1.5 hours</span>
-            <span className="onboarding-time-label">8 Education sessions</span>
-            <span className="onboarding-time-value">8 hours</span>
-            <span className="onboarding-time-label">8 Exercise sessions</span>
-            <span className="onboarding-time-value">8 hours</span>
-            <span className="onboarding-time-label">Post program assessment</span>
-            <span className="onboarding-time-value">1.5 hours</span>
-            <span className="onboarding-time-label onboarding-time-total">Total commitment</span>
-            <span className="onboarding-time-value onboarding-time-total">Up to 19 hours</span>
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">Time Commitment</h4>
+        <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 mb-4">
+          <div className="grid grid-cols-2 gap-y-1.5 text-sm">
+            <span className="text-slate-600">Initial intake day</span>
+            <span className="text-slate-800 font-medium text-right">1.5 hours</span>
+            <span className="text-slate-600">8 Education sessions</span>
+            <span className="text-slate-800 font-medium text-right">8 hours</span>
+            <span className="text-slate-600">8 Exercise sessions</span>
+            <span className="text-slate-800 font-medium text-right">8 hours</span>
+            <span className="text-slate-600">Post program assessment</span>
+            <span className="text-slate-800 font-medium text-right">1.5 hours</span>
+            <span className="text-slate-800 font-bold border-t border-blue-200 pt-1.5 mt-1">Total commitment</span>
+            <span className="text-slate-800 font-bold border-t border-blue-200 pt-1.5 mt-1 text-right">Up to 19 hours</span>
           </div>
         </div>
 
         {/* Risks */}
-        <h4 className="onboarding-section-heading">What Are The Possible Risks And Discomforts?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">What Are The Possible Risks And Discomforts?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           There are no known risks for participating in this research study. It is possible that
           you may feel some exercise related discomfort. There may be risks associated with
           participating in an exercise program, but a kinesiologist is present to alleviate those
@@ -184,22 +179,22 @@ export default function BackgroundInfoPage() {
         </p>
 
         {/* Number of participants */}
-        <h4 className="onboarding-section-heading">How Many People Will Be In The Study?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">How Many People Will Be In The Study?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           There will be 28 participants in this study.
         </p>
 
         {/* Benefits */}
-        <h4 className="onboarding-section-heading">What Are The Possible Benefits?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">What Are The Possible Benefits?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           There may be no direct benefits to you for participating in the study. However, you may
           see some health benefits from increased physical activity and attendance at the education
           sessions.
         </p>
 
         {/* Privacy */}
-        <h4 className="onboarding-section-heading">What Information Will Be Kept Private?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">What Information Will Be Kept Private?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           Your personal information will not be shared with anyone outside of the research team
           without your consent, or as required by law. Any of the surveys or questionnaires that
           you answer will have your name removed and will be given an ID number. Your name will
@@ -207,7 +202,7 @@ export default function BackgroundInfoPage() {
           and your ID will be securely stored on a password protected computer at the University
           of Prince Edward Island.
         </p>
-        <p className="onboarding-para">
+        <p className="text-sm text-slate-600 mb-3">
           There will be no identifying factors associated with your information, should this
           research study be published. Should a member of the research team be concerned about
           your health or well-being, they have the right to alert and consult with a primary
@@ -217,8 +212,8 @@ export default function BackgroundInfoPage() {
         </p>
 
         {/* Early end */}
-        <h4 className="onboarding-section-heading">Can Participation In The Study End Early?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">Can Participation In The Study End Early?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           Your participation in this research project is completely voluntary. You have the right
           to withdraw from the research study by February 28, 2023. Please reach out to either
           Anja Salijevic at asalijevic@upei.ca or Laurie Michael at lmichael@upei.ca if you wish
@@ -227,60 +222,60 @@ export default function BackgroundInfoPage() {
         </p>
 
         {/* Eligibility */}
-        <h4 className="onboarding-section-heading">Who Can Participate?</h4>
-        <div className="onboarding-info-card">
-          <p className="onboarding-info-card-label">Inclusion Criteria</p>
-          <ul className="onboarding-list">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">Who Can Participate?</h4>
+        <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 mb-4">
+          <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Inclusion Criteria</p>
+          <ul className="list-disc list-inside text-sm text-slate-600 space-y-1">
             <li>Undergraduate student at UPEI</li>
             <li>Over 18 years of age</li>
             <li>Passing the screening of the PAR-Q test</li>
           </ul>
-          <p className="onboarding-info-card-label" style={{ marginTop: '12px' }}>Exclusion Criteria</p>
-          <ul className="onboarding-list">
+          <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1 mt-3">Exclusion Criteria</p>
+          <ul className="list-disc list-inside text-sm text-slate-600 space-y-1">
             <li>Under 18 years of age</li>
             <li>Not an undergraduate student at UPEI</li>
             <li>Not passing the PAR-Q screening and not receiving approval from a health professional</li>
           </ul>
-          <p style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '10px', fontStyle: 'italic' }}>
+          <p className="text-xs text-slate-400 mt-2.5 italic">
             *PAR-Q is a test to determine whether a client should have a medical evaluation done
             before participating in a program that involves exercise.
           </p>
         </div>
 
         {/* Payment */}
-        <h4 className="onboarding-section-heading">Will I Be Paid To Participate?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">Will I Be Paid To Participate?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           No, you will not be paid to participate in the study. This study is completely voluntary.
         </p>
 
         {/* Costs */}
-        <h4 className="onboarding-section-heading">Will There Be Any Costs To Me?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">Will There Be Any Costs To Me?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           No, there will be no costs to you for participating in this study.
         </p>
 
         {/* Results */}
-        <h4 className="onboarding-section-heading">How Can I Learn About The Results?</h4>
-        <p className="onboarding-para">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">How Can I Learn About The Results?</h4>
+        <p className="text-sm text-slate-600 mb-3">
           If you are interested in receiving a copy of the study abstract once it is complete,
           please check the box at the end of the consent form under the Sharing Study Results
           section, and leave your email and/or mailing address.
         </p>
 
         {/* Contact */}
-        <h4 className="onboarding-section-heading">If I Have Questions, Who Should I Call?</h4>
-        <div className="onboarding-info-card">
-          <p className="onboarding-info-card-text">
+        <h4 className="text-sm font-bold text-slate-800 mt-4 mb-2">If I Have Questions, Who Should I Call?</h4>
+        <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 mb-2">
+          <p className="text-sm text-slate-700">
             <strong>Principal Investigator:</strong> Dr. William Montelpare —
             wmontelpare@upei.ca · 902-620-5186
           </p>
-          <p className="onboarding-info-card-text" style={{ marginTop: '6px' }}>
+          <p className="text-sm text-slate-700 mt-1.5">
             <strong>Health Educator:</strong> Anja Salijevic — asalijevic@upei.ca
           </p>
-          <p className="onboarding-info-card-text" style={{ marginTop: '6px' }}>
+          <p className="text-sm text-slate-700 mt-1.5">
             <strong>Dietitian:</strong> Laurie Michael — lmichael@upei.ca
           </p>
-          <p className="onboarding-info-card-text" style={{ marginTop: '10px', fontSize: '12px', color: 'var(--color-text-muted)' }}>
+          <p className="text-xs text-slate-400 mt-2.5">
             This study has been reviewed and approved by the UPEI Research Ethics Board.
             Contact them at researchcompliance@upei.ca or 902-620-5104.
           </p>
@@ -289,23 +284,18 @@ export default function BackgroundInfoPage() {
 
       {/* Scroll hint — only shows when user hasn't scrolled to bottom yet */}
       {!hasScrolledToBottom && (
-        <p
-          className="text-center text-sm"
-          style={{
-            color: 'var(--color-primary-600)',
-            marginTop: '0.75rem',
-            marginBottom: '0',
-            fontWeight: 500,
-          }}
-        >
+        <p className="text-xs text-amber-600 font-medium text-center mt-3">
           ↓ Scroll to read the full document before continuing
         </p>
       )}
 
       {/* Continue button */}
       <button
-        className="btn-primary"
-        style={{ marginTop: '1.25rem' }}
+        className={`w-full py-3 rounded-xl text-sm font-semibold transition-colors mt-4 ${
+          hasScrolledToBottom
+            ? 'bg-blue-600 hover:bg-blue-700 text-white'
+            : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+        }`}
         disabled={!hasScrolledToBottom}
         onClick={() => navigate('/onboarding/consent')}
       >
