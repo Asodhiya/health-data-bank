@@ -11,6 +11,7 @@ from sqlalchemy import (
     UniqueConstraint,
     PrimaryKeyConstraint,
     text,
+
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from datetime import datetime
 
-
+from typing import List
 
 class User(Base):
     __tablename__ = "users"
@@ -37,6 +38,7 @@ class User(Base):
     status: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("TRUE"))
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("now()"))
     last_login_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    Address: Mapped[str | None] = mapped_column(Text)
 
     roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
 
@@ -229,6 +231,7 @@ class SurveyForm(Base):
     version: Mapped[int | None] = mapped_column(Integer, server_default=text("1"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id"))
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    fields: Mapped[List["FormField"]]= relationship("FormField", back_populates="form", cascade="all, delete-orphan")
 
 
 class FormField(Base):
@@ -240,7 +243,9 @@ class FormField(Base):
     field_type: Mapped[str] = mapped_column(Text, nullable=False)
     is_required: Mapped[bool | None] = mapped_column(Boolean, server_default=text("FALSE"))
     display_order: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
-
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("form_fields.field_id"))
+    options: Mapped[List["FieldOption"]] = relationship("FieldOption", back_populates="field", cascade="all, delete-orphan", foreign_keys="[FieldOption.field_id]")
+    form: Mapped["SurveyForm"] = relationship("SurveyForm", back_populates="fields")
 
 class FieldOption(Base):
     __tablename__ = "field_options"
@@ -250,7 +255,8 @@ class FieldOption(Base):
     value: Mapped[int | None] = mapped_column(Integer)
     label: Mapped[str | None] = mapped_column(Text)
     display_order: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
-
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("form_fields.field_id"))
+    field: Mapped["FormField"] = relationship("FormField", back_populates="options",foreign_keys="[FieldOption.field_id]")
 
 class FormDeployment(Base):
     __tablename__ = "form_deployments"

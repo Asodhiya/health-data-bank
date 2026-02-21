@@ -1,18 +1,15 @@
-from fastapi import HTTPException, status,Depends
+from fastapi import HTTPException, status, Depends
 from app.db.session import get_db
 from app.core.security import PasswordHash
 from app.middleware.signup_validation import UserSignup
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select,update
 from app.db.models import User
 from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timezone
 
 async def authenticate_user(email: str, password: str, db: AsyncSession):
-    """
-    For the table columns are just a test that will be changed in the future.
-    (for connecting db, check .env file) --needs config.py (should be edited in next sprints)
-    """
-
+    """Checks email and password if in db or not"""
     res = await(db.execute(select(User).where(User.email == email)))
     user = res.scalar_one_or_none()
 
@@ -29,6 +26,10 @@ async def authenticate_user(email: str, password: str, db: AsyncSession):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
+
+    user.last_login_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(user)
 
     return user
 
@@ -61,3 +62,14 @@ async def create_user(payload: UserSignup, db: AsyncSession):
 
     await db.refresh(user)
     return user
+
+async def get_user_by_id(user_id: str, db: AsyncSession):
+    """get user if found in db"""
+    result = await db.execute(select(User).where(User.user_id == user_id))
+    return result.scalar_one_or_none()
+
+
+
+
+
+   

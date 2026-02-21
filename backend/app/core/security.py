@@ -3,6 +3,9 @@ from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 import os
 from dotenv import load_dotenv
+
+
+
 load_dotenv()
 class PasswordHash:
     __slots__ = ("_value",)
@@ -47,3 +50,5 @@ def decode_access_token(token: str) -> dict | None:
         return jwt.decode(token, os.getenv("JWT_SECRET"), algorithms=[os.getenv("JWT_ALGORITHM")])
     except JWTError:
         return None
+    
+

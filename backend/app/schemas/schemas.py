@@ -12,7 +12,7 @@ class RegisterRequest(BaseModel):
     last_name: str
     email: EmailStr
     password: str
-
+ 
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -40,3 +40,24 @@ class UserSignup(BaseModel):
 class SurveyRequest(BaseModel):
     # If empty, sets default value to a dictionary
     answers: Dict[str, Any] = Field(default_factory=dict)
+
+class Role_schema(BaseModel):
+    role_name: str
+
+class Permissions_schema(BaseModel):
+    code: str
+    description: str
+
+class Userverify(BaseModel):
+    username: str
+class UpdatePersonalInfoPayload(BaseModel):
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
+    address: Optional[str] = None
+    old_password: Optional[str] = None
+    new_password:Optional[str] = None
+
+    
