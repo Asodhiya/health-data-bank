@@ -31,7 +31,7 @@ import ProfilePage from "./pages/shared/ProfilePage";
 import FormListPage from "./pages/participant/FormListPage";
 
 function App() {
-  const [userRole, setUserRole] = useState("participant"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
+  const [userRole, setUserRole] = useState("researcher"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
 
   return (
     <BrowserRouter>
@@ -52,7 +52,7 @@ function App() {
           </Route>
         </Route>
 
-        {/* ── Nimzen's existing routes ── */}
+        
         <Route path="/" element={<DefaultRoute userRole={userRole} />} />
         <Route path="/dashboard" element={<DefaultRoute userRole={userRole} />} />
         <Route path="/logout" element={<Navigate to="/login" replace />} />
@@ -60,7 +60,7 @@ function App() {
         <Route element={<AdminRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/profile" element={<ProfilePage role="admin" />} />
+            <Route path="/admin/profile" element={<ProfilePage role="admin" />} />
           </Route>
         </Route>
 
@@ -75,14 +75,14 @@ function App() {
         <Route element={<CaretakerRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/caretaker" element={<CaretakerDashboard />} />
-            <Route path="/profile" element={<ProfilePage role="caretaker" />} />
+            <Route path="/caretaker/profile" element={<ProfilePage role="caretaker" />} />
           </Route>
         </Route>
 
         <Route element={<ResearcherRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/researcher" element={<ResearcherDashboard />} />
-            <Route path="/profile" element={<ProfilePage role="researcher" />} />
+            <Route path="/researcher/profile" element={<ProfilePage role="researcher" />} />
           </Route>
         </Route>
       </Routes>
