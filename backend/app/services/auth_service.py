@@ -3,7 +3,7 @@ from app.db.session import get_db
 from app.core.security import PasswordHash
 from app.middleware.signup_validation import UserSignup
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select,update
 from app.db.models import User
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone
@@ -68,3 +68,8 @@ async def get_user_by_id(user_id: str, db: AsyncSession):
     result = await db.execute(select(User).where(User.user_id == user_id))
     return result.scalar_one_or_none()
 
+
+
+
+
+   

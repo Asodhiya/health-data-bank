@@ -50,3 +50,14 @@ class Permissions_schema(BaseModel):
 
 class Userverify(BaseModel):
     username: str
+class UpdatePersonalInfoPayload(BaseModel):
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
+    address: Optional[str] = None
+    old_password: Optional[str] = None
+    new_password:Optional[str] = None
+
+    

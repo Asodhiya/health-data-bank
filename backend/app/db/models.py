@@ -38,6 +38,7 @@ class User(Base):
     status: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("TRUE"))
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("now()"))
     last_login_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    Address: Mapped[str | None] = mapped_column(Text)
 
     roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
 
