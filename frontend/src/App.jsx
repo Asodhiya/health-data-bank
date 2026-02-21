@@ -21,6 +21,7 @@ import LoginPage from "./pages/auth/LoginPage";
 import RegisterPage from "./pages/auth/RegisterPage";
 import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
 import BackgroundInfoPage from "./pages/onboarding/BackgroundInfoPage";
+import ResetPasswordPage from "./pages/auth/ResetPasswordPage";
 import ConsentPage from "./pages/onboarding/ConsentPage";
 import IntakePage from "./pages/onboarding/IntakePage";
 
@@ -31,7 +32,7 @@ import ProfilePage from "./pages/shared/ProfilePage";
 import FormListPage from "./pages/participant/FormListPage";
 
 function App() {
-  const [userRole, setUserRole] = useState("researcher"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
+  const [userRole, setUserRole] = useState("participant"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
 
   return (
     <BrowserRouter>
@@ -41,6 +42,7 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
         </Route>
 
         {/* ── Onboarding routes (participant only) ── */}

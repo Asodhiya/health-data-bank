@@ -34,4 +34,10 @@ export const api = {
 
   me: () =>
     request('/auth/me'),
+
+  updateUser: (payload) =>
+    request('/user/update_user', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 };
