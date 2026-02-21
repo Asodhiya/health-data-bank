@@ -1,0 +1,111 @@
+import { Outlet, useLocation } from 'react-router-dom';
+
+/*
+  Figure out which step (1–3) is active based on the current URL.
+  This avoids needing to pass props from App.jsx — the layout
+  reads the route directly.
+*/
+const STEPS = [
+  { num: 1, label: 'Background Info', path: '/onboarding/background' },
+  { num: 2, label: 'Informed Consent', path: '/onboarding/consent' },
+  { num: 3, label: 'Intake Form', path: '/onboarding/intake' },
+];
+
+function Stepper({ currentStep }) {
+  return (
+    <div className="flex items-center gap-0 mb-6">
+      {STEPS.map((step, i) => {
+        const isDone = currentStep > step.num;
+        const isActive = currentStep === step.num;
+
+        return (
+          <div key={step.num} className="flex items-center">
+            {/* Step circle + label */}
+            <div className="flex flex-col items-center gap-1">
+              <div
+                className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-colors ${
+                  isDone
+                    ? 'bg-blue-600 border-blue-600 text-white'
+                    : isActive
+                      ? 'bg-white border-blue-600 text-blue-600'
+                      : 'bg-white border-slate-200 text-slate-400'
+                }`}
+              >
+                {isDone ? (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                  >
+                    <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : (
+                  step.num
+                )}
+              </div>
+              <span
+                className={`text-xs font-medium whitespace-nowrap ${
+                  isActive
+                    ? 'text-blue-600'
+                    : isDone
+                      ? 'text-slate-500'
+                      : 'text-slate-400'
+                }`}
+              >
+                {step.label}
+              </span>
+            </div>
+
+            {/* Connector line between steps */}
+            {i < STEPS.length - 1 && (
+              <div
+                className={`w-12 sm:w-20 h-0.5 mx-2 mb-5 ${
+                  isDone ? 'bg-blue-600' : 'bg-slate-200'
+                }`}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function OnboardingLayout() {
+  const location = useLocation();
+
+  // Match current path to step number, default to 1
+  const currentStep =
+    STEPS.find((s) => location.pathname === s.path)?.num || 1;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-slate-100 flex justify-center p-4 sm:p-8">
+      <div className="w-full max-w-2xl flex flex-col items-center">
+        {/* Brand — same as AuthLayout */}
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-800 tracking-tight mb-5 text-center">
+          Health Data Bank
+        </h1>
+
+        {/* Step indicator */}
+        <Stepper currentStep={currentStep} />
+
+        {/* Card — wider than AuthLayout's max-w-md */}
+        <div className="w-full bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-slate-200/60 p-6 sm:p-8">
+          <Outlet />
+        </div>
+
+        {/* Footer — same as AuthLayout */}
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs text-slate-400">
+          <a href="#" className="hover:text-slate-500 transition-colors">Terms &amp; Conditions</a>
+          <span>|</span>
+          <a href="#" className="hover:text-slate-500 transition-colors">About Us</a>
+          <span>|</span>
+          <a href="#" className="hover:text-slate-500 transition-colors">Copyright</a>
+        </div>
+      </div>
+    </div>
+  );
+}
