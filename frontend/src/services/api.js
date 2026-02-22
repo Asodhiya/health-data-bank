@@ -40,4 +40,58 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  // ── Form Management (researcher/admin) ──
+  listForms: () =>
+    request('/form_management/list'),
+
+  getFormDetail: (formId) =>
+    request(`/form_management/detail/${formId}`),
+
+  createForm: (payload) =>
+    request('/form_management/create', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateForm: (formId, payload) =>
+    request(`/form_management/update/${formId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteForm: (formId) =>
+    request(`/form_management/delete/${formId}`, {
+      method: 'DELETE',
+    }),
+
+  publishForm: (formId, groupId) =>
+    request(`/form_management/${formId}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ group_id: groupId }),
+    }),
+
+  unpublishForm: (formId) =>
+    request(`/form_management/${formId}/unpublish`, {
+      method: 'POST',
+    }),
+
+  // ── Survey Fill (participant) ──
+  getDeployedForms: () =>
+    request('/surveys/deployed'),
+
+  getDraftAnswers: (formId) =>
+    request(`/submissions/${formId}/draft`),
+
+  saveDraftAnswers: (formId, answers) =>
+    request(`/submissions/${formId}/save`, {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    }),
+
+  submitSurvey: (formId, answers) =>
+    request(`/submissions/${formId}/submit`, {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    }),
 };

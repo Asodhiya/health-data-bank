@@ -27,12 +27,14 @@ import IntakePage from "./pages/onboarding/IntakePage";
 
 // ── Shared pages ──
 import ProfilePage from "./pages/shared/ProfilePage";
+import SurveyBuilderPage from "./pages/shared/SurveyBuilderPage";
 
 // ── Participant pages ──
 import FormListPage from "./pages/participant/FormListPage";
+import SurveyFillPage from "./pages/participant/SurveyFillPage";
 
 function App() {
-  const [userRole, setUserRole] = useState("participant"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
+  const [userRole, setUserRole] = useState("researcher"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
 
   return (
     <BrowserRouter>
@@ -63,6 +65,7 @@ function App() {
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/profile" element={<ProfilePage role="admin" />} />
+            <Route path="/surveys" element={<SurveyBuilderPage />} />
           </Route>
         </Route>
 
@@ -71,6 +74,7 @@ function App() {
             <Route path="/participant" element={<ParticipantDashboard />} />
             <Route path="/participant/profile" element={<ProfilePage role="participant" />} />
             <Route path="/participant/survey" element={<FormListPage />} />
+            <Route path="/participant/surveys/:id" element={<SurveyFillPage />} />
           </Route>
         </Route>
 
@@ -85,6 +89,7 @@ function App() {
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/researcher" element={<ResearcherDashboard />} />
             <Route path="/researcher/profile" element={<ProfilePage role="researcher" />} />
+            <Route path="/survey-builder" element={<SurveyBuilderPage />} />
           </Route>
         </Route>
       </Routes>
