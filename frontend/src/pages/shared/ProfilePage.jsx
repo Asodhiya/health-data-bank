@@ -331,13 +331,24 @@ function PersonalInfoSection({ profile, onSave, role }) {
 
   const set = (field) => (val) => setForm((prev) => ({ ...prev, [field]: val }));
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const cleaned = { ...form };
     if (cleaned.intl !== 'Yes') cleaned.country = '';
     if (cleaned.pronouns !== 'Other') cleaned.pronounsCustom = '';
-    // TODO: call api.updateProfile(cleaned)
-    onSave(cleaned);
-    setEditing(false);
+    try {
+      await api.updateUser({
+        username: cleaned.username || undefined,
+        first_name: cleaned.first_name || undefined,
+        last_name: cleaned.last_name || undefined,
+        email: cleaned.email || undefined,
+        phone_number: cleaned.phone || undefined,
+        address: cleaned.address || undefined,
+      });
+      onSave(cleaned);
+      setEditing(false);
+    } catch (err) {
+      alert(err.message || 'Failed to update profile');
+    }
   };
 
   const handleCancel = () => {
@@ -455,14 +466,21 @@ function ChangePasswordSection() {
   const set = (field) => (val) => { setForm({ ...form, [field]: val }); setError(''); setSuccess(''); };
   const toggle = (field) => () => setShow({ ...show, [field]: !show[field] });
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!form.current) { setError('Current password is required.'); return; }
     const failed = PASSWORD_RULES.filter((r) => !r.test(form.newPwd));
     if (failed.length) { setError('New password must have: ' + failed.map((r) => r.label).join(', ')); return; }
     if (form.newPwd !== form.confirm) { setError('New passwords do not match.'); return; }
-    // TODO: call api.changePassword(...)
-    setSuccess('Password updated successfully.');
-    setForm({ current: '', newPwd: '', confirm: '' });
+    try {
+      await api.updateUser({
+        old_password: form.current,
+        new_password: form.newPwd,
+      });
+      setSuccess('Password updated successfully.');
+      setForm({ current: '', newPwd: '', confirm: '' });
+    } catch (err) {
+      setError(err.message || 'Failed to update password');
+    }
   };
 
   return (

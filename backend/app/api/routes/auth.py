@@ -29,7 +29,7 @@ async def login(data: LoginRequest, response: Response,db: AsyncSession = Depend
     
 
 #fix the queries over here
-@router.post("/register_particpant",response_model=UserResponse)
+@router.post("/register_participant",response_model=UserResponse)
 async def register(payload: UserSignup, db: AsyncSession = Depends(get_db)):
     """User registration endpoint"""
     new_user = await create_user(payload,db)

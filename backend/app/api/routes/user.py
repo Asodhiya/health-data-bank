@@ -7,7 +7,7 @@ from app.db.models import User
 from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter()
 
-@router.post("/change_password")
-async def change_password(Payload:UpdatePersonalInfoPayload ,user: User = Depends(check_current_user),db: AsyncSession = Depends(get_db)):
+@router.post("/update_user")
+async def update_user(Payload:UpdatePersonalInfoPayload ,user: User = Depends(check_current_user),db: AsyncSession = Depends(get_db)):
     await update_user(Payload,user,db)
     return "detail : User updated sucessfully"

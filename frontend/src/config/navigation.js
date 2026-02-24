@@ -92,13 +92,11 @@ export const DASHBOARD_NAV = [
   },
 
   /* =====================
-     COMMON
+     PROFILE (per-role path)
   ====================== */
-  {
-    label: "Profile",
-    to: "/profile",
-    roles: ["admin", "researcher", "caretaker"],
-  },
+  { label: "Profile", to: "/admin/profile",      roles: ["admin"] },
+  { label: "Profile", to: "/researcher/profile",  roles: ["researcher"] },
+  { label: "Profile", to: "/caretaker/profile",   roles: ["caretaker"] },
 
   {
     label: "Logout",

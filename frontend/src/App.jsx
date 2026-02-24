@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import DashboardLayout from "./layouts/DashboardLayout";
-import AuthLayout from "./components/AuthLayout";
-import OnboardingLayout from "./layouts/OnboardingLayout";
 import reactLogo from "./assets/react.svg";
 import viteLogo from "/vite.svg";
 import NoSideDashboardLayout from "./layouts/NoSideDashboardLayout";
@@ -23,6 +21,7 @@ import LoginPage from "./pages/auth/LoginPage";
 import RegisterPage from "./pages/auth/RegisterPage";
 import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
 import BackgroundInfoPage from "./pages/onboarding/BackgroundInfoPage";
+import ResetPasswordPage from "./pages/auth/ResetPasswordPage";
 import ConsentPage from "./pages/onboarding/ConsentPage";
 import IntakePage from "./pages/onboarding/IntakePage";
 
@@ -43,6 +42,7 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
         </Route>
 
         {/* ── Onboarding routes (participant only) ── */}
@@ -54,21 +54,15 @@ function App() {
           </Route>
         </Route>
 
-        {/* ── Nimzen's existing routes ── */}
+        
         <Route path="/" element={<DefaultRoute userRole={userRole} />} />
         <Route path="/dashboard" element={<DefaultRoute userRole={userRole} />} />
         <Route path="/logout" element={<Navigate to="/login" replace />} />
 
-        {/* Participant routes — DashboardPage has its own layout */}
-        <Route element={<ParticipantRoute userRole={userRole} />}>
-          <Route path="/participant" element={<DashboardPage />} />
-        </Route>
-
-        {/* Admin routes */}
         <Route element={<AdminRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/profile" element={<ProfilePage role="admin" />} />
+            <Route path="/admin/profile" element={<ProfilePage role="admin" />} />
           </Route>
         </Route>
 
@@ -83,15 +77,14 @@ function App() {
         <Route element={<CaretakerRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/caretaker" element={<CaretakerDashboard />} />
-            <Route path="/profile" element={<ProfilePage role="caretaker" />} />
+            <Route path="/caretaker/profile" element={<ProfilePage role="caretaker" />} />
           </Route>
         </Route>
 
-        {/* Researcher routes */}
         <Route element={<ResearcherRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/researcher" element={<ResearcherDashboard />} />
-            <Route path="/profile" element={<ProfilePage role="researcher" />} />
+            <Route path="/researcher/profile" element={<ProfilePage role="researcher" />} />
           </Route>
         </Route>
       </Routes>
