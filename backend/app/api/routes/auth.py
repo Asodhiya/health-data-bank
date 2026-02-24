@@ -1,34 +1,59 @@
 """
 Authentication Routes
 """
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status,Response,Depends,BackgroundTasks
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.models import User
+from sqlalchemy import select
+from app.db.session import get_db
+from app.core.security import PasswordHash,create_access_token, generate_reset_token, hash_reset_token, reset_token_expiry
+from app.schemas.schemas import UserSignup
+from app.services.cookies import _set_cookie
+from app.services.auth_service import authenticate_user,create_user,reset_forgot_password
+from app.schemas.schemas import LoginRequest,UserResponse ,ForgotPasswordIn  
+from app.core.dependency import check_current_user
+from app.services.email_sender import send_reset_email
+
 
 router = APIRouter()
 
 
 @router.post("/login")
-async def login():
-    """User login endpoint"""
-    # TODO: Implement authentication with Supabase
-    return {"message": "Login endpoint - To be implemented"}
 
+async def login(data: LoginRequest, response: Response,db: AsyncSession = Depends(get_db)):
+    """authenticates user by checking email and hashed password in the dummy db"""
+    user = await authenticate_user(data.email, data.password,db)
+    token = create_access_token({"sub": str(user.user_id)})
+    _set_cookie(response, token)
+    return {"detail": "Login successful"}
+    
 
-@router.post("/register")
-async def register():
+#fix the queries over here
+@router.post("/register_participant",response_model=UserResponse)
+async def register(payload: UserSignup, db: AsyncSession = Depends(get_db)):
     """User registration endpoint"""
-    # TODO: Implement registration with Supabase
-    return {"message": "Register endpoint - To be implemented"}
-
+    new_user = await create_user(payload,db)
+    return {"id": str(new_user.user_id), "email": new_user.email, "created_at": new_user.created_at}
 
 @router.post("/logout")
-async def logout():
-    """User logout endpoint"""
-    # TODO: Implement logout
-    return {"message": "Logout endpoint - To be implemented"}
+async def logout(response: Response):
+    """User logout endpoint - clears the auth cookie"""
+    response.delete_cookie("token")
+    return {"message": "Logged out successfully"}
 
 
 @router.get("/me")
-async def get_current_user():
+async def get_current_user(user: User = Depends(check_current_user)):
     """Get current authenticated user"""
-    # TODO: Implement with JWT validation
-    return {"message": "Current user endpoint - To be implemented"}
+    return {
+        "user_id": str(user.user_id),
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+    }
+
+
+@router.post("/auth/forgot-password")
+async def forgot_password(payload: ForgotPasswordIn,background: BackgroundTasks,db: AsyncSession = Depends(get_db),):
+    await reset_forgot_password(payload,background,db)
+    return {"message": "If the email exists, a reset link has been sent."}
