@@ -24,7 +24,7 @@ export const api = {
     }),
 
   register: (payload) =>
-    request('/auth/register', {
+    request('/auth/register_participant', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
