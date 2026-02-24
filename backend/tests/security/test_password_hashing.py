@@ -5,8 +5,8 @@ What we are testing:
     The PasswordHash class is responsible for hashing user passwords before
     they are stored in the database, and for verifying a plain-text password
     against a stored hash at login time.
-Run with:
-    pytest tests/unit/test_security/test_password_hashing.py -v
+Run with (from tests):
+    pytest security/test_password_hashing.py -v
 """
 
 import pytest

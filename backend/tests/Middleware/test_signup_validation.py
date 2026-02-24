@@ -1,3 +1,9 @@
+"""
+Run with:
+    pytest tests/Middleware/test_signup_validation.py -v
+    pytest tests/Middleware/test_signup_validation.py -v --html=tests/Middleware/test1_signup_validation_report.html --self-contained-html 
+"""
+
 import pytest
 from pydantic import ValidationError
 from app.middleware.signup_validation import UserSignup
