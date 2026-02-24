@@ -71,3 +71,4 @@ async def update_user(Payload:UpdatePersonalInfoPayload,user:User ,db: AsyncSess
         except Exception:
             await db.rollback()
             raise HTTPException(status_code=500, detail="Failed to update user information")
+        

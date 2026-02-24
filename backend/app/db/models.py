@@ -39,6 +39,8 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("now()"))
     last_login_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     Address: Mapped[str | None] = mapped_column(Text)
+    reset_token_hash: Mapped[str | None] = mapped_column( String,nullable=True)
+    reset_token_expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True),nullable=True)
 
     roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
 

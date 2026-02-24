@@ -1,17 +1,20 @@
 """
 Authentication Routes
 """
-from fastapi import APIRouter, HTTPException, status,Response,Depends
+from fastapi import APIRouter, HTTPException, status,Response,Depends,BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import User
 from sqlalchemy import select
 from app.db.session import get_db
-from app.core.security import PasswordHash,create_access_token
+from app.core.security import PasswordHash,create_access_token, generate_reset_token, hash_reset_token, reset_token_expiry
 from app.schemas.schemas import UserSignup
 from app.services.cookies import _set_cookie
-from app.services.auth_service import authenticate_user,create_user
-from app.schemas.schemas import LoginRequest,UserResponse   
+from app.services.auth_service import authenticate_user,create_user,reset_forgot_password
+from app.schemas.schemas import LoginRequest,UserResponse ,ForgotPasswordIn  
 from app.core.dependency import check_current_user
+from app.services.email_sender import send_reset_email
+
+
 router = APIRouter()
 
 
@@ -50,3 +53,7 @@ async def get_current_user(user: User = Depends(check_current_user)):
     }
 
 
+@router.post("/auth/forgot-password")
+async def forgot_password(payload: ForgotPasswordIn,background: BackgroundTasks,db: AsyncSession = Depends(get_db),):
+    await reset_forgot_password(payload,background,db)
+    return {"message": "If the email exists, a reset link has been sent."}

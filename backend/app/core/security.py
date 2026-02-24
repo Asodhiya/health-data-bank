@@ -3,7 +3,8 @@ from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 import os
 from dotenv import load_dotenv
-
+import secrets
+import hashlib
 
 
 load_dotenv()
@@ -52,3 +53,13 @@ def decode_access_token(token: str) -> dict | None:
         return None
     
 
+def generate_reset_token() -> str:
+  
+    return secrets.token_urlsafe(32)
+
+def hash_reset_token(token: str) -> str:
+   
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+def reset_token_expiry(minutes: int = 15) -> datetime:
+    return datetime.now(timezone.utc) + timedelta(minutes=minutes)

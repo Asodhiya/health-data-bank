@@ -60,4 +60,5 @@ class UpdatePersonalInfoPayload(BaseModel):
     old_password: Optional[str] = None
     new_password:Optional[str] = None
 
-    
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr

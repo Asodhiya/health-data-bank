@@ -2,8 +2,7 @@
 Application Configuration
 """
 from pydantic_settings import BaseSettings
-from typing import Optional
-
+from pydantic import ConfigDict
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
@@ -13,16 +12,13 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     DEBUG: bool = True
 
-    # Database
-    #DATABASE_URL: Optional[str] = None
-
     # CORS
     FRONTEND_URL: str = "http://localhost:3000"
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore",   
+    )
 
-
-# Global settings instance
 settings = Settings()

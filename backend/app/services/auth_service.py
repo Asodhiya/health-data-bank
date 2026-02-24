@@ -1,12 +1,14 @@
-from fastapi import HTTPException, status, Depends
-from app.db.session import get_db
-from app.core.security import PasswordHash
+from fastapi import HTTPException, status, BackgroundTasks
+
+from app.core.security import PasswordHash, generate_reset_token, hash_reset_token, reset_token_expiry
 from app.middleware.signup_validation import UserSignup
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select,update
+from sqlalchemy import select
 from app.db.models import User
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone
+from app.schemas.schemas import ForgotPasswordIn
+from app.services.email_sender import send_reset_email
 
 async def authenticate_user(email: str, password: str, db: AsyncSession):
     """Checks email and password if in db or not"""
@@ -71,5 +73,22 @@ async def get_user_by_id(user_id: str, db: AsyncSession):
 
 
 
+async def reset_forgot_password( payload: ForgotPasswordIn, background: BackgroundTasks,db: AsyncSession ):
+    result = await db.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
 
+    if not user:
+        return {"message": "If the email exists, a reset link has been sent."}
+
+    raw_token = generate_reset_token()
+    user.reset_token_hash = hash_reset_token(raw_token)
+    user.reset_token_expires_at = reset_token_expiry(15)
+
+    await db.commit()
+    FRONTEND_URL = "http://localhost:3000"
+    reset_link = f"{FRONTEND_URL}/forgot-password?token={raw_token}"
+    send_reset_email(user.email, reset_link)
+    # background.add_task(send_reset_email, user.email, reset_link)
+
+    return {"message": "If the email exists, a reset link has been sent."}
    
