@@ -65,10 +65,12 @@ export const api = {
       method: 'DELETE',
     }),
 
+  listGroups: () =>
+    request('/form_management/groups'),
+
   publishForm: (formId, groupId) =>
-    request(`/form_management/${formId}/publish`, {
+    request(`/form_management/${formId}/publish?group_id=${groupId}`, {
       method: 'POST',
-      body: JSON.stringify({ group_id: groupId }),
     }),
 
   unpublishForm: (formId) =>

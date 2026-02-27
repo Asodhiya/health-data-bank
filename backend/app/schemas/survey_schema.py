@@ -46,6 +46,8 @@ class SurveyDetailOut(BaseModel):
     title: str
     description: Optional[str] = None
     version: int
+    status: str
+    created_at: datetime
     fields: List[FormFieldOut] = []
 
     class Config:
@@ -56,8 +58,10 @@ class SurveyListItem(BaseModel):
     title: str
     description: Optional[str] = None
     status: str
+    created_at: datetime
     due_date: Optional[datetime] = None
     deployment_id: Optional[UUID] = None
+    fields: List[FormFieldOut] = []
 
     class Config:
         from_attributes = True
