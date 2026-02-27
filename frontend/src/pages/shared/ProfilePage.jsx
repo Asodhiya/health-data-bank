@@ -33,12 +33,10 @@ const LockIcon        = () => <Ico size={16} d={<><rect x="3" y="11" width="18" 
 const EyeIcon         = () => <Ico size={16} d={<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></>} />;
 const EyeOffIcon      = () => <Ico size={16} d={<><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>} />;
 const BellIcon        = () => <Ico size={16} d={<><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>} />;
-const MonitorIcon     = () => <Ico size={16} d={<><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></>} />;
-const ChevronRight    = () => <Ico size={16} d={<polyline points="9 18 15 12 9 6" />} />;
-const TrashIcon       = () => <Ico size={16} d={<><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></>} />;
 const CheckCircleIcon = () => <Ico size={16} d={<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></>} stroke="#16a34a" />;
 const BriefcaseIcon   = () => <Ico size={16} d={<><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /></>} />;
 const BookIcon        = () => <Ico size={16} d={<><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15z" /></>} />;
+const TrashIcon       = () => <Ico size={16} d={<><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></>} />;
 
 
 /* ── Password rules — same as RegisterPage ── */
@@ -49,6 +47,27 @@ const PASSWORD_RULES = [
   { label: 'number',           test: (p) => /\d/.test(p) },
   { label: 'special character', test: (p) => /[^A-Za-z0-9]/.test(p) },
 ];
+
+
+/* ── Calculate age from date string ── */
+const calcAge = (dob) => {
+  if (!dob) return null;
+  const birth = new Date(dob);
+  if (isNaN(birth)) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age >= 0 ? age : null;
+};
+
+
+/* ── Country list from browser Intl API ── */
+const COUNTRIES = (() => {
+  const displayNames = new Intl.DisplayNames(['en'], { type: 'region' });
+  const codes = 'AF AL DZ AD AO AG AR AM AU AT AZ BS BH BD BB BY BE BZ BJ BT BO BA BW BR BN BG BF BI CV KH CM CA CF TD CL CN CO KM CG CR HR CU CY CZ DK DJ DM DO EC EG SV GQ ER EE SZ ET FJ FI FR GA GM GE DE GH GR GD GT GN GW GY HT HN HU IS IN ID IR IQ IE IL IT JM JP JO KZ KE KI KW KG LA LV LB LS LR LY LI LT LU MG MW MY MV ML MT MH MR MU MX FM MD MC MN ME MA MZ MM NA NR NP NL NZ NI NE NG KP MK NO OM PK PW PS PA PG PY PE PH PL PT QA RO RU RW KN LC VC WS SM ST SA SN RS SC SL SG SK SI SB SO ZA KR SS ES LK SD SR SE CH SY TW TJ TZ TH TL TG TO TT TN TR TM TV UG UA AE GB US UY UZ VU VA VE VN YE ZM ZW'.split(' ');
+  return codes.map((code) => displayNames.of(code)).filter(Boolean).sort();
+})();
 
 
 /* ── Dev fallback data per role ── */
@@ -193,6 +212,50 @@ function ToggleSwitch({ checked, onChange }) {
   );
 }
 
+function SearchableSelect({ value, onChange, options, placeholder = 'Search...' }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const filtered = query
+    ? options.filter((o) => o.toLowerCase().includes(query.toLowerCase()))
+    : options;
+
+  const handleSelect = (val) => {
+    onChange(val);
+    setQuery('');
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <input
+        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        placeholder={placeholder}
+        value={open ? query : value || ''}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+      />
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <ul className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
+            {filtered.length === 0 ? (
+              <li className="px-3 py-2.5 text-sm text-slate-400">No results</li>
+            ) : (
+              filtered.map((opt) => (
+                <li key={opt}
+                  className={`px-3 py-2 text-sm cursor-pointer transition-colors ${opt === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}
+                  onClick={() => handleSelect(opt)}
+                >{opt}</li>
+              ))
+            )}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 
 /* ══════════════════════════════════════════════
    ROLE-SPECIFIC FIELD BLOCKS
@@ -211,9 +274,27 @@ function ParticipantFields({ form, set, editing, profile }) {
       <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Demographics</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4">
-        <ProfileField icon={<CalendarIcon />} label="DATE OF BIRTH"
-          value={editing ? form.dob : profile.dob} editing={editing}
-          onChange={set('dob')} type={editing ? 'date' : 'text'} />
+        <div className="mb-3.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">DATE OF BIRTH</span>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><CalendarIcon /></span>
+            {editing ? (
+              <input
+                className="w-full py-2.5 pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+                type="date" value={form.dob}
+                onChange={(e) => set('dob')(e.target.value)}
+                max={new Date().toISOString().split('T')[0]}
+              />
+            ) : (
+              <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg pl-10 pr-3">
+                {profile.dob || '—'}
+                {calcAge(profile.dob) !== null && (
+                  <span className="text-slate-400 ml-2">({calcAge(profile.dob)} yrs)</span>
+                )}
+              </span>
+            )}
+          </div>
+        </div>
         <div className="mb-3.5">
           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">SEX</span>
           {editing
@@ -254,10 +335,13 @@ function ParticipantFields({ form, set, editing, profile }) {
         {editing ? (
           <>
             <ChipSelect options={['Yes', 'No']} value={form.intl} onChange={set('intl')} />
-            <div className={`overflow-hidden transition-all ${form.intl === 'Yes' ? 'max-h-24 opacity-100 mt-2.5' : 'max-h-0 opacity-0'}`}>
-              <input className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Which country are you from?"
-                value={form.country || ''} onChange={(e) => set('country')(e.target.value)} />
+            <div className={`transition-all ${form.intl === 'Yes' ? 'max-h-96 opacity-100 mt-2.5' : 'max-h-0 opacity-0 overflow-hidden'}`}>
+              <SearchableSelect
+                value={form.country || ''}
+                onChange={set('country')}
+                options={COUNTRIES}
+                placeholder="Search for your country..."
+              />
               <p className="text-xs text-slate-400 mt-1">This helps us understand our international community</p>
             </div>
           </>
@@ -531,15 +615,12 @@ function SecuritySection() {
           <CheckCircleIcon /> <span>MFA is active via email verification</span>
         </div>
       )}
-      <button className="flex items-center justify-between w-full text-sm text-slate-500 hover:text-slate-700 py-3 mt-2 transition-colors">
-        <span>View Login Activity</span> <ChevronRight />
-      </button>
     </div>
   );
 }
 
-function NotificationsSection() {
-  const [prefs, setPrefs] = useState({ email: true, survey: true, weekly: false });
+function NotificationsSection({ role }) {
+  const [prefs, setPrefs] = useState({ email: true, survey: true, weekly: false, receiveResults: true });
   const toggle = (key) => () => setPrefs({ ...prefs, [key]: !prefs[key] });
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-5">
@@ -559,40 +640,20 @@ function NotificationsSection() {
         <span className="text-sm text-slate-600">Weekly progress report</span>
         <ToggleSwitch checked={prefs.weekly} onChange={toggle('weekly')} />
       </div>
-    </div>
-  );
-}
-
-function ActiveSessionsSection() {
-  const [sessions] = useState([
-    { id: 1, name: 'Chrome on MacBook', lastActive: 'Today, 2:34 PM', isCurrent: true },
-    { id: 2, name: 'Safari on iPhone 14', lastActive: 'Yesterday, 9:12 AM', isCurrent: false },
-  ]);
-  return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-5">
-      <div className="flex items-center gap-2 mb-5">
-        <span className="text-blue-600"><MonitorIcon /></span>
-        <h2 className="text-base font-bold text-slate-800">Active Sessions</h2>
-      </div>
-      <div className="space-y-3">
-        {sessions.map((s) => (
-          <div key={s.id} className={`flex items-center justify-between p-3.5 rounded-xl border ${s.isCurrent ? 'border-blue-200 bg-blue-50/30' : 'border-slate-100'}`}>
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500"><MonitorIcon /></div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-slate-700">{s.name}</span>
-                  {s.isCurrent && <span className="text-xs font-bold text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">This device</span>}
-                </div>
-                <span className="text-xs text-slate-400">Last active: {s.lastActive}</span>
-              </div>
-            </div>
-            {!s.isCurrent && (
-              <button className="text-xs font-medium text-rose-500 hover:text-rose-700 border border-rose-200 rounded-lg px-3 py-1.5 hover:bg-rose-50 transition-colors">Revoke</button>
-            )}
+      {role === 'participant' && (
+        <>
+          <div className="border-t border-slate-100 mt-3 pt-3 mb-1">
+            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Study</span>
           </div>
-        ))}
-      </div>
+          <div className="flex items-center justify-between py-3">
+            <div>
+              <span className="text-sm text-slate-600">Receive study results</span>
+              <p className="text-xs text-slate-400 mt-0.5">Get notified when study results are available</p>
+            </div>
+            <ToggleSwitch checked={prefs.receiveResults} onChange={toggle('receiveResults')} />
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -710,8 +771,7 @@ export default function ProfilePage({ role = 'participant' }) {
         <>
           <ChangePasswordSection />
           <SecuritySection />
-          <NotificationsSection />
-          <ActiveSessionsSection />
+          <NotificationsSection role={role} />
           <DangerZoneSection />
         </>
       )}
