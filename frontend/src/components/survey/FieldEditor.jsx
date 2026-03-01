@@ -51,6 +51,7 @@ export function newField(type) {
   return {
     id: uid(),
     label: '',
+    description: '',
     field_type: type,
     is_required: false,
     display_order: 0,
@@ -185,28 +186,42 @@ function LikertConfig({ field, onChange }) {
 /* ═══════════════════════════════════════════
    FIELD CARD — collapsible editor for one field
    ═══════════════════════════════════════════ */
-export function FieldCard({ field, index, total, isExpanded, onToggle, onUpdate, onRemove, onDuplicate, onMove }) {
+export function FieldCard({ field, index, total, isExpanded, isSelected, onToggle, onSelect, onUpdate, onRemove, onDuplicate, onMove }) {
+  const [showDesc, setShowDesc] = useState(false);
   const info = FIELD_TYPES.find((t) => t.value === field.field_type) || {};
   const hasOpts = ['single_select', 'multi_select', 'dropdown'].includes(field.field_type);
   const isLikert = field.field_type === 'likert';
+  const hasDescription = !!(field.description);
 
   return (
     <div className={`bg-white rounded-xl border transition-all duration-200
-      ${isExpanded
-        ? 'border-blue-300 shadow-md ring-1 ring-blue-50'
-        : 'border-slate-200 shadow-sm hover:border-slate-300'
+      ${isSelected
+        ? 'border-rose-300 ring-1 ring-rose-100'
+        : isExpanded
+          ? 'border-blue-300 shadow-md ring-1 ring-blue-50'
+          : 'border-slate-200 shadow-sm hover:border-slate-300'
       }`}>
 
       {/* Header — always visible */}
-      <div className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none" onClick={onToggle}>
-        <span className="text-base w-6 text-center opacity-70">{info.icon}</span>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-slate-800 truncate">
-            {field.label || <span className="text-slate-400 italic">Untitled question</span>}
-          </p>
-          <p className="text-xs text-slate-400 mt-0.5">
+      <div className="flex items-center gap-3 px-4 py-3">
+        {/* Checkbox for multi-select */}
+        {onSelect && (
+          <input type="checkbox" checked={!!isSelected}
+            onChange={onSelect}
+            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-400 shrink-0 cursor-pointer" />
+        )}
+
+        <div className="flex-1 min-w-0 cursor-pointer select-none" onClick={onToggle}>
+          <div className="flex items-center gap-2">
+            <span className="text-base w-6 text-center opacity-70">{info.icon}</span>
+            <p className="text-sm font-semibold text-slate-800 truncate">
+              {field.label || <span className="text-slate-400 italic">Untitled question</span>}
+            </p>
+          </div>
+          <p className="text-xs text-slate-400 mt-0.5 ml-8">
             {info.label}
             {field.is_required && <span className="text-rose-400 ml-1">• Required</span>}
+            {hasDescription && <span className="text-blue-400 ml-1">• Has description</span>}
           </p>
         </div>
         <span className="text-xs font-mono text-slate-300 mr-1">Q{index + 1}</span>
@@ -236,6 +251,30 @@ export function FieldCard({ field, index, total, isExpanded, onToggle, onUpdate,
               placeholder="Enter your question…"
               className="w-full mt-1 px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-50
                 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition" />
+          </div>
+
+          {/* Expandable description */}
+          <div>
+            <button onClick={() => setShowDesc(!showDesc)}
+              className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800 transition">
+              <Svg size={13} d={showDesc ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'} />
+              {showDesc ? 'Hide description' : (hasDescription ? 'Show description' : 'Add description')}
+            </button>
+
+            {showDesc && (
+              <div className="mt-2">
+                <textarea
+                  value={field.description || ''}
+                  onChange={(e) => onUpdate({ description: e.target.value })}
+                  placeholder="Add helper text that participants will see below this question…"
+                  rows={2}
+                  className="w-full px-3 py-2 text-sm border border-blue-200 rounded-lg bg-blue-50/50
+                    focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition resize-none placeholder-slate-400" />
+                <p className="text-xs text-slate-400 mt-1">
+                  This description appears below the question text when participants fill out the form.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
