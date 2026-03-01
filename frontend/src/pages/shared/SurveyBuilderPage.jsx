@@ -538,14 +538,15 @@ function PublishModal({ onClose, onConfirm }) {
 /* ══════════════════════════════════════════════
    BUILDER VIEW
    ══════════════════════════════════════════════ */
-function BuilderView({ form, onSave, onBack, onPublish }) {
+function BuilderView({ form, onSave, onBack, onPublish, onUnpublish }) {
   const [title, setTitle]       = useState(form?.title || '');
   const [desc, setDesc]         = useState(form?.description || '');
   const [fields, setFields]     = useState(form?.fields || []);
   const [expanded, setExpanded] = useState(null);
   const [showAdd, setShowAdd]   = useState(false);
   const [mode, setMode]         = useState('edit');
-  const [showPublish, setShowPublish] = useState(false);
+  const [showPublish, setShowPublish]     = useState(false);
+  const [showUnpublish, setShowUnpublish] = useState(false);
   const [selected, setSelected] = useState(new Set());
 
   const isDraft = !form?.status || form.status === 'DRAFT';
@@ -614,8 +615,10 @@ function BuilderView({ form, onSave, onBack, onPublish }) {
             <button onClick={() => setMode('preview')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'preview' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>Preview</button>
           </div>
           <button onClick={handleSaveDraft} className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm">Save Draft</button>
-          {isDraft && (
+          {isDraft ? (
             <button onClick={() => setShowPublish(true)} className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition shadow-sm">Publish</button>
+          ) : (
+            <button onClick={() => setShowUnpublish(true)} className="px-4 py-2 text-sm font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-200 rounded-xl transition shadow-sm">Unpublish</button>
           )}
         </div>
       </div>
@@ -678,6 +681,24 @@ function BuilderView({ form, onSave, onBack, onPublish }) {
 
       {showPublish && (
         <PublishModal onClose={() => setShowPublish(false)} onConfirm={(groupId) => onPublish(form, groupId)} />
+      )}
+
+      {showUnpublish && (
+        <ConfirmModal
+          title={`Unpublish "${title || 'Untitled Form'}"`}
+          message="This form will revert to draft status and become unavailable to participants in the assigned group."
+          confirmLabel="Unpublish"
+          confirmClass="bg-amber-600 hover:bg-amber-700"
+          onConfirm={() => { onUnpublish(form.form_id); setShowUnpublish(false); }}
+          onClose={() => setShowUnpublish(false)}
+        >
+          <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600">
+            <div className="flex items-start gap-2">
+              <span className="shrink-0 mt-0.5"><InfoIco /></span>
+              <span>Participants who have not yet completed this form will lose access. Previously submitted responses will be preserved.</span>
+            </div>
+          </div>
+        </ConfirmModal>
       )}
     </div>
   );
@@ -769,7 +790,7 @@ export default function SurveyBuilderPage() {
     }
   };
 
-  /* ── List-level actions (called from FormListView) ── */
+  /* ── List-level actions ── */
   const handleDelete = async (formId) => {
     try {
       await api.deleteForm(formId);
@@ -816,7 +837,13 @@ export default function SurveyBuilderPage() {
         />
       )}
       {view === 'builder' && (
-        <BuilderView form={editingForm} onSave={handleSave} onBack={handleBack} onPublish={handlePublishFromBuilder} />
+        <BuilderView
+          form={editingForm}
+          onSave={handleSave}
+          onBack={handleBack}
+          onPublish={handlePublishFromBuilder}
+          onUnpublish={handleUnpublish}
+        />
       )}
       {toast && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white px-5 py-2.5 rounded-xl shadow-lg text-sm font-medium animate-bounce">{toast}</div>}
     </div>
