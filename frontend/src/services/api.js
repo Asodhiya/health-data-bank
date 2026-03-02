@@ -78,28 +78,35 @@ export const api = {
       method: 'POST',
     }),
 
-  // Returns which groups a form is currently deployed to
-  // Backend endpoint: GET /form_management/{formId}/deployments
-  // Falls back gracefully if endpoint doesn't exist yet
   getFormDeployments: (formId) =>
     request(`/form_management/${formId}/deployments`),
 
   // ── Survey Fill (participant) ──
+  // Backend: GET /api/v1/participant/surveys/assigned
   getDeployedForms: () =>
-    request('/surveys/deployed'),
+    request('/participant/surveys/assigned'),
 
-  getDraftAnswers: (formId) =>
-    request(`/submissions/${formId}/draft`),
+  // Backend: GET /api/v1/participant/surveys/:formId
+  getParticipantFormDetail: (formId) =>
+    request(`/participant/surveys/${formId}`),
 
+  // Backend: GET /api/v1/participant/surveys/:formId/response
+  getSurveyResponse: (formId) =>
+    request(`/participant/surveys/${formId}/response`),
+
+  // Backend: POST /api/v1/participant/surveys/:formId/save
+  // Body: [{field_id, value}, ...]
   saveDraftAnswers: (formId, answers) =>
-    request(`/submissions/${formId}/save`, {
+    request(`/participant/surveys/${formId}/save`, {
       method: 'POST',
-      body: JSON.stringify({ answers }),
+      body: JSON.stringify(answers),
     }),
 
+  // Backend: POST /api/v1/participant/surveys/:formId/submit
+  // Body: [{field_id, value}, ...]
   submitSurvey: (formId, answers) =>
-    request(`/submissions/${formId}/submit`, {
+    request(`/participant/surveys/${formId}/submit`, {
       method: 'POST',
-      body: JSON.stringify({ answers }),
+      body: JSON.stringify(answers),
     }),
 };

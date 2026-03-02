@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-// import { api } from '../../services/api';   // uncomment when backend is ready
+import { api } from '../../services/api';
 
 /*
   FormListPage — participant's survey list.
@@ -11,9 +11,26 @@ import { useNavigate } from 'react-router-dom';
   Shows all forms deployed to this participant's group,
   with search, sort, date filters, and urgency-based ordering.
 
-  Data source (current):  mock data below
-  Data source (future):   GET /api/v1/surveys/deployed
+  Data source:  GET /api/v1/participant/surveys/assigned
+  Fallback:     mock data + localStorage hydration (when backend unavailable)
 */
+
+/* ── Transform backend response → frontend shape ── */
+const STATUS_MAP = { NEW: 'pending', IN_PROGRESS: 'in_progress', COMPLETED: 'completed' };
+const fmtDateStr = (d) => d ? new Date(d).toISOString().split('T')[0] : undefined;
+
+const transformAssigned = (item) => ({
+  form_id: String(item.form_id),
+  title: item.title,
+  description: item.description || '',
+  question_count: item.question_count || 0,
+  status: STATUS_MAP[item.status] || item.status || 'pending',
+  category: item.category || '',
+  answered: item.answered_count ?? item.answered ?? 0,
+  deployed_at: fmtDateStr(item.deployed_at),
+  due_date: fmtDateStr(item.due_date),
+  submitted_at: fmtDateStr(item.submitted_at),
+});
 
 
 /* ── Mock data — replace with API call when backend is ready ── */
@@ -192,38 +209,52 @@ export default function FormListPage() {
   const [showSort, setShowSort] = useState(false);
 
   useEffect(() => {
-    /* TODO: api.getDeployedForms().then(setForms)... */
-    const timer = setTimeout(() => {
-      // Hydrate mock data with any localStorage submission/draft status
-      const hydrated = MOCK_DEPLOYED_FORMS.map((form) => {
-        try {
-          const raw = localStorage.getItem(`hdb_draft_${form.form_id}`);
-          if (!raw) return form;
-          const parsed = JSON.parse(raw);
-          if (parsed.submitted) {
-            return {
-              ...form,
-              status: 'completed',
-              answered: form.question_count,
-              submitted_at: parsed.savedAt
-                ? new Date(parsed.savedAt).toISOString().split('T')[0]
-                : undefined,
-            };
-          }
-          // Draft in progress — count answered fields
-          const answeredCount = Object.values(parsed.answers || {}).filter(
-            (v) => Array.isArray(v) ? v.length > 0 : v !== undefined && v !== '' && v !== null
-          ).length;
-          if (answeredCount > 0) {
-            return { ...form, status: 'in_progress', answered: answeredCount };
-          }
-        } catch { /* ignore malformed entries */ }
-        return form;
-      });
-      setForms(hydrated);
-      setLoading(false);
-    }, 300);
-    return () => clearTimeout(timer);
+    let cancelled = false;
+
+    const loadForms = async () => {
+      /* ── Try real API first ── */
+      try {
+        const data = await api.getDeployedForms();
+        if (!cancelled && Array.isArray(data) && data.length > 0) {
+          setForms(data.map(transformAssigned));
+          setLoading(false);
+          return;
+        }
+      } catch { /* API unavailable — fall through to mock data */ }
+
+      /* ── Fallback: mock data hydrated with localStorage status ── */
+      if (!cancelled) {
+        const hydrated = MOCK_DEPLOYED_FORMS.map((form) => {
+          try {
+            const raw = localStorage.getItem(`hdb_draft_${form.form_id}`);
+            if (!raw) return form;
+            const parsed = JSON.parse(raw);
+            if (parsed.submitted) {
+              return {
+                ...form,
+                status: 'completed',
+                answered: form.question_count,
+                submitted_at: parsed.savedAt
+                  ? new Date(parsed.savedAt).toISOString().split('T')[0]
+                  : undefined,
+              };
+            }
+            const answeredCount = Object.values(parsed.answers || {}).filter(
+              (v) => Array.isArray(v) ? v.length > 0 : v !== undefined && v !== '' && v !== null
+            ).length;
+            if (answeredCount > 0) {
+              return { ...form, status: 'in_progress', answered: answeredCount };
+            }
+          } catch { /* ignore malformed entries */ }
+          return form;
+        });
+        setForms(hydrated);
+        setLoading(false);
+      }
+    };
+
+    loadForms();
+    return () => { cancelled = true; };
   }, []);
 
   const handleStart = (formId) => navigate(`/participant/surveys/${formId}`);

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import FieldInput from '../../components/survey/FieldInput';
-// import { api } from '../../services/api';   // uncomment when backend is ready
+import { api } from '../../services/api';
 
 /*
   SurveyFillPage — participant fills out a deployed survey.
@@ -9,8 +9,12 @@ import FieldInput from '../../components/survey/FieldInput';
   Route:  /participant/surveys/:id
   Layout: renders inside NoSideDashboardLayout <Outlet />
 
+  Data source:  GET /api/v1/participant/surveys/:id  (form + fields)
+                GET /api/v1/participant/surveys/:id/response  (draft / submitted answers)
+  Fallback:     mock data + localStorage (when backend unavailable)
+
   Features:
-    - Auto-save with debounce (3s after last change, localStorage now, API later)
+    - Auto-save with debounce (3s after last change, API + localStorage)
     - "Last saved" indicator in sticky progress bar
     - Submit confirmation modal with answer summary
     - Read-only view for completed forms (loads submitted answers)
@@ -20,14 +24,43 @@ import FieldInput from '../../components/survey/FieldInput';
     - Answer feedback flash animation
     - Description expand/collapse
     - Return-to-position on resume
-
-  Data flow (future):
-    GET  /api/v1/form_management/detail/:id   → form + fields + options
-    GET  /api/v1/submissions/:formId/draft     → saved partial answers (if any)
-    GET  /api/v1/submissions/:formId/result    → submitted answers (completed)
-    POST /api/v1/submissions/:formId/save      → save partial answers
-    POST /api/v1/submissions/:formId/submit    → final submission
 */
+
+
+/* ── Transform backend field → frontend field (same logic as builder's transformForEdit) ── */
+const transformField = (f) => {
+  if (f.field_type === 'likert') {
+    const sortedOpts = [...(f.options || [])].sort((a, b) => a.value - b.value);
+    const min = sortedOpts.length > 0 ? sortedOpts[0].value : 0;
+    const max = sortedOpts.length > 0 ? sortedOpts[sortedOpts.length - 1].value : 4;
+    const labels = sortedOpts.map((o) => o.label);
+    return { ...f, id: f.field_id || f.id, likertMin: min, likertMax: max, likertLabels: labels, options: [] };
+  }
+  return { ...f, id: f.field_id || f.id, options: (f.options || []).map((o) => ({ id: o.option_id || o.id, label: o.label, value: o.value })) };
+};
+
+const transformForm = (backendForm) => ({
+  ...backendForm,
+  form_id: String(backendForm.form_id),
+  fields: (backendForm.fields || [])
+    .sort((a, b) => a.display_order - b.display_order)
+    .map(transformField),
+});
+
+/* ── Transform frontend answers object → backend array ── */
+const answersToArray = (answersObj) =>
+  Object.entries(answersObj)
+    .filter(([, v]) => v !== undefined && v !== '' && v !== null)
+    .map(([fieldId, value]) => ({ field_id: fieldId, value }));
+
+/* ── Transform backend answer array → frontend answers object ── */
+const answersFromBackend = (answerList) => {
+  const obj = {};
+  (answerList || []).forEach((a) => {
+    obj[String(a.field_id)] = a.value;
+  });
+  return obj;
+};
 
 
 /* ── Mock data ── */
@@ -138,9 +171,36 @@ export default function SurveyFillPage() {
   const answersRef = useRef(answers);                                   // #11 — always-fresh ref for beforeunload
   answersRef.current = answers;
 
-  /* ── Load form + draft ── */
+  /* ── Load form + existing answers (API-first, mock fallback) ── */
   useEffect(() => {
-    const timer = setTimeout(() => {
+    let cancelled = false;
+
+    const loadFromAPI = async () => {
+      try {
+        const [formData, responseData] = await Promise.all([
+          api.getParticipantFormDetail(id),
+          api.getSurveyResponse(id).catch(() => null),
+        ]);
+        if (cancelled) return;
+        const transformed = transformForm(formData);
+        setForm(transformed);
+
+        if (responseData && responseData.status === 'COMPLETED') {
+          isReadOnly.current = true;
+          setAnswers(answersFromBackend(responseData.answers));
+        } else if (responseData && responseData.answers?.length > 0) {
+          setAnswers(answersFromBackend(responseData.answers));
+          setLastSavedAt(new Date());
+        }
+        setLoading(false);
+        return true; // API succeeded
+      } catch {
+        return false; // API failed
+      }
+    };
+
+    const loadFromMock = () => {
+      if (cancelled) return;
       const formData = MOCK_FORM_DETAIL[id];
       if (formData) {
         setForm(formData);
@@ -159,7 +219,6 @@ export default function SurveyFillPage() {
               if (parsed.submitted) {
                 isReadOnly.current = true;
               } else if (parsed.lastFieldId) {
-                // #15 — Return-to-position: scroll to last answered field
                 requestAnimationFrame(() => {
                   setTimeout(() => {
                     document.getElementById(`q-${parsed.lastFieldId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -171,9 +230,12 @@ export default function SurveyFillPage() {
         }
       }
       setLoading(false);
-    }, 300);
+    };
+
+    loadFromAPI().then((ok) => { if (!ok && !cancelled) loadFromMock(); });
+
     return () => {
-      clearTimeout(timer);
+      cancelled = true;
       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     };
   }, [id]);
@@ -220,12 +282,18 @@ export default function SurveyFillPage() {
     }
   };
 
-  /* ── Auto-save (debounced 3s) ── */
+  /* ── Auto-save (debounced 3s) — tries API, always saves to localStorage ── */
   const doAutoSave = useCallback(() => {
     if (isReadOnly.current || Object.keys(answers).length === 0) return;
     setAutoSaveStatus('saving');
     const now = new Date();
+
+    // Always save to localStorage as backup
     localStorage.setItem(draftKey(id), JSON.stringify({ answers, savedAt: now.toISOString(), lastFieldId: lastAnsweredFieldId(answers) }));
+
+    // Try API save (fire-and-forget, don't block UI)
+    api.saveDraftAnswers(id, answersToArray(answers)).catch(() => { /* API unavailable, localStorage has it */ });
+
     setTimeout(() => {
       setLastSavedAt(now);
       setAutoSaveStatus('saved');
@@ -318,6 +386,7 @@ export default function SurveyFillPage() {
   const handleManualSave = () => {
     const now = new Date();
     localStorage.setItem(draftKey(id), JSON.stringify({ answers, savedAt: now.toISOString(), lastFieldId: lastAnsweredFieldId(answers) }));
+    api.saveDraftAnswers(id, answersToArray(answers)).catch(() => {});
     setLastSavedAt(now);
     setAutoSaveStatus('saved');
     setTimeout(() => setAutoSaveStatus('idle'), 2000);
@@ -325,13 +394,15 @@ export default function SurveyFillPage() {
 
   const handleSaveExit = () => { handleManualSave(); navigate('/participant/survey'); };
   const handleSubmitClick = () => { if (!validate()) return; setShowSubmitConfirm(true); };
-  const handleConfirmSubmit = () => {
-    // Persist submission so it survives page reload
+  const handleConfirmSubmit = async () => {
+    // Persist submission in localStorage so it survives reload
     localStorage.setItem(draftKey(id), JSON.stringify({
       answers,
       savedAt: new Date().toISOString(),
       submitted: true,
     }));
+    // Try API submission (don't block success screen on failure)
+    api.submitSurvey(id, answersToArray(answers)).catch(() => {});
     setSubmitted(true);
     setShowSubmitConfirm(false);
   };
