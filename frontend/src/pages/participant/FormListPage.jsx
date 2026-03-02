@@ -144,7 +144,7 @@ function FormRow({ form, onStart }) {
       </div>
 
       <h3 className="text-base font-bold text-slate-800 mb-1">{form.title}</h3>
-      <p className="text-sm text-slate-500 mb-4">{form.description}</p>
+      <p className="text-sm text-slate-500 mb-4 line-clamp-2">{form.description}</p>
 
       <div className="flex items-end justify-between gap-4">
         {isActive && form.answered ? (
@@ -228,7 +228,21 @@ export default function FormListPage() {
 
   const handleStart = (formId) => navigate(`/participant/surveys/${formId}`);
 
-  if (loading) return <div className="flex items-center justify-center py-20"><p className="text-slate-400 text-base">Loading your surveys...</p></div>;
+  if (loading) return (
+    <div className="max-w-3xl mx-auto px-4 py-6">
+      <div className="mb-6"><div className="h-7 w-40 bg-slate-200 rounded-lg animate-pulse" /></div>
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="bg-white rounded-2xl p-5 border border-slate-100 animate-pulse">
+            <div className="flex items-center gap-2 mb-3"><div className="h-5 w-24 bg-slate-200 rounded-full" /><div className="h-5 w-16 bg-slate-100 rounded-full" /></div>
+            <div className="h-5 w-3/4 bg-slate-200 rounded mb-2" />
+            <div className="h-4 w-full bg-slate-100 rounded mb-4" />
+            <div className="flex justify-between items-center"><div className="h-3 w-20 bg-slate-100 rounded" /><div className="h-9 w-28 bg-slate-200 rounded-lg" /></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   /* ── Better empty state ── */
   if (forms.length === 0) {

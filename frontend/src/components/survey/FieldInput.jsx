@@ -23,6 +23,8 @@ const Svg = ({ d, size = 18, sw = 1.8, ...rest }) => (
 
 export default function FieldInput({ field, value, onChange, onToggleMulti, disabled = false }) {
   const t = field.field_type;
+  const ariaLabel = field.label || 'Survey question';
+  const ariaRequired = field.is_required || false;
 
   /* ── Likert Scale ── */
   if (t === 'likert') {
@@ -53,7 +55,8 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
                 </div>
                 <span className="text-xs font-mono text-slate-400">{val}</span>
                 <input type="radio" name={`field-${field.id}`} value={val}
-                  checked={selected} onChange={() => onChange(val)} className="sr-only" />
+                  checked={selected} onChange={() => onChange(val)} className="sr-only"
+                  aria-label={`${ariaLabel} — ${labels[i] || val}`} aria-required={ariaRequired} />
               </label>
             );
           })}
@@ -81,7 +84,8 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
               </div>
               <span className="text-sm text-slate-700">{opt.label}</span>
               <input type="radio" name={`field-${field.id}`} value={opt.value}
-                checked={selected} onChange={() => onChange(opt.value)} className="sr-only" />
+                checked={selected} onChange={() => onChange(opt.value)} className="sr-only"
+                aria-label={`${ariaLabel} — ${opt.label}`} aria-required={ariaRequired} />
             </label>
           );
         })}
@@ -109,7 +113,8 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
               </div>
               <span className="text-sm text-slate-700">{opt.label}</span>
               <input type="checkbox" checked={checked}
-                onChange={() => onToggleMulti(opt.value)} className="sr-only" />
+                onChange={() => onToggleMulti(opt.value)} className="sr-only"
+                aria-label={`${ariaLabel} — ${opt.label}`} />
             </label>
           );
         })}
@@ -121,6 +126,7 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
   if (t === 'dropdown') {
     return (
       <select value={value ?? ''} disabled={disabled}
+        aria-label={ariaLabel} aria-required={ariaRequired}
         onChange={(e) => onChange(e.target.value === '' ? null : parseInt(e.target.value))}
         className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl bg-white
           focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent
@@ -141,12 +147,14 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
     return isLong ? (
       <textarea value={value || ''} onChange={(e) => onChange(e.target.value)}
         disabled={disabled} placeholder="Type your answer…" rows={3}
+        aria-label={ariaLabel} aria-required={ariaRequired}
         className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl bg-white
           focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent
           transition resize-none disabled:opacity-60" />
     ) : (
       <input type="text" value={value || ''} onChange={(e) => onChange(e.target.value)}
         disabled={disabled} placeholder="Type your answer…"
+        aria-label={ariaLabel} aria-required={ariaRequired}
         className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl bg-white
           focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent
           transition disabled:opacity-60" />
@@ -157,6 +165,7 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
   if (t === 'number') {
     return (
       <input type="number" value={value ?? ''} disabled={disabled}
+        aria-label={ariaLabel} aria-required={ariaRequired}
         onChange={(e) => onChange(e.target.value === '' ? null : parseFloat(e.target.value))}
         placeholder="0"
         className="w-44 px-4 py-3 text-sm border border-slate-200 rounded-xl bg-white
@@ -169,6 +178,7 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
   if (t === 'date') {
     return (
       <input type="date" value={value || ''} disabled={disabled}
+        aria-label={ariaLabel} aria-required={ariaRequired}
         onChange={(e) => onChange(e.target.value)}
         className="w-52 px-4 py-3 text-sm border border-slate-200 rounded-xl bg-white
           focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent

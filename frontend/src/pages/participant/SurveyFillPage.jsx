@@ -456,7 +456,7 @@ export default function SurveyFillPage() {
       {!readOnly && fields.length > 3 && fields.filter((f) => f.field_type === 'likert').length >= fields.length * 0.6 && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700 mb-4 flex items-center gap-2">
           <Svg size={14} sw={2} stroke="#3b82f6" d={<><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></>} />
-          <span>Tip: Click a question card, then press <strong>1</strong>–<strong>{(fields[0]?.likertMax ?? 4) - (fields[0]?.likertMin ?? 0) + 1}</strong> to answer with keyboard. Auto-advances to next question.</span>
+          <span>Tip: Click a question card, then press number keys to answer Likert questions. Auto-advances to next question.</span>
         </div>
       )}
 

@@ -4,6 +4,16 @@ import FieldInput from '../../components/survey/FieldInput';
 import { FieldCard, AddFieldPanel, FIELD_TYPES, newField, uid } from '../../components/survey/FieldEditor';
 import { api } from '../../services/api';
 
+/* Toast animation — injected once, not per render */
+if (typeof document !== 'undefined' && !document.getElementById('hdb-toast-styles')) {
+  const style = document.createElement('style');
+  style.id = 'hdb-toast-styles';
+  style.textContent = `
+    @keyframes toastSlideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+  `;
+  document.head.appendChild(style);
+}
+
 /* ── SVG icons ── */
 const Svg = ({ d, size = 18, sw = 1.8, ...rest }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -130,7 +140,7 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
    FORM LIST VIEW
    #6 tab counts, #7 sort, #8 publish date, #9 empty state
    ══════════════════════════════════════════════ */
-function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublish, groups }) {
+function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublish, groups, pageTitle = 'Survey Forms' }) {
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sort, setSort]                 = useState('newest');
@@ -217,7 +227,7 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
     return (
       <div>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-slate-800">Survey Forms</h2>
+          <h2 className="text-xl font-bold text-slate-800">{pageTitle}</h2>
         </div>
         <div className="text-center py-20">
           <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-5">
@@ -241,7 +251,10 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">Survey Forms</h2>
+          <div className="flex items-center gap-1.5 text-xs mb-1">
+            <span className="text-slate-400">Dashboard</span><span className="text-slate-300">/</span><span className="text-slate-600 font-medium">Surveys</span>
+          </div>
+          <h2 className="text-xl font-bold text-slate-800">{pageTitle}</h2>
           <p className="text-sm text-slate-500 mt-0.5">{forms.length} forms total</p>
         </div>
         <button onClick={onCreate}
@@ -506,6 +519,22 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
 }
 
 
+/* ── Preview description expand/collapse ── */
+function PreviewDescription({ text }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > 100;
+  return (
+    <p className="text-xs text-slate-500 mb-3 italic">
+      {isLong && !expanded ? (
+        <>{text.slice(0, 100)}… <button onClick={() => setExpanded(true)} className="not-italic text-blue-500 hover:text-blue-700 font-semibold transition">more</button></>
+      ) : (
+        <>{text}{isLong && <button onClick={() => setExpanded(false)} className="ml-1 not-italic text-blue-500 hover:text-blue-700 font-semibold transition">less</button>}</>
+      )}
+    </p>
+  );
+}
+
+
 /* ══════════════════════════════════════════════
    PREVIEW VIEW — #11 device toggle
    ══════════════════════════════════════════════ */
@@ -534,7 +563,7 @@ function PreviewView({ title, description, fields }) {
         <div className="bg-blue-600 rounded-t-2xl px-6 py-5 text-white">
           <h2 className="text-lg font-bold">{title || 'Untitled Form'}</h2>
           {description && <p className="text-sm text-blue-100 mt-1">{description}</p>}
-          <p className="text-xs text-blue-200 mt-2">{fields.length} question{fields.length !== 1 && 's'} • <span className="text-red-200">*</span> = required</p>
+          <p className="text-xs text-blue-200 mt-2">{fields.length} question{fields.length !== 1 && 's'} • ~{Math.ceil(fields.length * 0.5)} min • <span className="text-red-200">*</span> = required</p>
         </div>
         {/* Mock progress bar */}
         <div className="bg-white border-x border-slate-200 px-4 py-2.5">
@@ -552,7 +581,7 @@ function PreviewView({ title, description, fields }) {
                 {f.label || 'Untitled question'}
                 {f.is_required && <span className="text-rose-400 ml-1">*</span>}
               </p>
-              {f.description && <p className="text-xs text-slate-500 mb-3 italic">{f.description}</p>}
+              {f.description && <PreviewDescription text={f.description} />}
               <FieldInput field={f} value={undefined} onChange={() => {}} onToggleMulti={() => {}} disabled />
             </div>
           ))}
@@ -951,6 +980,10 @@ export default function SurveyBuilderPage() {
 
   useEffect(() => { loadForms(); loadGroups(); }, []);
 
+  /* Infer role context from URL path for display purposes */
+  const isAdminContext = window.location.pathname.startsWith('/surveys');
+  const pageTitle = isAdminContext ? 'Survey Management' : 'Survey Forms';
+
   const showToast = (msg) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
@@ -1033,7 +1066,20 @@ export default function SurveyBuilderPage() {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center py-20"><p className="text-slate-400 text-base">Loading forms...</p></div>;
+  if (loading) return (
+    <div className="max-w-4xl mx-auto">
+      <div className="flex items-center justify-between mb-6"><div className="h-7 w-40 bg-slate-200 rounded-lg animate-pulse" /><div className="h-10 w-28 bg-slate-200 rounded-xl animate-pulse" /></div>
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="bg-white rounded-xl border border-slate-200 p-5 animate-pulse">
+            <div className="flex items-center gap-2.5 mb-2"><div className="h-5 w-2/3 bg-slate-200 rounded" /><div className="h-5 w-16 bg-slate-100 rounded-full" /></div>
+            <div className="h-4 w-full bg-slate-100 rounded mb-3" />
+            <div className="flex items-center gap-3"><div className="h-3 w-20 bg-slate-100 rounded" /><div className="h-3 w-16 bg-slate-100 rounded" /><div className="h-3 w-24 bg-slate-100 rounded" /></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -1046,6 +1092,7 @@ export default function SurveyBuilderPage() {
           onDelete={handleDelete}
           onPublish={handlePublishFromList}
           onUnpublish={handleUnpublish}
+          pageTitle={pageTitle}
         />
       )}
       {view === 'builder' && (
@@ -1058,17 +1105,11 @@ export default function SurveyBuilderPage() {
         />
       )}
 
-      {/* #15 — Fixed toast: slide-up + fade instead of bounce */}
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50"
-          style={{ animation: 'toastSlideUp 0.3s ease-out, toastFadeOut 0.4s ease-in 2.1s forwards' }}>
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-[toastSlideUp_0.3s_ease-out]">
           <div className="bg-slate-800 text-white px-5 py-2.5 rounded-xl shadow-lg text-sm font-medium">{toast}</div>
         </div>
       )}
-      <style>{`
-        @keyframes toastSlideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes toastFadeOut { from { opacity: 1; } to { opacity: 0; } }
-      `}</style>
     </div>
   );
 }
