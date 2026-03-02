@@ -2,10 +2,11 @@
   Survey Builder sub-components — used by SurveyBuilderPage.
 
   Exports:
-    FieldCard      – collapsible field editor card
+    FieldCard      – collapsible field editor card (with drag handle)
     AddFieldPanel  – modal to pick a new field type
     FIELD_TYPES    – registry of available types
     newField       – factory to create a blank field
+    uid            – unique ID generator
 */
 import { useState } from 'react';
 
@@ -23,6 +24,7 @@ const TrashIco = () => <Svg size={16} d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01
 const ChevUp   = () => <Svg size={14} d="M18 15l-6-6-6 6" />;
 const ChevDn   = () => <Svg size={14} d="M6 9l6 6 6-6" />;
 const CopyIco  = () => <Svg size={15} d="M8 4H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M16 4h2a2 2 0 012 2v6a2 2 0 01-2 2h-8a2 2 0 01-2-2V6a2 2 0 012-2" />;
+const GripIco  = () => <Svg size={16} sw={2} d={<><circle cx="9" cy="5" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="19" r="1"/></>} />;
 
 
 /* ═══════════════════════════════════════════
@@ -82,7 +84,6 @@ function OptionEditor({ options, onChange }) {
   return (
     <div className="mt-3 space-y-2">
       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Answer Options</p>
-
       {options.map((opt, i) => (
         <div key={opt.id} className="flex items-center gap-2 group/opt">
           <span className="text-xs text-slate-400 w-5 text-right font-mono">{i + 1}.</span>
@@ -104,7 +105,6 @@ function OptionEditor({ options, onChange }) {
           )}
         </div>
       ))}
-
       <button onClick={add}
         className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-800 transition mt-1">
         <PlusIco /> Add option
@@ -137,7 +137,6 @@ function LikertConfig({ field, onChange }) {
   return (
     <div className="mt-3 space-y-3">
       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Likert Scale</p>
-
       <div className="flex gap-3">
         <div className="flex-1">
           <label className="text-xs text-slate-500">Min value</label>
@@ -162,7 +161,6 @@ function LikertConfig({ field, onChange }) {
               focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
         </div>
       </div>
-
       <div className="space-y-1.5">
         <label className="text-xs text-slate-500">Scale labels ({count})</label>
         {Array.from({ length: count }, (_, i) => (
@@ -184,9 +182,14 @@ function LikertConfig({ field, onChange }) {
 
 
 /* ═══════════════════════════════════════════
-   FIELD CARD — collapsible editor for one field
+   FIELD CARD — collapsible editor for one field.
+   Supports drag-and-drop via native HTML5 DnD.
    ═══════════════════════════════════════════ */
-export function FieldCard({ field, index, total, isExpanded, isSelected, onToggle, onSelect, onUpdate, onRemove, onDuplicate, onMove }) {
+export function FieldCard({
+  field, index, total, isExpanded, isSelected,
+  onToggle, onSelect, onUpdate, onRemove, onDuplicate, onMove,
+  onDragStart, onDragOver, onDrop,
+}) {
   const [showDesc, setShowDesc] = useState(false);
   const info = FIELD_TYPES.find((t) => t.value === field.field_type) || {};
   const hasOpts = ['single_select', 'multi_select', 'dropdown'].includes(field.field_type);
@@ -194,17 +197,29 @@ export function FieldCard({ field, index, total, isExpanded, isSelected, onToggl
   const hasDescription = !!(field.description);
 
   return (
-    <div className={`bg-white rounded-xl border transition-all duration-200
-      ${isSelected
-        ? 'border-rose-300 ring-1 ring-rose-100'
-        : isExpanded
-          ? 'border-blue-300 shadow-md ring-1 ring-blue-50'
-          : 'border-slate-200 shadow-sm hover:border-slate-300'
-      }`}>
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', String(index));
+        onDragStart?.(index);
+      }}
+      onDragOver={(e) => { e.preventDefault(); onDragOver?.(index); }}
+      onDrop={(e) => { e.preventDefault(); onDrop?.(index); }}
+      className={`bg-white rounded-xl border transition-all duration-200
+        ${isSelected
+          ? 'border-rose-300 ring-1 ring-rose-100'
+          : isExpanded
+            ? 'border-blue-300 shadow-md ring-1 ring-blue-50'
+            : 'border-slate-200 shadow-sm hover:border-slate-300'
+        }`}>
 
       {/* Header — always visible */}
-      <div className="flex items-center gap-3 px-4 py-3">
-        {/* Checkbox for multi-select */}
+      <div className="flex items-center gap-2 px-4 py-3">
+        {/* Drag handle */}
+        <span className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition shrink-0">
+          <GripIco />
+        </span>
+
         {onSelect && (
           <input type="checkbox" checked={!!isSelected}
             onChange={onSelect}
@@ -243,9 +258,7 @@ export function FieldCard({ field, index, total, isExpanded, isSelected, onToggl
       {isExpanded && (
         <div className="px-4 pb-4 border-t border-slate-100 pt-3 space-y-3">
           <div>
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Question Text
-            </label>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Question Text</label>
             <input value={field.label}
               onChange={(e) => onUpdate({ label: e.target.value })}
               placeholder="Enter your question…"
@@ -253,26 +266,19 @@ export function FieldCard({ field, index, total, isExpanded, isSelected, onToggl
                 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition" />
           </div>
 
-          {/* Expandable description */}
           <div>
             <button onClick={() => setShowDesc(!showDesc)}
               className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800 transition">
               <Svg size={13} d={showDesc ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'} />
               {showDesc ? 'Hide description' : (hasDescription ? 'Show description' : 'Add description')}
             </button>
-
             {showDesc && (
               <div className="mt-2">
-                <textarea
-                  value={field.description || ''}
-                  onChange={(e) => onUpdate({ description: e.target.value })}
-                  placeholder="Add helper text that participants will see below this question…"
-                  rows={2}
+                <textarea value={field.description || ''} onChange={(e) => onUpdate({ description: e.target.value })}
+                  placeholder="Add helper text that participants will see below this question…" rows={2}
                   className="w-full px-3 py-2 text-sm border border-blue-200 rounded-lg bg-blue-50/50
                     focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition resize-none placeholder-slate-400" />
-                <p className="text-xs text-slate-400 mt-1">
-                  This description appears below the question text when participants fill out the form.
-                </p>
+                <p className="text-xs text-slate-400 mt-1">This description appears below the question text when participants fill out the form.</p>
               </div>
             )}
           </div>
@@ -285,17 +291,10 @@ export function FieldCard({ field, index, total, isExpanded, isSelected, onToggl
               Required
             </label>
             <div className="flex-1" />
-            <button onClick={onDuplicate}
-              className="flex items-center gap-1 text-xs text-slate-400 hover:text-blue-600 transition">
-              <CopyIco /> Duplicate
-            </button>
-            <button onClick={onRemove}
-              className="flex items-center gap-1 text-xs text-slate-400 hover:text-rose-500 transition">
-              <TrashIco /> Delete
-            </button>
+            <button onClick={onDuplicate} className="flex items-center gap-1 text-xs text-slate-400 hover:text-blue-600 transition"><CopyIco /> Duplicate</button>
+            <button onClick={onRemove} className="flex items-center gap-1 text-xs text-slate-400 hover:text-rose-500 transition"><TrashIco /> Delete</button>
           </div>
 
-          {/* Type-specific config */}
           {hasOpts && <OptionEditor options={field.options} onChange={(opts) => onUpdate({ options: opts })} />}
           {isLikert && <LikertConfig field={field} onChange={(data) => onUpdate(data)} />}
         </div>
@@ -310,24 +309,18 @@ export function FieldCard({ field, index, total, isExpanded, isSelected, onToggl
    ═══════════════════════════════════════════ */
 export function AddFieldPanel({ onAdd, onClose }) {
   return (
-    <div className="fixed inset-0 bg-black/30 z-50 flex items-end sm:items-center justify-center p-4"
-      onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
-        onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100">
           <h3 className="text-base font-bold text-slate-800">Add a Field</h3>
           <p className="text-xs text-slate-500 mt-0.5">Choose a field type for your question</p>
         </div>
-
         <div className="p-3 grid grid-cols-2 gap-2 max-h-80 overflow-y-auto">
           {FIELD_TYPES.map((t) => (
-            <button key={t.value}
-              onClick={() => { onAdd(t.value); onClose(); }}
+            <button key={t.value} onClick={() => { onAdd(t.value); onClose(); }}
               className="flex items-start gap-3 p-3 rounded-xl border border-slate-200
                 hover:border-blue-300 hover:bg-blue-50/50 transition-all text-left group">
-              <span className="text-xl mt-0.5 w-7 text-center group-hover:scale-110 transition-transform">
-                {t.icon}
-              </span>
+              <span className="text-xl mt-0.5 w-7 text-center group-hover:scale-110 transition-transform">{t.icon}</span>
               <div>
                 <p className="text-sm font-semibold text-slate-800">{t.label}</p>
                 <p className="text-xs text-slate-400 mt-0.5">{t.desc}</p>
@@ -335,12 +328,8 @@ export function AddFieldPanel({ onAdd, onClose }) {
             </button>
           ))}
         </div>
-
         <div className="px-5 py-3 border-t border-slate-100 bg-slate-50">
-          <button onClick={onClose}
-            className="text-sm text-slate-500 hover:text-slate-700 font-medium transition">
-            Cancel
-          </button>
+          <button onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 font-medium transition">Cancel</button>
         </div>
       </div>
     </div>
