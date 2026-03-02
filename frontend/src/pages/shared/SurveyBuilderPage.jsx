@@ -151,7 +151,7 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
   const [showFilters, setShowFilters]   = useState(false);
   const [selected, setSelected]         = useState(new Set());
   const [modal, setModal]               = useState(null);
-  const [publishGroup, setPublishGroup] = useState('');
+  const [publishGroups, setPublishGroups] = useState(new Set());
 
   const hasDateFilter  = dateFrom || dateTo;
   const hasGroupFilter = groupFilter !== 'ALL';
@@ -202,14 +202,15 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
     setModal(null);
   };
   const handleConfirmPublish = () => {
-    if (!publishGroup) return;
+    if (publishGroups.size === 0) return;
+    const groupIds = [...publishGroups];
     modal.ids.forEach((id) => {
       const f = forms.find((x) => x.form_id === id);
-      if (f && f.status === 'DRAFT') onPublish(id, publishGroup);
+      if (f && f.status === 'DRAFT') onPublish(id, groupIds);
     });
     setSelected((prev) => { const n = new Set(prev); modal.ids.forEach((id) => n.delete(id)); return n; });
     setModal(null);
-    setPublishGroup('');
+    setPublishGroups(new Set());
   };
   const handleConfirmUnpublish = () => {
     modal.ids.forEach((id) => {
@@ -487,17 +488,41 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
         </ConfirmModal>
       )}
 
-      {/* ── PUBLISH MODAL ── */}
+      {/* ── PUBLISH MODAL (multi-group) ── */}
       {modal?.type === 'publish' && (
         <ConfirmModal title={modal.formTitle ? `Publish "${modal.formTitle}"` : 'Publish Forms'}
-          message={modal.formTitle ? `Select a group to assign "${modal.formTitle}" to.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select a group to assign.`}
-          confirmLabel="Publish" confirmClass="bg-emerald-600 hover:bg-emerald-700" onConfirm={handleConfirmPublish}
-          onClose={() => { setModal(null); setPublishGroup(''); }} disabled={!publishGroup}>
-          <select value={publishGroup} onChange={(e) => setPublishGroup(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
-            <option value="">-- Select Group --</option>
-            {groups.map((g) => <option key={g.group_id} value={g.group_id}>{g.name}</option>)}
-          </select>
+          message={modal.formTitle ? `Assign "${modal.formTitle}" to one or more groups.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select groups to assign.`}
+          confirmLabel={publishGroups.size > 1 ? `Publish to ${publishGroups.size} Groups` : 'Publish'}
+          confirmClass="bg-emerald-600 hover:bg-emerald-700" onConfirm={handleConfirmPublish}
+          onClose={() => { setModal(null); setPublishGroups(new Set()); }} disabled={publishGroups.size === 0}>
+          <div className="mb-1">
+            <button onClick={() => {
+              if (publishGroups.size === groups.length) setPublishGroups(new Set());
+              else setPublishGroups(new Set(groups.map((g) => g.group_id)));
+            }} className="text-xs text-blue-600 hover:text-blue-800 font-semibold mb-2 transition">
+              {publishGroups.size === groups.length ? 'Deselect all' : 'Select all'}
+            </button>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              {groups.map((g) => {
+                const checked = publishGroups.has(g.group_id);
+                return (
+                  <label key={g.group_id}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
+                      checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}>
+                    <input type="checkbox" checked={checked}
+                      onChange={() => setPublishGroups((prev) => { const n = new Set(prev); n.has(g.group_id) ? n.delete(g.group_id) : n.add(g.group_id); return n; })}
+                      className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-400" />
+                    <span className="text-sm font-medium text-slate-700 truncate flex-1">{g.name}</span>
+                    {checked && <span className="text-emerald-600 shrink-0"><Svg size={14} sw={2.5} d={<polyline points="20 6 9 17 4 12" />} /></span>}
+                  </label>
+                );
+              })}
+            </div>
+            {publishGroups.size > 0 && (
+              <p className="text-xs text-emerald-600 font-medium mt-2">{publishGroups.size} group{publishGroups.size > 1 ? 's' : ''} selected</p>
+            )}
+          </div>
         </ConfirmModal>
       )}
 
@@ -595,35 +620,88 @@ function PreviewView({ title, description, fields }) {
 
 
 /* ══════════════════════════════════════════════
-   PUBLISH MODAL (from builder — uses api.listGroups)
+   PUBLISH MODAL — multi-group checkbox select
+   Used by BuilderView; fetches groups via api.listGroups()
    ══════════════════════════════════════════════ */
-function PublishModal({ onClose, onConfirm }) {
+function PublishModal({ onClose, onConfirm, title: formTitle }) {
   const [groups, setGroups] = useState([]);
-  const [selectedGroup, setSelectedGroup] = useState('');
+  const [selectedGroups, setSelectedGroups] = useState(new Set());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api.listGroups().then((data) => { setGroups(data); setLoading(false); }).catch(() => setLoading(false));
   }, []);
 
+  const toggleGroup = (gid) => {
+    setSelectedGroups((prev) => {
+      const next = new Set(prev);
+      next.has(gid) ? next.delete(gid) : next.add(gid);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    if (selectedGroups.size === groups.length) setSelectedGroups(new Set());
+    else setSelectedGroups(new Set(groups.map((g) => g.group_id)));
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-        <h3 className="text-lg font-bold text-slate-800 mb-2">Publish Survey</h3>
-        <p className="text-sm text-slate-500 mb-4">Select a group to assign this survey to.</p>
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-slate-800 mb-1">Publish Survey</h3>
+        <p className="text-sm text-slate-500 mb-4">
+          {formTitle ? `Assign "${formTitle}" to one or more groups.` : 'Select groups to assign this survey to.'}
+        </p>
         {loading ? (
-          <p className="text-sm text-slate-400">Loading groups...</p>
+          <div className="space-y-2 mb-4">
+            {[1, 2, 3].map((i) => <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />)}
+          </div>
+        ) : groups.length === 0 ? (
+          <div className="text-center py-6 mb-4">
+            <p className="text-sm text-slate-400">No groups available.</p>
+            <p className="text-xs text-slate-400 mt-1">Create a participant group first.</p>
+          </div>
         ) : (
-          <select value={selectedGroup} onChange={(e) => setSelectedGroup(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-200 rounded-lg mb-4 text-sm">
-            <option value="">-- Select Group --</option>
-            {groups.map((g) => <option key={g.group_id} value={g.group_id}>{g.name}</option>)}
-          </select>
+          <div className="mb-4">
+            <button onClick={selectAll}
+              className="text-xs text-blue-600 hover:text-blue-800 font-semibold mb-2 transition">
+              {selectedGroups.size === groups.length ? 'Deselect all' : 'Select all'}
+            </button>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              {groups.map((g) => {
+                const checked = selectedGroups.has(g.group_id);
+                return (
+                  <label key={g.group_id}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
+                      checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleGroup(g.group_id)}
+                      className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-400" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium text-slate-700 block truncate">{g.name}</span>
+                    </div>
+                    {checked && (
+                      <span className="text-emerald-600 shrink-0">
+                        <Svg size={14} sw={2.5} d={<polyline points="20 6 9 17 4 12" />} />
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+            {selectedGroups.size > 0 && (
+              <p className="text-xs text-emerald-600 font-medium mt-2">
+                {selectedGroups.size} group{selectedGroups.size > 1 ? 's' : ''} selected
+              </p>
+            )}
+          </div>
         )}
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium">Cancel</button>
-          <button onClick={() => onConfirm(selectedGroup)} disabled={!selectedGroup}
-            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold disabled:opacity-50">Publish</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium hover:text-slate-700 transition">Cancel</button>
+          <button onClick={() => onConfirm([...selectedGroups])} disabled={selectedGroups.size === 0}
+            className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition">
+            Publish{selectedGroups.size > 1 ? ` to ${selectedGroups.size} Groups` : ''}
+          </button>
         </div>
       </div>
     </div>
@@ -897,7 +975,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish }) {
       )}
 
       {showPublish && (
-        <PublishModal onClose={() => setShowPublish(false)} onConfirm={(groupId) => onPublish(form, groupId)} />
+        <PublishModal title={title} onClose={() => setShowPublish(false)} onConfirm={(groupIds) => onPublish(form, groupIds)} />
       )}
 
       {showUnpublish && (
@@ -1017,7 +1095,7 @@ export default function SurveyBuilderPage() {
     }
   };
 
-  const handlePublishFromBuilder = async (formData, groupId) => {
+  const handlePublishFromBuilder = async (formData, groupIds) => {
     try {
       let formId = formData.form_id;
       if (!formId || formId.startsWith('tmp-')) {
@@ -1028,8 +1106,10 @@ export default function SurveyBuilderPage() {
         const payload = transformForSave(formData);
         await api.updateForm(formId, payload);
       }
-      await api.publishForm(formId, groupId);
-      showToast('Form published!');
+      // Publish to each selected group
+      const ids = Array.isArray(groupIds) ? groupIds : [groupIds];
+      await Promise.all(ids.map((gid) => api.publishForm(formId, gid)));
+      showToast(ids.length > 1 ? `Published to ${ids.length} groups!` : 'Form published!');
       handleBack();
     } catch (err) {
       showToast('Error publishing form');
@@ -1046,10 +1126,11 @@ export default function SurveyBuilderPage() {
     }
   };
 
-  const handlePublishFromList = async (formId, groupId) => {
+  const handlePublishFromList = async (formId, groupIds) => {
     try {
-      await api.publishForm(formId, groupId);
-      showToast('Form published!');
+      const ids = Array.isArray(groupIds) ? groupIds : [groupIds];
+      await Promise.all(ids.map((gid) => api.publishForm(formId, gid)));
+      showToast(ids.length > 1 ? `Published to ${ids.length} groups!` : 'Form published!');
       loadForms();
     } catch (err) {
       showToast('Error publishing form');
