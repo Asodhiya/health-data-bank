@@ -154,8 +154,12 @@ export default function SurveyFillPage() {
               const parsed = JSON.parse(draft);
               setAnswers(parsed.answers || {});
               if (parsed.savedAt) setLastSavedAt(new Date(parsed.savedAt));
-              // #15 — Return-to-position: scroll to last answered field
-              if (parsed.lastFieldId) {
+
+              // If previously submitted via this client, enter read-only mode
+              if (parsed.submitted) {
+                isReadOnly.current = true;
+              } else if (parsed.lastFieldId) {
+                // #15 — Return-to-position: scroll to last answered field
                 requestAnimationFrame(() => {
                   setTimeout(() => {
                     document.getElementById(`q-${parsed.lastFieldId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -321,7 +325,16 @@ export default function SurveyFillPage() {
 
   const handleSaveExit = () => { handleManualSave(); navigate('/participant/survey'); };
   const handleSubmitClick = () => { if (!validate()) return; setShowSubmitConfirm(true); };
-  const handleConfirmSubmit = () => { localStorage.removeItem(draftKey(id)); setSubmitted(true); setShowSubmitConfirm(false); };
+  const handleConfirmSubmit = () => {
+    // Persist submission so it survives page reload
+    localStorage.setItem(draftKey(id), JSON.stringify({
+      answers,
+      savedAt: new Date().toISOString(),
+      submitted: true,
+    }));
+    setSubmitted(true);
+    setShowSubmitConfirm(false);
+  };
   const handleBackClick = () => {
     if (isReadOnly.current) { navigate('/participant/survey'); return; }
     if (hasAnyAnswers) setShowExitPrompt(true);

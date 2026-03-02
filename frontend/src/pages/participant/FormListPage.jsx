@@ -193,7 +193,36 @@ export default function FormListPage() {
 
   useEffect(() => {
     /* TODO: api.getDeployedForms().then(setForms)... */
-    const timer = setTimeout(() => { setForms(MOCK_DEPLOYED_FORMS); setLoading(false); }, 300);
+    const timer = setTimeout(() => {
+      // Hydrate mock data with any localStorage submission/draft status
+      const hydrated = MOCK_DEPLOYED_FORMS.map((form) => {
+        try {
+          const raw = localStorage.getItem(`hdb_draft_${form.form_id}`);
+          if (!raw) return form;
+          const parsed = JSON.parse(raw);
+          if (parsed.submitted) {
+            return {
+              ...form,
+              status: 'completed',
+              answered: form.question_count,
+              submitted_at: parsed.savedAt
+                ? new Date(parsed.savedAt).toISOString().split('T')[0]
+                : undefined,
+            };
+          }
+          // Draft in progress — count answered fields
+          const answeredCount = Object.values(parsed.answers || {}).filter(
+            (v) => Array.isArray(v) ? v.length > 0 : v !== undefined && v !== '' && v !== null
+          ).length;
+          if (answeredCount > 0) {
+            return { ...form, status: 'in_progress', answered: answeredCount };
+          }
+        } catch { /* ignore malformed entries */ }
+        return form;
+      });
+      setForms(hydrated);
+      setLoading(false);
+    }, 300);
     return () => clearTimeout(timer);
   }, []);
 
