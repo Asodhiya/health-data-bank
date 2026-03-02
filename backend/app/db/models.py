@@ -278,9 +278,9 @@ class FormSubmission(Base):
     form_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id"))
     participant_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("participant_profile.participant_id"))
     group_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("groups.group_id"))
-    submitted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    submitted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    #submitted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()")) #what it used to be
     is_valid: Mapped[bool | None] = mapped_column(Boolean, server_default=text("TRUE"))
-
 
 class SubmissionAnswer(Base):
     __tablename__ = "submission_answers"
