@@ -78,6 +78,12 @@ export const api = {
       method: 'POST',
     }),
 
+  // Returns which groups a form is currently deployed to
+  // Backend endpoint: GET /form_management/{formId}/deployments
+  // Falls back gracefully if endpoint doesn't exist yet
+  getFormDeployments: (formId) =>
+    request(`/form_management/${formId}/deployments`),
+
   // ── Survey Fill (participant) ──
   getDeployedForms: () =>
     request('/surveys/deployed'),

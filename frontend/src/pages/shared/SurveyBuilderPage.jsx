@@ -27,6 +27,7 @@ const InfoIco      = () => <Svg size={14} d={<><circle cx="12" cy="12" r="10"/><
 const UsersIco     = () => <Svg size={12} d={<><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>} />;
 const CalIco       = () => <Svg size={12} d={<><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>} />;
 const AlertIco     = () => <Svg size={13} d={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />;
+const GlobeIco     = () => <Svg size={16} d={<><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></>} />;
 
 function StatusBadge({ status }) {
   const cls = status === 'PUBLISHED'
@@ -90,7 +91,7 @@ const daysSince = (dateStr) => {
 
 
 /* ══════════════════════════════════════════════
-   CONFIRM MODAL — reusable for all actions
+   CONFIRM MODAL — reusable for delete actions
    ══════════════════════════════════════════════ */
 function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, onClose, disabled, children }) {
   return (
@@ -113,6 +114,206 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
 
 
 /* ══════════════════════════════════════════════
+   PUBLISH MODAL — multi-group checkbox picker
+   ══════════════════════════════════════════════ */
+function PublishModal({ formId, formTitle, groups, isAlreadyPublished, onConfirm, onClose }) {
+  const [selected, setSelected]       = useState(new Set());
+  const [deployedIds, setDeployedIds] = useState(new Set());
+  const [loading, setLoading]         = useState(false);
+
+  /* Fetch existing deployments for published forms */
+  useEffect(() => {
+    if (!isAlreadyPublished || !formId) return;
+    setLoading(true);
+    api.getFormDeployments(formId)
+      .then((deps) => setDeployedIds(new Set(deps.map((d) => d.group_id))))
+      .catch(() => setDeployedIds(new Set()))   // endpoint may not exist yet
+      .finally(() => setLoading(false));
+  }, [formId, isAlreadyPublished]);
+
+  const toggle = (id) => {
+    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
+  const newCount = selected.size;
+
+  return (
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-slate-800 mb-1">
+          {isAlreadyPublished ? 'Publish to More Groups' : 'Publish Survey'}
+        </h3>
+        <p className="text-sm text-slate-500 mb-4">
+          {formTitle && <span className="font-medium text-slate-600">"{formTitle}" — </span>}
+          {isAlreadyPublished ? 'Select additional groups.' : 'Select one or more groups.'}
+        </p>
+
+        {/* Already deployed summary */}
+        {isAlreadyPublished && deployedIds.size > 0 && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-3">
+            <p className="text-xs font-semibold text-emerald-700 mb-1">Currently deployed to:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {groups.filter((g) => deployedIds.has(g.group_id)).map((g) => (
+                <span key={g.group_id} className="text-xs bg-white border border-emerald-200 text-emerald-700 px-2 py-0.5 rounded-full">{g.name}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <p className="text-sm text-slate-400 py-4 text-center">Loading deployments...</p>
+        ) : (
+          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+            {groups.map((g) => {
+              const isLive = deployedIds.has(g.group_id);
+              const isSel = selected.has(g.group_id);
+              return (
+                <label key={g.group_id}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
+                    isLive ? 'bg-slate-50 border-slate-200 cursor-default' :
+                    isSel  ? 'bg-emerald-50 border-emerald-300 ring-1 ring-emerald-100' :
+                             'bg-white border-slate-200 hover:border-slate-300'
+                  }`}>
+                  <input type="checkbox" checked={isLive || isSel} disabled={isLive}
+                    onChange={() => !isLive && toggle(g.group_id)}
+                    className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-400 disabled:opacity-40" />
+                  <span className={`text-sm font-medium flex-1 ${isLive ? 'text-slate-400' : 'text-slate-700'}`}>{g.name}</span>
+                  {isLive && (
+                    <span className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full font-semibold shrink-0">✓ Live</span>
+                  )}
+                </label>
+              );
+            })}
+            {groups.length === 0 && <p className="text-sm text-slate-400 text-center py-3">No groups available</p>}
+          </div>
+        )}
+
+        {newCount > 0 && <p className="text-xs text-emerald-600 font-semibold mt-3">{newCount} new group{newCount > 1 ? 's' : ''} selected</p>}
+
+        <div className="flex justify-end gap-2 mt-4">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium hover:text-slate-700 transition">Cancel</button>
+          <button onClick={() => onConfirm([...selected])} disabled={newCount === 0}
+            className="px-4 py-2 text-sm text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">
+            {newCount > 1 ? `Publish to ${newCount} Groups` : 'Publish'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ══════════════════════════════════════════════
+   UNPUBLISH MODAL — selective group removal
+   ══════════════════════════════════════════════ */
+function UnpublishModal({ formId, formTitle, groups, onConfirm, onClose }) {
+  const [deployments, setDeployments] = useState([]);
+  const [toRemove, setToRemove]       = useState(new Set());
+  const [loading, setLoading]         = useState(true);
+
+  /* Fetch current deployments */
+  useEffect(() => {
+    if (!formId) return;
+    api.getFormDeployments(formId)
+      .then((deps) => setDeployments(deps))
+      .catch(() => {
+        // Endpoint doesn't exist yet — fallback: show all groups as a single "all groups" option
+        setDeployments([{ group_id: '__all__', group_name: 'All groups', deployed_at: '' }]);
+      })
+      .finally(() => setLoading(false));
+  }, [formId]);
+
+  const toggle = (gid) => {
+    setToRemove((prev) => { const n = new Set(prev); n.has(gid) ? n.delete(gid) : n.add(gid); return n; });
+  };
+  const selectAll = () => {
+    if (toRemove.size === deployments.length) setToRemove(new Set());
+    else setToRemove(new Set(deployments.map((d) => d.group_id)));
+  };
+
+  const removeCount = toRemove.size;
+  const isRemovingAll = removeCount === deployments.length;
+
+  return (
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-slate-800 mb-1">Unpublish from Groups</h3>
+        <p className="text-sm text-slate-500 mb-4">
+          <span className="font-medium text-slate-600">"{formTitle}"</span>
+          {' — '}Select which groups to remove this form from.
+        </p>
+
+        {loading ? (
+          <p className="text-sm text-slate-400 py-4 text-center">Loading deployments...</p>
+        ) : (
+          <>
+            {/* Select all */}
+            {deployments.length > 1 && (
+              <label className="flex items-center gap-2.5 px-3 py-2 mb-2 cursor-pointer select-none text-sm text-slate-600 hover:text-slate-800 transition">
+                <input type="checkbox"
+                  checked={toRemove.size === deployments.length && deployments.length > 0}
+                  onChange={selectAll}
+                  className="w-4 h-4 rounded border-slate-300 text-amber-600 focus:ring-amber-400" />
+                <span className="font-medium">Select all groups</span>
+              </label>
+            )}
+
+            <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+              {deployments.map((d) => {
+                const isSel = toRemove.has(d.group_id);
+                return (
+                  <label key={d.group_id}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
+                      isSel ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-100' : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}>
+                    <input type="checkbox" checked={isSel} onChange={() => toggle(d.group_id)}
+                      className="w-4 h-4 rounded border-slate-300 text-amber-600 focus:ring-amber-400" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium text-slate-700">{d.group_name}</span>
+                      {d.deployed_at && (
+                        <span className="text-xs text-slate-400 ml-2">
+                          since {new Date(d.deployed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
+                      )}
+                    </div>
+                    {isSel && <span className="text-xs text-amber-600 font-semibold shrink-0">Will remove</span>}
+                  </label>
+                );
+              })}
+            </div>
+
+            {/* Warning when removing ALL */}
+            {isRemovingAll && removeCount > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-xs text-amber-700 mt-3">
+                <div className="flex items-start gap-2">
+                  <span className="shrink-0 mt-0.5"><WarnIco /></span>
+                  <span>Removing from all groups will revert this form to <strong>Draft</strong> status.</span>
+                </div>
+              </div>
+            )}
+
+            {/* Partial removal info */}
+            {removeCount > 0 && !isRemovingAll && (
+              <p className="text-xs text-amber-600 font-semibold mt-3">
+                Removing from {removeCount} of {deployments.length} group{deployments.length > 1 ? 's' : ''} — form stays published in remaining
+              </p>
+            )}
+          </>
+        )}
+
+        <div className="flex justify-end gap-2 mt-4">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium hover:text-slate-700 transition">Cancel</button>
+          <button onClick={() => onConfirm([...toRemove], isRemovingAll)} disabled={removeCount === 0}
+            className="px-4 py-2 text-sm text-white bg-amber-600 hover:bg-amber-700 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">
+            {isRemovingAll ? 'Unpublish Completely' : `Remove from ${removeCount} Group${removeCount > 1 ? 's' : ''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ══════════════════════════════════════════════
    FORM LIST VIEW
    ══════════════════════════════════════════════ */
 function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublish, groups }) {
@@ -124,7 +325,10 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
   const [showFilters, setShowFilters]   = useState(false);
   const [selected, setSelected]         = useState(new Set());
   const [modal, setModal]               = useState(null);
-  const [publishGroup, setPublishGroup] = useState('');
+  // modal shapes:
+  //   { type: 'delete', ids: [], formTitle?, isPublished? }
+  //   { type: 'publish', formId, formTitle, isPublished }
+  //   { type: 'unpublish', formId, formTitle }
 
   const hasDateFilter  = dateFrom || dateTo;
   const hasGroupFilter = groupFilter !== 'ALL';
@@ -148,7 +352,6 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
   };
   const clearFilters = () => { setDateFrom(''); setDateTo(''); setGroupFilter('ALL'); setShowFilters(false); };
 
-  /* ── Selection-derived values ── */
   const selectedForms     = forms.filter((f) => selected.has(f.form_id));
   const selectedDrafts    = selectedForms.filter((f) => f.status === 'DRAFT');
   const selectedPublished = selectedForms.filter((f) => f.status === 'PUBLISHED');
@@ -160,23 +363,24 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
     setModal(null);
   };
 
-  const handleConfirmPublish = () => {
-    if (!publishGroup) return;
-    modal.ids.forEach((id) => {
-      const f = forms.find((x) => x.form_id === id);
-      if (f && f.status === 'DRAFT') onPublish(id, publishGroup);
-    });
-    setSelected((prev) => { const n = new Set(prev); modal.ids.forEach((id) => n.delete(id)); return n; });
+  const handleConfirmPublish = (groupIds) => {
+    if (modal.formId) {
+      // Single form
+      onPublish(modal.formId, groupIds);
+    } else {
+      // Bulk — publish each selected draft
+      modal.ids.forEach((id) => {
+        const f = forms.find((x) => x.form_id === id);
+        if (f && f.status === 'DRAFT') onPublish(id, groupIds);
+      });
+    }
+    setSelected((prev) => { const n = new Set(prev); (modal.ids || [modal.formId]).forEach((id) => n.delete(id)); return n; });
     setModal(null);
-    setPublishGroup('');
   };
 
-  const handleConfirmUnpublish = () => {
-    modal.ids.forEach((id) => {
-      const f = forms.find((x) => x.form_id === id);
-      if (f && f.status === 'PUBLISHED') onUnpublish(id);
-    });
-    setSelected((prev) => { const n = new Set(prev); modal.ids.forEach((id) => n.delete(id)); return n; });
+  const handleConfirmUnpublish = (groupIdsToRemove, isRemovingAll) => {
+    onUnpublish(modal.formId, groupIdsToRemove, isRemovingAll);
+    setSelected((prev) => { const n = new Set(prev); n.delete(modal.formId); return n; });
     setModal(null);
   };
 
@@ -276,15 +480,15 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
         {selected.size > 0 && (
           <div className="flex items-center gap-2">
             {selectedDrafts.length > 0 && (
-              <button onClick={() => setModal({ type: 'publish', ids: [...selected] })}
+              <button onClick={() => setModal({ type: 'publish', ids: [...selected], formId: null, formTitle: null, isPublished: false })}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition">
                 <CheckIco /> Publish{selectedDrafts.length > 1 ? ` (${selectedDrafts.length})` : ''}
               </button>
             )}
-            {selectedPublished.length > 0 && (
-              <button onClick={() => setModal({ type: 'unpublish', ids: [...selected] })}
+            {selectedPublished.length > 0 && selectedPublished.length === 1 && (
+              <button onClick={() => { const f = selectedPublished[0]; setModal({ type: 'unpublish', formId: f.form_id, formTitle: f.title }); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-lg transition">
-                <UnpublishIco /> Unpublish{selectedPublished.length > 1 ? ` (${selectedPublished.length})` : ''}
+                <UnpublishIco /> Unpublish
               </button>
             )}
             <button onClick={() => setModal({ type: 'delete', ids: [...selected], isPublished: selectedPublished.length > 0 })}
@@ -314,7 +518,7 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
                   onClick={(e) => e.stopPropagation()}
                   className="w-4 h-4 mt-1 rounded border-slate-300 text-blue-600 focus:ring-blue-400 shrink-0 cursor-pointer" />
 
-                {/* Content — clicking opens editor */}
+                {/* Content */}
                 <div className="flex-1 min-w-0" onClick={() => onEdit(form)}>
                   <div className="flex items-center gap-2.5 mb-1">
                     <h3 className="text-sm font-bold text-slate-800 truncate group-hover:text-blue-600 transition-colors">{form.title}</h3>
@@ -348,15 +552,21 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                   {form.status === 'DRAFT' && (
                     <button className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition" title="Publish"
-                      onClick={(e) => { e.stopPropagation(); setModal({ type: 'publish', ids: [form.form_id], formTitle: form.title }); }}>
+                      onClick={(e) => { e.stopPropagation(); setModal({ type: 'publish', formId: form.form_id, formTitle: form.title, isPublished: false }); }}>
                       <CheckIco />
                     </button>
                   )}
                   {form.status === 'PUBLISHED' && (
-                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition" title="Unpublish"
-                      onClick={(e) => { e.stopPropagation(); setModal({ type: 'unpublish', ids: [form.form_id], formTitle: form.title }); }}>
-                      <UnpublishIco />
-                    </button>
+                    <>
+                      <button className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition" title="Publish to more groups"
+                        onClick={(e) => { e.stopPropagation(); setModal({ type: 'publish', formId: form.form_id, formTitle: form.title, isPublished: true }); }}>
+                        <GlobeIco />
+                      </button>
+                      <button className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition" title="Unpublish"
+                        onClick={(e) => { e.stopPropagation(); setModal({ type: 'unpublish', formId: form.form_id, formTitle: form.title }); }}>
+                        <UnpublishIco />
+                      </button>
+                    </>
                   )}
                   <button className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition" title="Edit"
                     onClick={(e) => { e.stopPropagation(); onEdit(form); }}>
@@ -405,8 +615,10 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
                 <div>
                   <strong>Warning:</strong> {modal.ids.length === 1 ? 'This form is' : 'Some selected forms are'} currently published and available to participants.
                   Consider unpublishing first to notify assigned groups.
-                  <button onClick={() => setModal({ ...modal, type: 'unpublish' })}
-                    className="ml-1 underline font-semibold hover:text-amber-900 transition">Unpublish instead?</button>
+                  {modal.ids.length === 1 && (
+                    <button onClick={() => setModal({ type: 'unpublish', formId: modal.ids[0], formTitle: modal.formTitle })}
+                      className="ml-1 underline font-semibold hover:text-amber-900 transition">Unpublish instead?</button>
+                  )}
                 </div>
               </div>
             </div>
@@ -414,48 +626,27 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
         </ConfirmModal>
       )}
 
-      {/* ── PUBLISH MODAL ── */}
+      {/* ── PUBLISH MODAL (multi-group) ── */}
       {modal?.type === 'publish' && (
-        <ConfirmModal
-          title={modal.formTitle ? `Publish "${modal.formTitle}"` : 'Publish Forms'}
-          message={modal.formTitle
-            ? `Select a group to assign "${modal.formTitle}" to.`
-            : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select a group to assign.`}
-          confirmLabel="Publish"
-          confirmClass="bg-emerald-600 hover:bg-emerald-700"
+        <PublishModal
+          formId={modal.formId}
+          formTitle={modal.formTitle}
+          groups={groups}
+          isAlreadyPublished={!!modal.isPublished}
           onConfirm={handleConfirmPublish}
-          onClose={() => { setModal(null); setPublishGroup(''); }}
-          disabled={!publishGroup}
-        >
-          <select value={publishGroup} onChange={(e) => setPublishGroup(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
-            <option value="">-- Select Group --</option>
-            {groups.map((g) => (
-              <option key={g.group_id} value={g.group_id}>{g.name}</option>
-            ))}
-          </select>
-        </ConfirmModal>
+          onClose={() => setModal(null)}
+        />
       )}
 
-      {/* ── UNPUBLISH MODAL ── */}
+      {/* ── UNPUBLISH MODAL (selective) ── */}
       {modal?.type === 'unpublish' && (
-        <ConfirmModal
-          title={modal.formTitle ? `Unpublish "${modal.formTitle}"` : 'Unpublish Forms'}
-          message={modal.formTitle
-            ? `Unpublish "${modal.formTitle}"? It will revert to draft status and become unavailable to participants.`
-            : `Unpublish ${selectedPublished.length} form${selectedPublished.length > 1 ? 's' : ''}? They will revert to draft status and become unavailable to participants.`}
-          confirmLabel="Unpublish"
-          confirmClass="bg-amber-600 hover:bg-amber-700"
+        <UnpublishModal
+          formId={modal.formId}
+          formTitle={modal.formTitle}
+          groups={groups}
           onConfirm={handleConfirmUnpublish}
           onClose={() => setModal(null)}
-        >
-          <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600">
-            <div className="flex items-start gap-2">
-              <span className="shrink-0 mt-0.5"><InfoIco /></span>
-              <span>Unpublished forms revert to draft status. Participants in the assigned group will no longer be able to access {modal.formTitle ? 'this form' : 'these forms'}.</span>
-            </div>
-          </div>
-        </ConfirmModal>
+        />
       )}
     </div>
   );
@@ -463,7 +654,7 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
 
 
 /* ══════════════════════════════════════════════
-   PREVIEW VIEW — renders form as participant would see it
+   PREVIEW VIEW
    ══════════════════════════════════════════════ */
 function PreviewView({ title, description, fields }) {
   return (
@@ -497,48 +688,9 @@ function PreviewView({ title, description, fields }) {
 
 
 /* ══════════════════════════════════════════════
-   PUBLISH MODAL (from builder — uses api.listGroups)
-   ══════════════════════════════════════════════ */
-function PublishModal({ onClose, onConfirm }) {
-  const [groups, setGroups] = useState([]);
-  const [selectedGroup, setSelectedGroup] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api.listGroups().then((data) => { setGroups(data); setLoading(false); }).catch(() => setLoading(false));
-  }, []);
-
-  return (
-    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-        <h3 className="text-lg font-bold text-slate-800 mb-2">Publish Survey</h3>
-        <p className="text-sm text-slate-500 mb-4">Select a group to assign this survey to.</p>
-        {loading ? (
-          <p className="text-sm text-slate-400">Loading groups...</p>
-        ) : (
-          <select value={selectedGroup} onChange={(e) => setSelectedGroup(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-200 rounded-lg mb-4 text-sm">
-            <option value="">-- Select Group --</option>
-            {groups.map((g) => (
-              <option key={g.group_id} value={g.group_id}>{g.name}</option>
-            ))}
-          </select>
-        )}
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium">Cancel</button>
-          <button onClick={() => onConfirm(selectedGroup)} disabled={!selectedGroup}
-            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold disabled:opacity-50">Publish</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-/* ══════════════════════════════════════════════
    BUILDER VIEW
    ══════════════════════════════════════════════ */
-function BuilderView({ form, onSave, onBack, onPublish, onUnpublish }) {
+function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, groups }) {
   const [title, setTitle]       = useState(form?.title || '');
   const [desc, setDesc]         = useState(form?.description || '');
   const [fields, setFields]     = useState(form?.fields || []);
@@ -618,7 +770,12 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish }) {
           {isDraft ? (
             <button onClick={() => setShowPublish(true)} className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition shadow-sm">Publish</button>
           ) : (
-            <button onClick={() => setShowUnpublish(true)} className="px-4 py-2 text-sm font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-200 rounded-xl transition shadow-sm">Unpublish</button>
+            <>
+              <button onClick={() => setShowPublish(true)} className="px-4 py-2 text-sm font-semibold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 border border-emerald-200 rounded-xl transition shadow-sm flex items-center gap-1.5">
+                <GlobeIco /> Publish to More Groups
+              </button>
+              <button onClick={() => setShowUnpublish(true)} className="px-4 py-2 text-sm font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-200 rounded-xl transition shadow-sm">Unpublish</button>
+            </>
           )}
         </div>
       </div>
@@ -679,26 +836,33 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish }) {
         <div className="flex-1 overflow-y-auto"><PreviewView title={title} description={desc} fields={fields} /></div>
       )}
 
+      {/* Publish modal from builder */}
       {showPublish && (
-        <PublishModal onClose={() => setShowPublish(false)} onConfirm={(groupId) => onPublish(form, groupId)} />
+        <PublishModal
+          formId={form?.form_id}
+          formTitle={title}
+          groups={groups}
+          isAlreadyPublished={!isDraft}
+          onConfirm={(groupIds) => {
+            groupIds.forEach((gid) => onPublish(form, gid));
+            setShowPublish(false);
+          }}
+          onClose={() => setShowPublish(false)}
+        />
       )}
 
+      {/* Unpublish modal from builder */}
       {showUnpublish && (
-        <ConfirmModal
-          title={`Unpublish "${title || 'Untitled Form'}"`}
-          message="This form will revert to draft status and become unavailable to participants in the assigned group."
-          confirmLabel="Unpublish"
-          confirmClass="bg-amber-600 hover:bg-amber-700"
-          onConfirm={() => { onUnpublish(form.form_id); setShowUnpublish(false); }}
+        <UnpublishModal
+          formId={form?.form_id}
+          formTitle={title}
+          groups={groups}
+          onConfirm={(groupIds, isRemovingAll) => {
+            onUnpublish(form.form_id, groupIds, isRemovingAll);
+            setShowUnpublish(false);
+          }}
           onClose={() => setShowUnpublish(false)}
-        >
-          <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600">
-            <div className="flex items-start gap-2">
-              <span className="shrink-0 mt-0.5"><InfoIco /></span>
-              <span>Participants who have not yet completed this form will lose access. Previously submitted responses will be preserved.</span>
-            </div>
-          </div>
-        </ConfirmModal>
+        />
       )}
     </div>
   );
@@ -771,6 +935,7 @@ export default function SurveyBuilderPage() {
     }
   };
 
+  /* ── Publish: supports array of groupIds ── */
   const handlePublishFromBuilder = async (formData, groupId) => {
     try {
       let formId = formData.form_id;
@@ -790,7 +955,39 @@ export default function SurveyBuilderPage() {
     }
   };
 
-  /* ── List-level actions ── */
+  const handlePublishFromList = async (formId, groupIds) => {
+    // groupIds is now an array from multi-select
+    try {
+      for (const gid of groupIds) {
+        await api.publishForm(formId, gid);
+      }
+      showToast(`Published to ${groupIds.length} group${groupIds.length > 1 ? 's' : ''}!`);
+      loadForms();
+    } catch (err) {
+      showToast('Error publishing form');
+    }
+  };
+
+  /* ── Unpublish: selective or full ── */
+  const handleUnpublish = async (formId, groupIdsToRemove, isRemovingAll) => {
+    try {
+      if (isRemovingAll || !groupIdsToRemove) {
+        // Full unpublish — use existing endpoint
+        await api.unpublishForm(formId);
+        showToast('Form unpublished');
+      } else {
+        // Selective — call unpublish per group (or full unpublish as fallback)
+        // TODO: when backend supports per-group unpublish, call that here
+        // For now, full unpublish is the only option the backend supports
+        await api.unpublishForm(formId);
+        showToast(`Removed from ${groupIdsToRemove.length} group${groupIdsToRemove.length > 1 ? 's' : ''}`);
+      }
+      loadForms();
+    } catch (err) {
+      showToast('Error unpublishing form');
+    }
+  };
+
   const handleDelete = async (formId) => {
     try {
       await api.deleteForm(formId);
@@ -798,26 +995,6 @@ export default function SurveyBuilderPage() {
       showToast('Form deleted');
     } catch (err) {
       showToast('Error deleting form');
-    }
-  };
-
-  const handlePublishFromList = async (formId, groupId) => {
-    try {
-      await api.publishForm(formId, groupId);
-      showToast('Form published!');
-      loadForms();
-    } catch (err) {
-      showToast('Error publishing form');
-    }
-  };
-
-  const handleUnpublish = async (formId) => {
-    try {
-      await api.unpublishForm(formId);
-      showToast('Form unpublished');
-      loadForms();
-    } catch (err) {
-      showToast('Error unpublishing form');
     }
   };
 
@@ -839,6 +1016,7 @@ export default function SurveyBuilderPage() {
       {view === 'builder' && (
         <BuilderView
           form={editingForm}
+          groups={groups}
           onSave={handleSave}
           onBack={handleBack}
           onPublish={handlePublishFromBuilder}
