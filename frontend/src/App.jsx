@@ -34,7 +34,7 @@ import FormListPage from "./pages/participant/FormListPage";
 import SurveyFillPage from "./pages/participant/SurveyFillPage";
 
 function App() {
-  const [userRole, setUserRole] = useState("researcher"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
+  const [userRole, setUserRole] = useState("participant"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
 
   return (
     <BrowserRouter>
