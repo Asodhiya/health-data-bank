@@ -44,6 +44,10 @@ class SurveyRequest(BaseModel):
 class Role_schema(BaseModel):
     role_name: str
 
+class Role_user_link(BaseModel):
+    role_name : str
+    username: str
+
 class Permissions_schema(BaseModel):
     code: str
     description: str
@@ -62,3 +66,7 @@ class UpdatePersonalInfoPayload(BaseModel):
 
 class ForgotPasswordIn(BaseModel):
     email: EmailStr
+
+class Link_role_permission_schema(BaseModel):
+    code: str
+    role_name: str
