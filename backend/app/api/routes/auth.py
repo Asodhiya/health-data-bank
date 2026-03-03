@@ -66,7 +66,7 @@ async def get_current_user(user: User = Depends(check_current_user)):
     }
 
 
-@router.post("/auth/forgot-password")
+@router.post("/forgot-password")
 async def forgot_password(payload: ForgotPasswordIn,background: BackgroundTasks,db: AsyncSession = Depends(get_db),):
     await reset_forgot_password(payload,background,db)
     return {"message": "If the email exists, a reset link has been sent."}
