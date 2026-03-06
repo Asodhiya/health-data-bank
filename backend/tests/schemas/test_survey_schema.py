@@ -9,6 +9,7 @@ What we are testing:
 
 Run with:
     pytest tests/schemas/test_survey_schema.py -v
+    pytest tests/schemas/test_survey_schema.py -v --html=tests/schemas/test_survey_schema_report.html --self-contained-html 
 """
 
 import pytest

@@ -13,6 +13,7 @@ Important:
 
 Run with:
     pytest tests/security/test_jwt.py -v
+    pytest tests/services/test_user_updates.py -v --html=tests/security/test_jwt_report.html --self-contained-html
 """
 
 import pytest

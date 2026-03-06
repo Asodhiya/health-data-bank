@@ -2,8 +2,8 @@ fastapi
 uvicorn
 psycopg[binary]
 python-dotenv
-pydantic
-pydantic-settings
+pydantic==2.4.0
+pydantic-settings==2.0.3
 bcrypt
 python-jose[cryptography]
 email-validator
