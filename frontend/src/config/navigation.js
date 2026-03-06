@@ -94,9 +94,9 @@ export const DASHBOARD_NAV = [
   /* =====================
      PROFILE (per-role path)
   ====================== */
-  { label: "Profile", to: "/admin/profile",      roles: ["admin"] },
-  { label: "Profile", to: "/researcher/profile",  roles: ["researcher"] },
-  { label: "Profile", to: "/caretaker/profile",   roles: ["caretaker"] },
+  { label: "Profile", to: "/admin/profile", roles: ["admin"] },
+  { label: "Profile", to: "/researcher/profile", roles: ["researcher"] },
+  { label: "Profile", to: "/caretaker/profile", roles: ["caretaker"] },
 
   {
     label: "Logout",
@@ -107,33 +107,18 @@ export const DASHBOARD_NAV = [
 
 export const PARTICIPANT_NAV = [
   {
-    label: "My Dashboard",
+    label: "Home",
     to: "/participant",
     roles: ["participant"],
   },
   {
-    label: "Fill Survey / Check-in",
+    label: "Fill Survey",
     to: "/participant/survey",
     roles: ["participant"],
   },
   {
     label: "Health Goals",
-    to: "/participant/history",
-    roles: ["participant"],
-  },
-  {
-    label: "Messages (bell icon)",
-    to: "/participant/messages",
-    roles: ["participant"],
-  },
-  {
-    label: "Profile",
-    to: "/participant/profile",
-    roles: ["participant"],
-  },
-  {
-    label: "Logout",
-    to: "/logout",
+    to: "/participant/healthgoals",
     roles: ["participant"],
   },
 ];
