@@ -5,7 +5,7 @@ from app.db.models import Role,Permission,RolePermission,User,UserRole
 from app.schemas.schemas import Role_schema,Permissions_schema,Role_user_link,Link_role_permission_schema
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from app.db.queries.RoleQuery import RoleQuery
+from app.db.queries.Queries import RoleQuery
 
 
 async def addroles(Payload : Role_schema, db:AsyncSession):

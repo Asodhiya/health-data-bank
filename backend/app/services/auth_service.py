@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone
 from app.schemas.schemas import ForgotPasswordIn,Role_user_link
 from app.services.email_sender import send_reset_email
-from app.db.queries.RoleQuery import RoleQuery
+from app.db.queries.Queries import RoleQuery
 
 async def authenticate_user(email: str, password: str, db: AsyncSession):
     """Checks email and password if in db or not"""
@@ -93,6 +93,7 @@ async def create_user_with_role(payload: UserSignup, role_name: str, db: AsyncSe
         await db.flush()
 
         await role_query.assign_role_to_user(user,role)
+        await role_query.put_role(user.user_id, role_name)
     await db.refresh(user)
     return user
 

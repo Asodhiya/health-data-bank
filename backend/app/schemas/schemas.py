@@ -70,3 +70,16 @@ class ForgotPasswordIn(BaseModel):
 class Link_role_permission_schema(BaseModel):
     code: str
     role_name: str
+
+class SignupInviteRequest(BaseModel):
+    email: EmailStr
+    target_role: str
+
+class HealthGoalPayload(BaseModel):
+    goal_type: str
+    target_value: float
+    unit: str
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+
+

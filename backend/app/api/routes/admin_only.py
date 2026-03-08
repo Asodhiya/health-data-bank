@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status,Response,Depends
+from fastapi import APIRouter, Depends
 from app.schemas.schemas import Role_schema,Permissions_schema,Role_user_link,Link_role_permission_schema
 from app.services.role_service import addroles,viewroles,add_permissions,link_user_roles,link_role_permisson
 from app.db.session import get_db
@@ -35,3 +35,6 @@ async def give_role(Payload: Role_user_link, db:AsyncSession = Depends(get_db)):
 async def role_permission(Payload:Link_role_permission_schema,db: AsyncSession = Depends(get_db)):
     role_perm = await(link_role_permisson(Payload,db))
     return role_perm
+
+
+

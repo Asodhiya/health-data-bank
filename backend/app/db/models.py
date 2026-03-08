@@ -42,7 +42,7 @@ class User(Base):
     reset_token_hash: Mapped[str | None] = mapped_column( String,nullable=True)
     reset_token_expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True),nullable=True)
 
-    roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
+    roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan",lazy="selectin")
 
 
 class Role(Base):
@@ -55,10 +55,53 @@ class Role(Base):
     )
     role_name: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
 
-    users = relationship("UserRole", back_populates="role", cascade="all, delete-orphan")
+    users = relationship("UserRole", back_populates="role", cascade="all, delete-orphan",lazy="selectin")
     permissions = relationship("RolePermission", back_populates="role", cascade="all, delete-orphan")
 
+class SignupInvite(Base):
+    __tablename__ = "signup_invites"
 
+    invite_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("roles.role_id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False
+    )
+
+    used: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("FALSE")
+    )
+
+    invited_by: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=False
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("now()")
+    )
+
+    role = relationship("Role")
+    
 class UserRole(Base):
     __tablename__ = "user_roles"
     __table_args__ = (
@@ -73,7 +116,7 @@ class UserRole(Base):
     )
 
     user = relationship("User", back_populates="roles")
-    role = relationship("Role", back_populates="users")
+    role = relationship("Role", back_populates="users",lazy="selectin")
 
 
 class Permission(Base):

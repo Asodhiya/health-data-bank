@@ -6,7 +6,7 @@ from app.db.session import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.RBAC_service import RBACService
 from typing import Callable
-
+from app.db.models import User,UserRole,Role
 async def check_current_user(request: Request, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("token")
     if not token:
@@ -43,4 +43,5 @@ def require_permissions(*required: str) -> Callable:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing permissions: {missing}"
             )
+        return user
     return guard
