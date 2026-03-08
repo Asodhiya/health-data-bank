@@ -76,9 +76,15 @@ class SignupInviteRequest(BaseModel):
     target_role: str
 
 class HealthGoalPayload(BaseModel):
-    goal_type: str
     target_value: float
     unit: str
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+
+class HealthGoalUpdate(BaseModel):
+    target_value: Optional[float] = None
+    unit: Optional[str] = None
+    status: Optional[str] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
 

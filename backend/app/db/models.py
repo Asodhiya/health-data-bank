@@ -42,7 +42,11 @@ class User(Base):
     reset_token_hash: Mapped[str | None] = mapped_column( String,nullable=True)
     reset_token_expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True),nullable=True)
 
-    roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan",lazy="selectin")
+    roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan", lazy="selectin")
+    participant_profile = relationship("ParticipantProfile", back_populates="user", uselist=False, lazy="selectin")
+    researcher_profile = relationship("ResearcherProfile", back_populates="user", uselist=False, lazy="selectin")
+    caretaker_profile = relationship("CaretakerProfile", back_populates="user", uselist=False, lazy="selectin")
+    admin_profile = relationship("AdminProfile", back_populates="user", uselist=False, lazy="selectin")
 
 
 class Role(Base):
@@ -215,6 +219,7 @@ class ParticipantProfile(Base):
     gender: Mapped[str | None] = mapped_column(Text)
     address: Mapped[str | None] = mapped_column(Text)
     program_enrolled_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
+    user = relationship("User", back_populates="participant_profile")
 
 
 class CaretakerProfile(Base):
@@ -224,6 +229,7 @@ class CaretakerProfile(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
     title: Mapped[str | None] = mapped_column(Text)
     organization: Mapped[str | None] = mapped_column(Text)
+    user = relationship("User", back_populates="caretaker_profile")
 
 
 class ResearcherProfile(Base):
@@ -232,6 +238,7 @@ class ResearcherProfile(Base):
     researcher_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
     department: Mapped[str | None] = mapped_column(Text)
+    user = relationship("User", back_populates="researcher_profile")
 
 
 class AdminProfile(Base):
@@ -239,6 +246,7 @@ class AdminProfile(Base):
 
     admin_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
+    user = relationship("User", back_populates="admin_profile")
 
 
 

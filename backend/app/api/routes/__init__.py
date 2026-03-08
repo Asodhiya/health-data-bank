@@ -3,7 +3,7 @@ API Routes
 """
 from fastapi import APIRouter
 
-from app.api.routes import auth, health, form_management, admin_only, user, participant_survey
+from app.api.routes import auth, health, form_management, admin_only, user, participant_survey, participants_only
 
 router = APIRouter()
 
@@ -14,3 +14,4 @@ router.include_router(form_management.router, prefix="/form_management", tags=["
 router.include_router(admin_only.router, prefix="/admin_only", tags=["AdminOnly"])
 router.include_router(user.router, prefix="/user", tags=["User"])
 router.include_router(participant_survey.router, prefix="/participant/surveys", tags=["Participant Surveys"])
+router.include_router(participants_only.router, prefix="/participant", tags=["Participant"])

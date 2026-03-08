@@ -15,7 +15,7 @@ from app.core.dependency import check_current_user, require_permissions
 from app.services.email_sender import send_reset_email
 from app.core.security import InviteTokenGenerator
 from app.schemas.schemas import SignupInviteRequest
-from app.db.queries.Queries import RoleQuery
+from app.db.queries.Queries import RoleQuery, UserQuery, InviteQuery
 
 
 router = APIRouter()
@@ -34,9 +34,10 @@ async def login(data: LoginRequest, response: Response,db: AsyncSession = Depend
 @router.post("/register")
 async def register(token: str, payload: UserSignup, db: AsyncSession = Depends(get_db)):
     """User registration via invite link"""
-    queries = RoleQuery(db)
+    invite_queries = InviteQuery(db)
+    role_queries = RoleQuery(db)
 
-    invite = await queries.get_invite_by_token_hash(hash_reset_token(token))
+    invite = await invite_queries.get_invite_by_token_hash(hash_reset_token(token))
     if not invite:
         raise HTTPException(status_code=400, detail="Invalid invite token")
     if invite.used:
@@ -46,7 +47,7 @@ async def register(token: str, payload: UserSignup, db: AsyncSession = Depends(g
     if invite.email != payload.email:
         raise HTTPException(status_code=400, detail="Email does not match invite")
 
-    role = await queries.get_role_by_id(invite.role_id)
+    role = await role_queries.get_role_by_id(invite.role_id)
 
     new_user = await create_user_with_role(payload, role.role_name, db)
 
@@ -54,12 +55,14 @@ async def register(token: str, payload: UserSignup, db: AsyncSession = Depends(g
     await db.commit()
 
     return new_user
-     
+
 
 @router.get("/validate-invite")
-async def get_token(token:str, db: AsyncSession = Depends(get_db) ):
-    queries = RoleQuery(db)
-    invite = await queries.get_invite_by_token_hash(hash_reset_token(token))
+async def get_token(token: str, db: AsyncSession = Depends(get_db)):
+    invite_queries = InviteQuery(db)
+    role_queries = RoleQuery(db)
+
+    invite = await invite_queries.get_invite_by_token_hash(hash_reset_token(token))
     if not invite:
         raise HTTPException(status_code=400, detail="Invalid invite token")
     if invite.used:
@@ -67,7 +70,7 @@ async def get_token(token:str, db: AsyncSession = Depends(get_db) ):
     if invite.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Invite has expired")
 
-    role = await queries.get_role_by_id(invite.role_id)
+    role = await role_queries.get_role_by_id(invite.role_id)
 
     return {
         "email": invite.email,
@@ -85,9 +88,9 @@ async def logout(response: Response):
 
 
 @router.get("/me")
-async def get_current_user( db: AsyncSession = Depends(get_db),user: User = Depends(check_current_user)):
-    queries = RoleQuery(db)
-    user_roles = await queries.get_user_roles(user.user_id)
+async def get_current_user(db: AsyncSession = Depends(get_db), user: User = Depends(check_current_user)):
+    user_queries = UserQuery(db)
+    user_roles = await user_queries.get_user_roles(user.user_id)
     """Get current authenticated user"""
     return {
         "user_id": str(user.user_id),
@@ -98,15 +101,15 @@ async def get_current_user( db: AsyncSession = Depends(get_db),user: User = Depe
 
 
 @router.post("/forgot-password")
-async def forgot_password(payload: ForgotPasswordIn,background: BackgroundTasks,db: AsyncSession = Depends(get_db),):
-    await reset_forgot_password(payload,background,db)
+async def forgot_password(payload: ForgotPasswordIn, background: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    await reset_forgot_password(payload, background, db)
     return {"message": "If the email exists, a reset link has been sent."}
 
 
 @router.post("/signup_invite")
 async def signup_invite(Payload: SignupInviteRequest, db: AsyncSession = Depends(get_db), current_user=Depends(require_permissions("send:invite"))):
-    queries = RoleQuery(db)
-    user_roles = await queries.get_user_roles(current_user.user_id)
+    user_queries = UserQuery(db)
+    user_roles = await user_queries.get_user_roles(current_user.user_id)
     target_role = Payload.target_role.lower()
 
     if "admin" in user_roles:

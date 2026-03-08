@@ -5,7 +5,7 @@ from app.db.models import Role,Permission,RolePermission,User,UserRole
 from app.schemas.schemas import Role_schema,Permissions_schema,Role_user_link,Link_role_permission_schema
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from app.db.queries.Queries import RoleQuery
+from app.db.queries.Queries import RoleQuery, UserQuery
 
 
 async def addroles(Payload : Role_schema, db:AsyncSession):
@@ -96,11 +96,12 @@ async def link_user_roles(Payload:Role_user_link, db:AsyncSession):
     Returns:
         UserRole: The newly created user-role association record.
     """
+    user_query = UserQuery(db)
     role_query = RoleQuery(db)
-    user_record= await role_query.get_user(Payload.username)
+    user_record = await user_query.get_user(Payload.username)
     if not user_record:
         raise HTTPException(status_code= 404, detail="User doesnot exist")
-    
+
     role_record = await role_query.get_role(Payload.role_name)
 
     if not role_record:
