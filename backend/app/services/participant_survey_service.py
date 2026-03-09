@@ -14,104 +14,114 @@ from app.db.models import (
     FieldElementMap, HealthDataPoint
 )
 
-async def list_assigned_surveys(user_id: UUID, db: AsyncSession) -> List[Dict[str, Any]]:
-    """List all surveys assigned to the participant (includes question/answer count)"""
-    stmt = select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
-    result = await db.execute(stmt)
-    participant = result.scalar_one_or_none()
-    
-    if not participant:
-        return []
+async def _get_participant(user_id: UUID, db: AsyncSession) -> Optional[ParticipantProfile]:
+    """Resolve user_id to ParticipantProfile, or return None."""
+    result = await db.execute(
+        select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
 
-    stmt = (
+
+async def _get_deployed_forms(participant_id: UUID, db: AsyncSession):
+    """Fetch all published, non-revoked forms deployed to the participant's groups."""
+    result = await db.execute(
         select(SurveyForm, FormDeployment)
         .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
         .join(GroupMember, GroupMember.group_id == FormDeployment.group_id)
         .where(
             and_(
-                GroupMember.participant_id == participant.participant_id,
+                GroupMember.participant_id == participant_id,
                 SurveyForm.status == "PUBLISHED",
                 FormDeployment.revoked_at.is_(None)
             )
         )
         .order_by(desc(FormDeployment.deployed_at))
     )
-    result = await db.execute(stmt)
-    rows = result.all()
+    return result.all()
 
-    form_ids = [row.SurveyForm.form_id for row in rows]
-    submissions_map = {}
-    answer_counts = {}
-    question_counts = {}
 
-    if form_ids:
-        sub_stmt = select(FormSubmission).where(
+async def _get_submissions_map(participant_id: UUID, form_ids: list, db: AsyncSession) -> dict:
+    """Return {form_id: FormSubmission} for the participant across the given forms."""
+    result = await db.execute(
+        select(FormSubmission).where(
             and_(
-                FormSubmission.participant_id == participant.participant_id,
+                FormSubmission.participant_id == participant_id,
                 FormSubmission.form_id.in_(form_ids)
             )
         )
-        sub_result = await db.execute(sub_stmt)
-        for sub in sub_result.scalars():
-            submissions_map[sub.form_id] = sub
-
-        sub_ids = [sub.submission_id for sub in submissions_map.values()]
-        if sub_ids:
-            ans_count_stmt = (
-                select(SubmissionAnswer.submission_id, func.count(SubmissionAnswer.answer_id))
-                .where(SubmissionAnswer.submission_id.in_(sub_ids))
-                .group_by(SubmissionAnswer.submission_id)
-            )
-            ans_count_res = await db.execute(ans_count_stmt)
-            for sub_id, count in ans_count_res:
-                answer_counts[sub_id] = count
+    )
+    return {sub.form_id: sub for sub in result.scalars()}
 
 
-        q_count_stmt = (
-            select(FormField.form_id, func.count(FormField.field_id))
-            .where(FormField.form_id.in_(form_ids))
-            .group_by(FormField.form_id)
-        )
-        q_count_res = await db.execute(q_count_stmt)
-        for f_id, count in q_count_res:
-            question_counts[f_id] = count
+async def _get_answer_counts(sub_ids: list, db: AsyncSession) -> dict:
+    """Return {submission_id: answer_count} for the given submission ids."""
+    result = await db.execute(
+        select(SubmissionAnswer.submission_id, func.count(SubmissionAnswer.answer_id))
+        .where(SubmissionAnswer.submission_id.in_(sub_ids))
+        .group_by(SubmissionAnswer.submission_id)
+    )
+    return {sub_id: count for sub_id, count in result}
 
+
+async def _get_question_counts(form_ids: list, db: AsyncSession) -> dict:
+    """Return {form_id: question_count} for the given form ids."""
+    result = await db.execute(
+        select(FormField.form_id, func.count(FormField.field_id))
+        .where(FormField.form_id.in_(form_ids))
+        .group_by(FormField.form_id)
+    )
+    return {f_id: count for f_id, count in result}
+
+
+def _build_survey_status(sub) -> tuple:
+    """Derive (status, submitted_at) from a submission row (or None)."""
+    if not sub:
+        return "NEW", None
+    if sub.submitted_at:
+        return "COMPLETED", sub.submitted_at
+    return "IN_PROGRESS", None
+
+
+async def list_assigned_surveys(user_id: UUID, db: AsyncSession) -> List[Dict[str, Any]]:
+    """List all surveys assigned to the participant (includes question/answer count)"""
+    participant = await _get_participant(user_id, db)
+    if not participant:
+        return []
+
+    rows = await _get_deployed_forms(participant.participant_id, db)
+    if not rows:
+        return []
+
+    form_ids = [row.SurveyForm.form_id for row in rows]
+    submissions_map = await _get_submissions_map(participant.participant_id, form_ids, db)
+
+    sub_ids = [sub.submission_id for sub in submissions_map.values()]
+    answer_counts = await _get_answer_counts(sub_ids, db) if sub_ids else {}
+    question_counts = await _get_question_counts(form_ids, db)
 
     output = []
     for survey, deployment in rows:
         sub = submissions_map.get(survey.form_id)
-        status = "NEW"
-        submitted_at = None
-        answered = 0
-        
-        if sub:
-            if sub.submitted_at:
-                status = "COMPLETED"
-                submitted_at = sub.submitted_at
-            else:
-                status = "IN_PROGRESS"
-            answered = answer_counts.get(sub.submission_id, 0)
-        
+        status, submitted_at = _build_survey_status(sub)
+        answered = answer_counts.get(sub.submission_id, 0) if sub else 0
+
         output.append({
             "form_id": survey.form_id,
             "title": survey.title,
             "description": survey.description,
-            "status": status, 
-            "due_date": None, 
+            "status": status,
+            "due_date": None,
             "deployed_at": deployment.deployed_at,
             "submitted_at": submitted_at,
             "question_count": question_counts.get(survey.form_id, 0),
             "answered_count": answered
         })
-        
+
     return output
 
 async def get_participant_survey_detail(form_id: UUID, user_id: UUID, db: AsyncSession) -> Optional[SurveyForm]:
     """Get survey details of selected survey"""
-    stmt = select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
-    result = await db.execute(stmt)
-    participant = result.scalar_one_or_none()
-    
+    participant = await _get_participant(user_id, db)
     if not participant:
         return None
 
@@ -142,9 +152,7 @@ async def get_participant_survey_detail(form_id: UUID, user_id: UUID, db: AsyncS
 
 async def get_participant_survey_response(form_id: UUID, user_id: UUID, db: AsyncSession) -> Optional[FormSubmission]:
     """Get existing submission (draft or completed)"""
-    stmt = select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
-    result = await db.execute(stmt)
-    participant = result.scalar_one_or_none()
+    participant = await _get_participant(user_id, db)
     if not participant:
         return None
 
@@ -176,9 +184,7 @@ async def _get_participant_and_submission(
     form_id: UUID, user_id: UUID, db: AsyncSession
 ):
     """Shared setup: resolve participant, verify deployment, get or create submission."""
-    stmt = select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
-    result = await db.execute(stmt)
-    participant = result.scalar_one_or_none()
+    participant = await _get_participant(user_id, db)
     if not participant:
         raise ValueError("User is not a participant")
 
@@ -230,11 +236,16 @@ def _build_answer_records(answers: List[Dict[str, Any]], submission_id):
         field_id = ans.get('field_id')
         value = ans.get('value')
 
+        if not field_id:
+            continue
+
         val_text = None
         val_num = None
         val_json = None
 
-        if isinstance(value, (int, float)):
+        if value is None:
+            pass
+        elif isinstance(value, (int, float)):
             val_num = value
         elif isinstance(value, (dict, list)):
             val_json = value
@@ -265,6 +276,70 @@ async def save_survey_response(form_id: UUID, user_id: UUID, answers: List[Dict[
     return submission
 
 
+def _apply_transform(
+    val_text: Optional[str],
+    val_num: Optional[float],
+    val_json: Optional[Dict[str, Any]],
+    transform_rule: Optional[Dict[str, Any]],
+) -> tuple[Optional[str], Optional[float], Optional[Dict[str, Any]]]:
+    """Normalise a raw answer value to the element's canonical unit.
+
+    Rules are applied in order: offset → multiply → map → extract.
+    Unknown keys are silently ignored (forward compatible).
+    Mismatched rules (e.g. multiply on a text value) are silently skipped.
+
+    Supported rule keys
+    -------------------
+    offset : int | float
+        Added to val_num before multiply. Use with multiply for affine
+        conversions (e.g. °F→°C: offset=-32, multiply=0.5556).
+    multiply : int | float
+        Scales val_num by this factor (e.g. lbs→kg: 0.453592).
+    map : dict
+        Remaps val_text (or str(val_num)) to another value.
+        If the mapped value is numeric → stored as val_num, val_text cleared.
+        If the mapped value is a string → replaces val_text.
+    extract : str
+        Pulls a sub-key from val_json (e.g. "systolic" from a BP object).
+        Result is stored as val_num if numeric, else val_text.
+    """
+    if not transform_rule:
+        return val_text, val_num, val_json
+
+    # offset
+    if "offset" in transform_rule and val_num is not None:
+        val_num = val_num + transform_rule["offset"]
+
+    # multiply
+    if "multiply" in transform_rule and val_num is not None:
+        val_num = val_num * transform_rule["multiply"]
+
+    # map
+    if "map" in transform_rule:
+        key = val_text if val_text is not None else (str(int(val_num)) if val_num is not None else None)
+        if key is not None:
+            mapped = transform_rule["map"].get(key)
+            if mapped is not None:
+                if isinstance(mapped, (int, float)):
+                    val_num = float(mapped)
+                    val_text = None
+                else:
+                    val_text = str(mapped)
+
+    # extract
+    if "extract" in transform_rule and isinstance(val_json, dict):
+        extracted = val_json.get(transform_rule["extract"])
+        if extracted is not None:
+            if isinstance(extracted, (int, float)):
+                val_num = float(extracted)
+                val_text = None
+            else:
+                val_text = str(extracted)
+            val_json = None
+
+    return val_text, val_num, val_json
+
+
 async def submit_survey_response(form_id: UUID, user_id: UUID, answers: List[Dict[str, Any]], db: AsyncSession) -> FormSubmission:
     """Submit survey answers and project mapped fields into HealthDataPoint records."""
     participant, submission = await _get_participant_and_submission(form_id, user_id, db)
@@ -277,17 +352,18 @@ async def submit_survey_response(form_id: UUID, user_id: UUID, answers: List[Dic
     field_ids = [field_uuid for _, field_uuid, *_ in answer_records]
     map_stmt = select(FieldElementMap).where(FieldElementMap.field_id.in_(field_ids))
     map_result = await db.execute(map_stmt)
-    element_map: Dict[UUID, UUID] = {
-        row.field_id: row.element_id for row in map_result.scalars().all()
+    field_map: Dict[UUID, FieldElementMap] = {
+        row.field_id: row for row in map_result.scalars().all()
     }
 
     for _, field_uuid, val_text, val_num, val_json in answer_records:
-        element_id = element_map.get(field_uuid)
-        if not element_id:
+        mapping = field_map.get(field_uuid)
+        if not mapping:
             continue
+        val_text, val_num, val_json = _apply_transform(val_text, val_num, val_json, mapping.transform_rule)
         dp = HealthDataPoint(
             participant_id=participant.participant_id,
-            element_id=element_id,
+            element_id=mapping.element_id,
             source_type="survey",
             source_submission_id=submission.submission_id,
             source_field_id=field_uuid,

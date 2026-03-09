@@ -13,6 +13,8 @@ from app.api.routes import (
     participants_only,
     researcher_query_data,
     stats,
+    data_elements,
+    goal_templates,
 )
 
 router = APIRouter()
@@ -27,3 +29,5 @@ router.include_router(participant_survey.router, prefix="/participant/surveys", 
 router.include_router(participants_only.router, prefix="/participant", tags=["Participant"])
 router.include_router(researcher_query_data.router, prefix="/researcher/query", tags=["Researcher Query"])
 router.include_router(stats.router, prefix="/stats", tags=["Stats"])
+router.include_router(data_elements.router, prefix="/data-elements", tags=["Data Elements"])
+router.include_router(goal_templates.router, prefix="/goal-templates", tags=["Goal Templates"])

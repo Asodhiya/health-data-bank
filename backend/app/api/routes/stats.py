@@ -1,9 +1,4 @@
-"""
-Participant statistics routes.
 
-Endpoints for retrieving personal health stats, data element breakdowns,
-and group comparisons for the authenticated participant.
-"""
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession

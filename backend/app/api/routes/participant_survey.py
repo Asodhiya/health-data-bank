@@ -59,7 +59,8 @@ async def submit_survey_response_route(form_id: UUID,answers: List[dict], db: As
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to submit survey")
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.post("/{form_id}/save", dependencies=[Depends(require_permissions("survey:submit"))])

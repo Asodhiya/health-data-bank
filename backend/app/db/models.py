@@ -347,14 +347,27 @@ class SubmissionAnswer(Base):
 
 
 
+class GoalTemplate(Base):
+    __tablename__ = "goal_templates"
+
+    template_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    element_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("data_elements.element_id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    default_target: Mapped[float | None] = mapped_column(Numeric)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id"))
+    is_active: Mapped[bool | None] = mapped_column(Boolean, server_default=text("TRUE"))
+    created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
 class HealthGoal(Base):
     __tablename__ = "health_goals"
 
     goal_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     participant_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("participant_profile.participant_id"))
-    goal_type: Mapped[str | None] = mapped_column(Text)
+    template_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("goal_templates.template_id"))
+    element_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("data_elements.element_id"))
     target_value: Mapped[float | None] = mapped_column(Numeric)
-    unit: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str | None] = mapped_column(Text, server_default=text("'active'"))
     start_date: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
     end_date: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))

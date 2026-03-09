@@ -11,12 +11,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import User
 from app.db.session import get_db
 from app.core.dependency import require_permissions
-from app.db.queries.Queries import ParticipantQuery, get_participant_id
-from app.schemas.schemas import HealthGoalPayload, HealthGoalUpdate
+from app.db.queries.Queries import ParticipantQuery, GoalTemplateQuery, get_participant_id
+from app.schemas.schemas import HealthGoalUpdate
 import uuid
 
 router = APIRouter()
 
+
+
+@router.get("/goal-templates")
+async def browse_goal_templates(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permissions("Goal:Displayall")),
+):
+    """Browse all active goal templates available to add to the dashboard."""
+    return await GoalTemplateQuery(db).list_templates()
 
 
 @router.get("/goals")
@@ -33,19 +42,19 @@ async def list_goals(
     return await ParticipantQuery(db).get_goals(participant_id)
 
 
-@router.post("/goals")
-async def create_goal(
-    payload: HealthGoalPayload,
+@router.post("/goals/add/{template_id}")
+async def add_goal_from_template(
+    template_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions("Goal:AddGoals")),
+    target_value: float | None = None,
 ):
     """
-    Create a new health goal for the authenticated participant.
-
-    Requires permission: Goal:Displayall
+    Add a researcher-defined goal template to the participant's dashboard.
+    target_value overrides the template's default_target if provided.
     """
     participant_id = get_participant_id(current_user)
-    return await ParticipantQuery(db).set_goal(participant_id, payload)
+    return await ParticipantQuery(db).add_goal_from_template(participant_id, template_id, target_value)
 
 
 @router.get("/goals/{goal_id}")
