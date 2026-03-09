@@ -1,10 +1,24 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
-import { useState } from "react";
-import { DASHBOARD_NAV } from "../config/navigation"; // Make sure this path is correct!
+import { useState, useEffect } from "react"; // Add useEffect
+import api from "../utils/axiosInstance"; // Bring in your superpower!
+import { DASHBOARD_NAV } from "../config/navigation";
 
 export default function DashboardLayout({ role }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const location = useLocation(); // Hooks into the current URL
+  const location = useLocation();
+
+  // ADD THIS: Create a bucket for the user data
+  const [user, setUser] = useState(null);
+
+  // ADD THIS: Fetch who is logged in when the layout loads
+  useEffect(() => {
+    api
+      .get("/auth/me")
+      .then((response) => setUser(response.data))
+      .catch((error) => console.error("Not logged in:", error));
+  }, []);
+
+  // ... keep your return statement exactly the same until the Outlet ...
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900">
@@ -30,13 +44,18 @@ export default function DashboardLayout({ role }) {
               />
             </svg>
           </button>
-          <div className="font-bold text-xl text-blue-600">
+          <Link
+            to={`/${role.toLowerCase()}`}
+            className="font-bold text-xl text-blue-600 hover:text-blue-700 transition-colors"
+          >
             Health Data Bank
-          </div>
+          </Link>
         </div>
 
         <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold">
-          {role.charAt(0).toUpperCase()}
+          {/* Use the user's first name initial, or fallback to the Role initial if still loading */}
+          {user?.first_name?.charAt(0).toUpperCase() ||
+            role.charAt(0).toUpperCase()}
         </div>
       </header>
 
@@ -58,9 +77,27 @@ export default function DashboardLayout({ role }) {
           } bg-white border-r border-gray-200 md:flex md:flex-col md:w-64`}
         >
           <nav className="flex-1 p-6 flex flex-col gap-2">
-            <p className="text-xs font-semibold text-slate-400 mb-4 border-b pb-4 uppercase tracking-wider">
-              Role: {role}
-            </p>
+            {/* USER PROFILE CARD */}
+            <div className="mb-6 p-4 bg-slate-50 border border-slate-100 rounded-xl shadow-sm">
+              <div className="flex flex-col">
+                <p className="text-xs font-bold text-blue-600 uppercase tracking-widest mb-1">
+                  Logged in as
+                </p>
+                <p className="text-sm font-extrabold text-slate-800 truncate capitalize">
+                  {user
+                    ? `${user.first_name} ${user.last_name || ""}`
+                    : "Loading Profile..."}
+                </p>
+
+                {/* Role Badge */}
+                <div className="mt-3 inline-flex items-center w-fit px-2 py-0.5 rounded-md bg-white border border-slate-200 shadow-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-2 animate-pulse"></span>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">
+                    {role}
+                  </p>
+                </div>
+              </div>
+            </div>
 
             {/* DYNAMIC NAVIGATION GENERATOR */}
             {DASHBOARD_NAV.filter((item) =>
@@ -87,7 +124,7 @@ export default function DashboardLayout({ role }) {
 
         {/* Main Content */}
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-slate-50 p-6">
-          <Outlet />
+          <Outlet context={{ user }} />
         </main>
       </div>
     </div>

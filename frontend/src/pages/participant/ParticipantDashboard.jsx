@@ -1,5 +1,40 @@
 import { Link, useOutletContext } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import api from "../../utils/axiosInstance";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+
+// 🎨 CUSTOM CHART HOVER EFFECT
+const CustomTooltip = ({ active, payload, label }) => {
+  // "active" means the mouse is hovering. "payload" holds our data!
+  if (active && payload && payload.length) {
+    // payload[0].payload gives us access to {name, score, focus}
+    const data = payload[0].payload;
+
+    return (
+      <div className="bg-white p-4 rounded-xl shadow-lg border border-slate-100 outline-none">
+        <p className="font-bold text-slate-800 mb-1">{label}</p>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="w-3 h-3 rounded-full bg-blue-500"></span>
+          <p className="text-sm font-medium text-slate-700">
+            Score: <span className="text-blue-600">{data.score}%</span>
+          </p>
+        </div>
+        <p className="text-xs text-slate-500 bg-slate-50 inline-block px-2 py-1 rounded-md mt-1 border border-slate-100">
+          Focus: {data.focus}
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
 
 export default function ParticipantDashboard() {
   // For now we are setting up our use mock data here :
@@ -15,6 +50,69 @@ export default function ParticipantDashboard() {
     year: "numeric",
   });
 
+  // greetings on time
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return { text: "Good morning", icon: "☀️" };
+    if (hour < 18) return { text: "Good afternoon", icon: "🌤️" };
+    return { text: "Good evening", icon: "🌙" };
+  };
+
+  const greetings = getGreeting();
+
+  // survey list from backend, Empty List
+  const [surveys, setSurveys] = useState([]);
+  const [loadingSurveys, setLoadingSurveys] = useState(true);
+
+  // ⚠️ DELETE THIS LATER: Fake data just to see the UI while DB is empty
+  const dummySurveys = [
+    {
+      id: 1,
+      title: "Nutrition Log",
+      description: "Record your meals and water intake for the day.",
+      icon: "🥗",
+    },
+    {
+      id: 2,
+      title: "Sleep Tracker",
+      description: "Log your sleep hours and resting quality.",
+      icon: "😴",
+    },
+    {
+      id: 3,
+      title: "Mood Check-in",
+      description: "A quick check-in on your stress and mental wellbeing.",
+      icon: "🧠",
+    },
+  ];
+
+  // ⚠️ DELETE THIS LATER: Fake data for the Recharts BarChart
+  const healthScoreData = [
+    { name: "Week 1", score: 85, focus: "Nutrition" },
+    { name: "Week 2", score: 92, focus: "Sleep" },
+    { name: "Week 3", score: 78, focus: "Activity" },
+    { name: "Week 4", score: 88, focus: "Mood" },
+  ];
+
+  // 🔄 SWITCH: Change this to `surveys` when real data is added to the DB.
+  const displaySurveys = dummySurveys;
+
+  useEffect(() => {
+    api
+      .get("/participant/surveys/assigned")
+      .then((response) => {
+        console.log("📋 Raw Survey Data:", response.data);
+
+        setSurveys(response.data);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch surveys:", err);
+      })
+      .finally(() => {
+        setLoadingSurveys(false);
+      });
+  }, []);
+
   return (
     <div className="max-w-6xl mx-auto space-y-6 p-2 md:p-0">
       {/* STEP 1: TOP WELCOME BANNER */}
@@ -22,7 +120,7 @@ export default function ParticipantDashboard() {
         {/* Left Side: Greeting & Pill */}
         <div className="space-y-3">
           <h1 className="text-2xl md:text-3xl font-bold text-slate-800">
-            Good morning, {user?.firstName}! ☀️
+            {greetings.text} , {user?.firstName}! {greetings.icon}
           </h1>
 
           {/* Hydration Pill */}
@@ -81,41 +179,67 @@ export default function ParticipantDashboard() {
 
           <div className="space-y-5">
             {/* Week 1 Bar */}
-            <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="font-medium text-slate-600">
-                  Week 1 (Nutrition Focus)
-                </span>
-                <span className="text-blue-600 font-bold">85%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-3">
-                <div className="bg-blue-500 h-3 rounded-full transition-all duration-1000 ease-out w-[85%]"></div>
-              </div>
-            </div>
+            <div className="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+              <h2 className="text-lg font-bold text-slate-800 mb-2">
+                Monthly Health Score
+              </h2>
+              <p className="text-sm text-slate-500 mb-6">
+                Your overall wellness average for the past 4 weeks.
+              </p>
 
-            {/* Week 2 Bar */}
-            <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="font-medium text-slate-600">
-                  Week 2 (Sleep Focus)
-                </span>
-                <span className="text-blue-600 font-bold">92%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-3">
-                <div className="bg-blue-500 h-3 rounded-full transition-all duration-1000 ease-out w-[92%]"></div>
-              </div>
-            </div>
-
-            {/* Week 3 Bar */}
-            <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="font-medium text-slate-600">
-                  Week 3 (Activity Focus)
-                </span>
-                <span className="text-blue-600 font-bold">78%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-3">
-                <div className="bg-blue-500 h-3 rounded-full transition-all duration-1000 ease-out w-[78%]"></div>
+              {/* THE RECHARTS COMPONENT */}
+              {/* THE RECHARTS COMPONENT OR EMPTY STATE */}
+              <div className="h-64 w-full">
+                {healthScoreData && healthScoreData.length > 0 ? (
+                  /* THE ACTUAL CHART */
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={healthScoreData}
+                      margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        vertical={false}
+                        stroke="#f1f5f9"
+                      />
+                      <XAxis
+                        dataKey="name"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: "#64748b", fontSize: 12 }}
+                        dy={10}
+                      />
+                      <YAxis
+                        domain={[0, 100]}
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: "#94a3b8", fontSize: 12 }}
+                      />
+                      <Tooltip
+                        cursor={{ fill: "#f8fafc" }}
+                        content={<CustomTooltip />}
+                      />
+                      <Bar
+                        dataKey="score"
+                        fill="#3b82f6"
+                        radius={[6, 6, 0, 0]}
+                        barSize={40}
+                        animationDuration={1500}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  /* THE EMPTY STATE */
+                  <div className="h-full w-full flex flex-col items-center justify-center bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                    <span className="text-4xl mb-3 block">📊</span>
+                    <p className="text-slate-700 font-medium">
+                      No health data available yet.
+                    </p>
+                    <p className="text-slate-500 text-sm mt-1">
+                      Complete your first survey to generate your score!
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -151,7 +275,6 @@ export default function ParticipantDashboard() {
       </div>
       {/* STEP 3: SURVEY TEMPLATES CAROUSEL */}
       <div className="bg-blue-600 rounded-2xl p-6 md:p-8 shadow-sm relative overflow-hidden">
-        {/* Decorative background circle (faded white) to add texture */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -translate-y-1/2 translate-x-1/4 pointer-events-none"></div>
 
         {/* Section Header & Arrow Buttons */}
@@ -205,88 +328,49 @@ export default function ParticipantDashboard() {
         {/* Horizontal Scroll Container */}
         <div className="flex gap-5 overflow-x-auto pb-4 snap-x relative z-10 custom-scrollbar">
           {/* Card 1: Nutrition */}
-          <div className="min-w-[260px] bg-slate-50 rounded-xl p-5 shadow-sm snap-start flex flex-col border border-slate-100">
-            <div className="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center mb-4">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
-                />
-              </svg>
-            </div>
-            <h3 className="text-lg font-bold text-slate-800">Nutrition Log</h3>
-            <p className="text-sm text-slate-500 mt-1 mb-6 flex-1">
-              Record your meals and water intake for the day.
-            </p>
-            <Link
-              to="/participant/survey"
-              className="w-full text-center bg-blue-100 hover:bg-blue-200 text-blue-700 py-2 rounded-lg font-medium transition-colors"
-            >
-              Start Survey
-            </Link>
-          </div>
-
-          {/* Card 2: Sleep */}
-          <div className="min-w-[260px] bg-slate-50 rounded-xl p-5 shadow-sm snap-start flex flex-col border border-slate-100">
-            <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center mb-4">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
-                />
-              </svg>
-            </div>
-            <h3 className="text-lg font-bold text-slate-800">Sleep Tracker</h3>
-            <p className="text-sm text-slate-500 mt-1 mb-6 flex-1">
-              Log your sleep hours and resting quality.
-            </p>
-            <button className="w-full text-center bg-blue-100 hover:bg-blue-200 text-blue-700 py-2 rounded-lg font-medium transition-colors">
-              Start Survey
-            </button>
-          </div>
-
-          {/* Card 3: Mental Health */}
-          <div className="min-w-[260px] bg-slate-50 rounded-xl p-5 shadow-sm snap-start flex flex-col border border-slate-100">
-            <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </div>
-            <h3 className="text-lg font-bold text-slate-800">Mood Check-in</h3>
-            <p className="text-sm text-slate-500 mt-1 mb-6 flex-1">
-              A quick check-in on your stress and mental wellbeing.
-            </p>
-            <button className="w-full text-center bg-blue-100 hover:bg-blue-200 text-blue-700 py-2 rounded-lg font-medium transition-colors">
-              Start Survey
-            </button>
-          </div>
+          {/* Horizontal Scroll Container */}
+          <div className="flex gap-5 overflow-x-auto pb-4 snap-x relative z-10 custom-scrollbar">
+            {/* PASTE STARTING HERE 👇 */}
+            {loadingSurveys ? (
+              <p className="text-white animate-pulse">
+                Checking for assigned surveys... 🔍
+              </p>
+            ) : displaySurveys.length > 0 ? (
+              displaySurveys.map((survey) => (
+                <div
+                  key={survey.id}
+                  className="min-w-[260px] bg-slate-50 rounded-xl p-5 shadow-sm snap-start flex flex-col border border-slate-100"
+                >
+                  <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mb-4 text-xl">
+                    {survey.icon || "📋"}
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-800">
+                    {survey.title}
+                  </h3>
+                  <p className="text-sm text-slate-500 mt-1 mb-6 flex-1">
+                    {survey.description}
+                  </p>
+                  <Link
+                    to="/participant/survey"
+                    className="w-full text-center bg-blue-100 hover:bg-blue-200 text-blue-700 py-2 rounded-lg font-medium transition-colors"
+                  >
+                    Start Survey
+                  </Link>
+                </div>
+              ))
+            ) : (
+              <div className="min-w-[260px] w-full bg-white/10 rounded-xl p-8 text-center border border-white/20 backdrop-blur-sm">
+                <span className="text-4xl mb-3 block">🎉</span>
+                <h3 className="text-xl font-bold text-white">
+                  You're all caught up!
+                </h3>
+                <p className="text-blue-100 mt-2">
+                  No surveys assigned today. Enjoy your day off!
+                </p>
+              </div>
+            )}
+          </div>{" "}
+          {/* Make sure this closing div is still here! */}
         </div>
       </div>
     </div>
