@@ -107,11 +107,6 @@ async def link_user_roles(Payload:Role_user_link, db:AsyncSession):
     if not role_record:
         raise HTTPException(status_code= 404, detail="Role doesnot exist")
    
-    user_role = UserRole(
-        user_id = user_record.user_id,
-        role_id = role_record.role_id
-    )
-    
     try:
         await role_query.assign_role_to_user(user_record, role_record)
         await db.commit()
@@ -119,8 +114,7 @@ async def link_user_roles(Payload:Role_user_link, db:AsyncSession):
         await db.rollback()
         raise HTTPException(status_code=409, detail="User role already exists")
 
-    await db.refresh(user_role)
-    return "detail: role sucessfully given"
+    return {"detail": "role successfully given"}
     
 
 
