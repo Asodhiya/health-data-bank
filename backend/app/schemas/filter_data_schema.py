@@ -27,6 +27,7 @@ class ParticipantResponse(BaseModel):
 
 
 class HealthDataPointOut(BaseModel):
+
     data_id: UUID
     participant_id: Optional[UUID] = None
     element_label: Optional[str] = None
