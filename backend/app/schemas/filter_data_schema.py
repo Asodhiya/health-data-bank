@@ -1,14 +1,14 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Dict
 from uuid import UUID
+from datetime import datetime
 
 class ParticipantFilter(BaseModel):
-    #should get from the user profiles
     gender: Optional[str] = None
     age_min: Optional[int] = None
     age_max: Optional[int] = None
-    group_id: Optional[str] = None
     status: Optional[str] = None
+    group_id: Optional[UUID] = None
     search: Optional[str] = None
     survey_id: Optional[str] = None
 
@@ -25,9 +25,19 @@ class ParticipantResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class AvailableSurvey(BaseModel):
-    form_id: UUID
-    title: str
+
+class HealthDataPointOut(BaseModel):
+    data_id: UUID
+    participant_id: Optional[UUID] = None
+    element_label: Optional[str] = None
+    value_text: Optional[str] = None
+    value_number: Optional[float] = None
+    value_date: Optional[datetime] = None
+    value_json: Optional[Dict] = None
+    unit: Optional[str] = None
+    observed_at: Optional[datetime] = None
+    source_type: Optional[str] = None
+    notes: Optional[str] = None
 
     class Config:
         from_attributes = True
