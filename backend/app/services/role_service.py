@@ -49,7 +49,7 @@ async def addroles(Payload : Role_schema, db:AsyncSession):
         raise HTTPException(status_code=409, detail="Role already exists")
 
     await db.refresh(new_role)
-    return new_role
+    return {"role_id": str(new_role.role_id), "role_name": new_role.role_name}
 
 
 
@@ -68,7 +68,7 @@ async def viewroles(db:AsyncSession):
     """
     res = await (db.execute(select(Role)))
     roles = res.scalars().all()
-    return roles
+    return [{"role_id": str(r.role_id), "role_name": r.role_name} for r in roles]
 
 
 
@@ -107,11 +107,6 @@ async def link_user_roles(Payload:Role_user_link, db:AsyncSession):
     if not role_record:
         raise HTTPException(status_code= 404, detail="Role doesnot exist")
    
-    user_role = UserRole(
-        user_id = user_record.user_id,
-        role_id = role_record.role_id
-    )
-    
     try:
         await role_query.assign_role_to_user(user_record, role_record)
         await db.commit()
@@ -119,8 +114,7 @@ async def link_user_roles(Payload:Role_user_link, db:AsyncSession):
         await db.rollback()
         raise HTTPException(status_code=409, detail="User role already exists")
 
-    await db.refresh(user_role)
-    return "detail: role sucessfully given"
+    return {"detail": "role successfully given"}
     
 
 
@@ -171,7 +165,7 @@ async def add_permissions(Payload : Permissions_schema, db:AsyncSession):
         raise HTTPException(status_code=409, detail="Permission already exisit")
 
     await db.refresh(new_permisison)
-    return new_permisison
+    return {"permission_id": str(new_permisison.permission_id), "code": new_permisison.code, "description": new_permisison.description}
 
 
 async def view_permissions(db:AsyncSession):
@@ -248,8 +242,11 @@ async def link_role_permisson(Payload: Link_role_permission_schema, db:AsyncSess
         raise HTTPException(status_code=404, detail="Permission already exisit")
 
     await db.refresh(role_permission)
-    return role_permission
-    
+    return {
+        "role_id": str(role_permission.role_id),
+        "permission_id": str(role_permission.permission_id),
+    }
+
 
     
 
