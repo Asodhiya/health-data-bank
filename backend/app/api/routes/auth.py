@@ -12,6 +12,7 @@ from app.services.cookies import _set_cookie
 from app.services.auth_service import authenticate_user, reset_forgot_password, create_user_with_role
 from app.schemas.schemas import LoginRequest, UserResponse, ForgotPasswordIn
 from app.core.dependency import check_current_user, require_permissions
+from app.core.permissions import SEND_INVITE
 from app.services.email_sender import send_reset_email
 from app.core.security import InviteTokenGenerator
 from app.schemas.schemas import SignupInviteRequest
@@ -206,7 +207,7 @@ async def signup_invite(
     Payload: SignupInviteRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(require_permissions("send:invite")),
+    current_user=Depends(require_permissions(SEND_INVITE)),
 ):
     ip = _get_client_ip(request)
     user_queries = UserQuery(db)
