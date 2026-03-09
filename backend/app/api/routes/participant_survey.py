@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.core.dependency import check_current_user, require_permissions
 from app.db.models import User
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, ParticipantSurveyItem
-from app.services.participant_survey_service import (list_assigned_surveys, get_participant_survey_detail, save_survey_response,get_participant_survey_response)
+from app.services.participant_survey_service import (list_assigned_surveys, get_participant_survey_detail, save_survey_response, submit_survey_response, get_participant_survey_response)
 
 router = APIRouter()
 #TODO:dependencies do not work as of the moment, needs it to be initialized in the database/or when testing, remove it
@@ -54,7 +54,7 @@ async def get_survey_response_route(form_id: UUID,db: AsyncSession = Depends(get
 async def submit_survey_response_route(form_id: UUID,answers: List[dict], db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
     """Submit responses of a survey form (submit)"""
     try:
-        submission = await save_survey_response(form_id, current_user.user_id, answers, db, is_draft=False)
+        submission = await submit_survey_response(form_id, current_user.user_id, answers, db)
         return {"message": "Survey submitted successfully", "submission_id": str(submission.submission_id)}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -66,7 +66,7 @@ async def submit_survey_response_route(form_id: UUID,answers: List[dict], db: As
 async def save_survey_draft_route(form_id: UUID,answers: List[dict], db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
     """Save responses (NOT SUBMIT)"""
     try:
-        submission = await save_survey_response(form_id, current_user.user_id, answers, db, is_draft=True)
+        submission = await save_survey_response(form_id, current_user.user_id, answers, db)
         return {"message": "Draft saved successfully", "submission_id": str(submission.submission_id)}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

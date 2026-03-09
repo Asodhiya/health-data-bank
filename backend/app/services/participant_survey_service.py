@@ -9,8 +9,9 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from app.db.models import (
-    SurveyForm, FormDeployment, GroupMember, FormSubmission, 
-    SubmissionAnswer, FormField, ParticipantProfile
+    SurveyForm, FormDeployment, GroupMember, FormSubmission,
+    SubmissionAnswer, FormField, ParticipantProfile,
+    FieldElementMap, HealthDataPoint
 )
 
 async def list_assigned_surveys(user_id: UUID, db: AsyncSession) -> List[Dict[str, Any]]:
@@ -171,12 +172,13 @@ async def get_participant_survey_response(form_id: UUID, user_id: UUID, db: Asyn
     return submission
 
 
-async def save_survey_response(form_id: UUID, user_id: UUID, answers: List[Dict[str, Any]], db: AsyncSession,is_draft: bool = False) -> FormSubmission:
-    """Save or Submit survey response"""
+async def _get_participant_and_submission(
+    form_id: UUID, user_id: UUID, db: AsyncSession
+):
+    """Shared setup: resolve participant, verify deployment, get or create submission."""
     stmt = select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
     result = await db.execute(stmt)
     participant = result.scalar_one_or_none()
-    
     if not participant:
         raise ValueError("User is not a participant")
 
@@ -192,17 +194,13 @@ async def save_survey_response(form_id: UUID, user_id: UUID, answers: List[Dict[
     )
     result = await db.execute(stmt)
     deployment = result.scalar_one_or_none()
-    
     if not deployment:
         raise ValueError("Form not assigned to participant")
 
-    stmt = (
-        select(FormSubmission)
-        .where(
-            and_(
-                FormSubmission.form_id == form_id,
-                FormSubmission.participant_id == participant.participant_id
-            )
+    stmt = select(FormSubmission).where(
+        and_(
+            FormSubmission.form_id == form_id,
+            FormSubmission.participant_id == participant.participant_id
         )
     )
     result = await db.execute(stmt)
@@ -211,10 +209,8 @@ async def save_survey_response(form_id: UUID, user_id: UUID, answers: List[Dict[
     if submission:
         if submission.submitted_at is not None:
             raise ValueError("Cannot modify a completed submission")
-
         from sqlalchemy import delete
         await db.execute(delete(SubmissionAnswer).where(SubmissionAnswer.submission_id == submission.submission_id))
-        
     else:
         submission = FormSubmission(
             form_id=form_id,
@@ -224,19 +220,20 @@ async def save_survey_response(form_id: UUID, user_id: UUID, answers: List[Dict[
         db.add(submission)
         await db.flush()
 
-    if is_draft:
-        submission.submitted_at = None
-    else:
-        submission.submitted_at = datetime.now()
+    return participant, submission
 
+
+def _build_answer_records(answers: List[Dict[str, Any]], submission_id):
+    """Convert raw answer dicts into (SubmissionAnswer, field_uuid, val_text, val_num, val_json) tuples."""
+    records = []
     for ans in answers:
         field_id = ans.get('field_id')
         value = ans.get('value')
-        
+
         val_text = None
         val_num = None
         val_json = None
-        
+
         if isinstance(value, (int, float)):
             val_num = value
         elif isinstance(value, (dict, list)):
@@ -244,14 +241,62 @@ async def save_survey_response(form_id: UUID, user_id: UUID, answers: List[Dict[
         else:
             val_text = str(value)
 
-        answer_record = SubmissionAnswer(
-            submission_id=submission.submission_id,
-            field_id=UUID(field_id) if isinstance(field_id, str) else field_id,
+        field_uuid = UUID(field_id) if isinstance(field_id, str) else field_id
+        record = SubmissionAnswer(
+            submission_id=submission_id,
+            field_id=field_uuid,
             value_text=val_text,
             value_number=val_num,
             value_json=val_json
         )
-        db.add(answer_record)
+        records.append((record, field_uuid, val_text, val_num, val_json))
+    return records
+
+
+async def save_survey_response(form_id: UUID, user_id: UUID, answers: List[Dict[str, Any]], db: AsyncSession) -> FormSubmission:
+    """Save survey answers as a draft (no submission timestamp, no health data projection)."""
+    _, submission = await _get_participant_and_submission(form_id, user_id, db)
+    submission.submitted_at = None
+
+    for record, *_ in _build_answer_records(answers, submission.submission_id):
+        db.add(record)
+
+    await db.commit()
+    return submission
+
+
+async def submit_survey_response(form_id: UUID, user_id: UUID, answers: List[Dict[str, Any]], db: AsyncSession) -> FormSubmission:
+    """Submit survey answers and project mapped fields into HealthDataPoint records."""
+    participant, submission = await _get_participant_and_submission(form_id, user_id, db)
+    submission.submitted_at = datetime.now()
+
+    answer_records = _build_answer_records(answers, submission.submission_id)
+    for record, *_ in answer_records:
+        db.add(record)
+
+    field_ids = [field_uuid for _, field_uuid, *_ in answer_records]
+    map_stmt = select(FieldElementMap).where(FieldElementMap.field_id.in_(field_ids))
+    map_result = await db.execute(map_stmt)
+    element_map: Dict[UUID, UUID] = {
+        row.field_id: row.element_id for row in map_result.scalars().all()
+    }
+
+    for _, field_uuid, val_text, val_num, val_json in answer_records:
+        element_id = element_map.get(field_uuid)
+        if not element_id:
+            continue
+        dp = HealthDataPoint(
+            participant_id=participant.participant_id,
+            element_id=element_id,
+            source_type="survey",
+            source_submission_id=submission.submission_id,
+            source_field_id=field_uuid,
+            value_text=val_text,
+            value_number=val_num,
+            value_json=val_json,
+            observed_at=datetime.now()
+        )
+        db.add(dp)
 
     await db.commit()
     return submission

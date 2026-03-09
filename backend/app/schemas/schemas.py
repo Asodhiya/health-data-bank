@@ -75,6 +75,17 @@ class SignupInviteRequest(BaseModel):
     email: EmailStr
     target_role: str
 
+class HealthDataPointPayload(BaseModel):
+    element_id: UUID
+    observed_at: Optional[datetime] = None
+    source_type: Optional[str] = None
+    value_text: Optional[str] = None
+    value_number: Optional[float] = None
+    value_date: Optional[datetime] = None
+    value_json: Optional[Dict[str, Any]] = None
+    notes: Optional[str] = None
+
+
 class HealthGoalPayload(BaseModel):
     target_value: float
     unit: str

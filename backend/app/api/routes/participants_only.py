@@ -11,22 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import User
 from app.db.session import get_db
 from app.core.dependency import require_permissions
-from app.db.queries.Queries import ParticipantQuery
+from app.db.queries.Queries import ParticipantQuery, get_participant_id
 from app.schemas.schemas import HealthGoalPayload, HealthGoalUpdate
 import uuid
 
 router = APIRouter()
 
-
-def get_participant_id(current_user: User) -> uuid.UUID:
-    """
-    Extract participant_id from the authenticated user's loaded profile.
-
-    Raises 403 if the user does not have a participant profile.
-    """
-    if not current_user.participant_profile:
-        raise HTTPException(status_code=403, detail="Not a participant")
-    return current_user.participant_profile.participant_id
 
 
 @router.get("/goals")

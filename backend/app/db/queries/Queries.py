@@ -7,6 +7,17 @@ from sqlalchemy.exc import IntegrityError
 from app.schemas.schemas import HealthGoalPayload, HealthGoalUpdate
 
 
+def get_participant_id(current_user: User) -> uuid.UUID:
+    """
+    Extract participant_id from the authenticated user's loaded profile.
+
+    Raises 403 if the user does not have a participant profile.
+    """
+    if not current_user.participant_profile:
+        raise HTTPException(status_code=403, detail="Not a participant")
+    return current_user.participant_profile.participant_id
+
+
 class UserQuery:
 
     def __init__(self, db: AsyncSession):
@@ -154,3 +165,12 @@ class ParticipantQuery:
 
         await self.db.delete(goal)
         await self.db.flush()
+
+
+class StasQuery:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def view_data_elements(self,)
+
+    
