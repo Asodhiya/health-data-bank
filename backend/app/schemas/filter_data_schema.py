@@ -3,6 +3,16 @@ from typing import Optional, List, Dict
 from uuid import UUID
 from datetime import datetime
 
+
+class AvailableSurvey(BaseModel):
+    form_id: UUID
+    title: str
+    description: Optional[str] = None
+    status: str
+
+    class Config:
+        from_attributes = True
+
 class ParticipantFilter(BaseModel):
     gender: Optional[str] = None
     age_min: Optional[int] = None

@@ -137,6 +137,12 @@ async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: 
     if not group_result.scalar_one_or_none():
         raise ValueError("Group not found")
 
+    existing_deployment = await db.execute(
+        select(FormDeployment).where(FormDeployment.form_id == form_id, FormDeployment.group_id == group_id)
+    )
+    if existing_deployment.scalar_one_or_none():
+        raise ValueError("This form is already deployed to this group")
+
     deployment = FormDeployment(
         form_id=form_id,
         group_id=group_id,
@@ -157,6 +163,12 @@ async def unpublish_survey_form(form_id: UUID,user_id: UUID,db: AsyncSession):
 
     if form.created_by != user_id:
         raise PermissionError("Not authorized to unpublish this form")
+
+    deployment_query = select(FormDeployment).where(FormDeployment.form_id == form_id)
+    deployment_result = await db.execute(deployment_query)
+    deployments = deployment_result.scalars().all()
+    for deployment in deployments:
+        await db.delete(deployment)
 
     form.status = "DRAFT"
     await db.commit()
