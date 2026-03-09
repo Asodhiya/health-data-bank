@@ -13,7 +13,7 @@ from app.services.auth_service import authenticate_user, reset_forgot_password, 
 from app.schemas.schemas import LoginRequest, UserResponse, ForgotPasswordIn
 from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import SEND_INVITE
-from app.services.email_sender import send_reset_email
+from app.services.email_sender import send_reset_email, send_invite_email
 from app.core.security import InviteTokenGenerator
 from app.schemas.schemas import SignupInviteRequest
 from app.db.queries.Queries import RoleQuery, UserQuery, InviteQuery
@@ -235,6 +235,7 @@ async def signup_invite(
         target_email=Payload.email,
     )
     result = await generator.save(db)
+    send_invite_email(Payload.email, result["invite_url"])
 
     # Log the invite being sent
     await write_audit_log(
