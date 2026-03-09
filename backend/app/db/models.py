@@ -42,7 +42,11 @@ class User(Base):
     reset_token_hash: Mapped[str | None] = mapped_column( String,nullable=True)
     reset_token_expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True),nullable=True)
 
-    roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
+    roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan", lazy="selectin")
+    participant_profile = relationship("ParticipantProfile", back_populates="user", uselist=False, lazy="selectin")
+    researcher_profile = relationship("ResearcherProfile", back_populates="user", uselist=False, lazy="selectin")
+    caretaker_profile = relationship("CaretakerProfile", back_populates="user", uselist=False, lazy="selectin")
+    admin_profile = relationship("AdminProfile", back_populates="user", uselist=False, lazy="selectin")
 
 
 class Role(Base):
@@ -55,10 +59,53 @@ class Role(Base):
     )
     role_name: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
 
-    users = relationship("UserRole", back_populates="role", cascade="all, delete-orphan")
+    users = relationship("UserRole", back_populates="role", cascade="all, delete-orphan",lazy="selectin")
     permissions = relationship("RolePermission", back_populates="role", cascade="all, delete-orphan")
 
+class SignupInvite(Base):
+    __tablename__ = "signup_invites"
 
+    invite_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("roles.role_id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False
+    )
+
+    used: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("FALSE")
+    )
+
+    invited_by: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=False
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("now()")
+    )
+
+    role = relationship("Role")
+    
 class UserRole(Base):
     __tablename__ = "user_roles"
     __table_args__ = (
@@ -73,7 +120,7 @@ class UserRole(Base):
     )
 
     user = relationship("User", back_populates="roles")
-    role = relationship("Role", back_populates="users")
+    role = relationship("Role", back_populates="users",lazy="selectin")
 
 
 class Permission(Base):
@@ -172,6 +219,7 @@ class ParticipantProfile(Base):
     gender: Mapped[str | None] = mapped_column(Text)
     address: Mapped[str | None] = mapped_column(Text)
     program_enrolled_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
+    user = relationship("User", back_populates="participant_profile")
 
 
 class CaretakerProfile(Base):
@@ -181,6 +229,7 @@ class CaretakerProfile(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
     title: Mapped[str | None] = mapped_column(Text)
     organization: Mapped[str | None] = mapped_column(Text)
+    user = relationship("User", back_populates="caretaker_profile")
 
 
 class ResearcherProfile(Base):
@@ -189,6 +238,7 @@ class ResearcherProfile(Base):
     researcher_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
     department: Mapped[str | None] = mapped_column(Text)
+    user = relationship("User", back_populates="researcher_profile")
 
 
 class AdminProfile(Base):
@@ -196,6 +246,7 @@ class AdminProfile(Base):
 
     admin_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
+    user = relationship("User", back_populates="admin_profile")
 
 
 
@@ -278,9 +329,9 @@ class FormSubmission(Base):
     form_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id"))
     participant_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("participant_profile.participant_id"))
     group_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("groups.group_id"))
-    submitted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    submitted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    #submitted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()")) #what it used to be
     is_valid: Mapped[bool | None] = mapped_column(Boolean, server_default=text("TRUE"))
-
 
 class SubmissionAnswer(Base):
     __tablename__ = "submission_answers"

@@ -2,9 +2,10 @@ from fastapi import HTTPException, status, Depends
 from app.db.session import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Role,Permission,RolePermission,User,UserRole
-from app.schemas.schemas import Role_schema,Permissions_schema,Userverify
+from app.schemas.schemas import Role_schema,Permissions_schema,Role_user_link,Link_role_permission_schema
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from app.db.queries.Queries import RoleQuery, UserQuery
 
 
 async def addroles(Payload : Role_schema, db:AsyncSession):
@@ -72,7 +73,7 @@ async def viewroles(db:AsyncSession):
 
 
 
-async def link_user_roles(Payload:Role_schema, Payload2: Userverify, db:AsyncSession):
+async def link_user_roles(Payload:Role_user_link, db:AsyncSession):
     """
     Link a user to a role in the system.
 
@@ -95,20 +96,24 @@ async def link_user_roles(Payload:Role_schema, Payload2: Userverify, db:AsyncSes
     Returns:
         UserRole: The newly created user-role association record.
     """
-    res =  await(db.execute(select(Role).where(Role.role_name == Payload.role_name)))
-    role_record = res.scalar_one_or_none()
-    if not role_record:
-        raise HTTPException(status_code= 404, detail="Role doesnot exist")
-    res = await(db.execute(select(User).where(User.username == Payload2.username)))
-    user_record = res.scalar_one_or_none()
+    user_query = UserQuery(db)
+    role_query = RoleQuery(db)
+    user_record = await user_query.get_user(Payload.username)
     if not user_record:
         raise HTTPException(status_code= 404, detail="User doesnot exist")
+
+    role_record = await role_query.get_role(Payload.role_name)
+
+    if not role_record:
+        raise HTTPException(status_code= 404, detail="Role doesnot exist")
+   
     user_role = UserRole(
         user_id = user_record.user_id,
         role_id = role_record.role_id
     )
-    db.add(user_role)
+    
     try:
+        await role_query.assign_role_to_user(user_record, role_record)
         await db.commit()
     except IntegrityError:
         await db.rollback()
@@ -187,7 +192,7 @@ async def view_permissions(db:AsyncSession):
     return permissions
 
 
-async def link_role_permisson(Payload: Permissions_schema,Payload2:Role_schema, db:AsyncSession):
+async def link_role_permisson(Payload: Link_role_permission_schema, db:AsyncSession):
 
     """
     Link (assign) a permission to a role.
@@ -219,14 +224,13 @@ async def link_role_permisson(Payload: Permissions_schema,Payload2:Role_schema, 
     """
 
     # 1) Find role by name
-    res = await(db.execute(select(Role).where(Role.role_name== Payload2.role_name)))
-    role_record = res.scalar_one_or_none()
+    role_query = RoleQuery(db)
+    role_record = await role_query.get_role(Payload.role_name)
     if not role_record:
         raise HTTPException(status_code= 404,detail="Role doesnot exist")
     
     # 1) Find permission by code
-    res = await(db.execute(select(Permission).where(Permission.code == Payload.code)))
-    permission = res.scalar_one_or_none()
+    permission = await role_query.get_permission(Payload.code)
     if not permission:
         raise HTTPException(status_code= 404,detail="Permission doesnot exist")
     

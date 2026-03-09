@@ -67,8 +67,8 @@ export default function ConsentPage() {
   const navigate = useNavigate();
   const [answers, setAnswers] = useState({});
   const [signature, setSignature] = useState('');
-  const [wantResults, setWantResults] = useState(false);
-  const [resultEmail, setResultEmail] = useState('');
+  //const [wantResults, setWantResults] = useState(false);
+  //const [resultEmail, setResultEmail] = useState('');
   const [error, setError] = useState('');
 
   const setAnswer = (id, val) => setAnswers({ ...answers, [id]: val });
@@ -211,11 +211,11 @@ export default function ConsentPage() {
           <span className="text-slate-400 ml-1">(recorded automatically)</span>
         </span>
       </div>
-
-      {/* ── Divider ── */}
+      
+      {/* 
       <hr className="border-slate-100 mb-5" />
-
-      {/* ── Section 3: Optional Results Request ── */}
+      */}
+      {/* 
       <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
         Sharing Study Results (Optional)
       </p>
@@ -244,7 +244,8 @@ export default function ConsentPage() {
           />
         )}
       </div>
-
+      */}
+      
       {/* ── Progress counter ── */}
       <div className="flex items-center justify-between text-xs text-slate-400 mb-4">
         <span>

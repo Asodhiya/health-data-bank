@@ -4,11 +4,12 @@ from app.core.security import PasswordHash, generate_reset_token, hash_reset_tok
 from app.middleware.signup_validation import UserSignup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.db.models import User
+from app.db.models import User, Role
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone
-from app.schemas.schemas import ForgotPasswordIn
+from app.schemas.schemas import ForgotPasswordIn,Role_user_link
 from app.services.email_sender import send_reset_email
+from app.db.queries.Queries import RoleQuery, UserQuery
 
 async def authenticate_user(email: str, password: str, db: AsyncSession):
     """Checks email and password if in db or not"""
@@ -62,6 +63,39 @@ async def create_user(payload: UserSignup, db: AsyncSession):
         await db.rollback()
         raise HTTPException(status_code=409, detail="User already exists")
 
+    await db.refresh(user)
+    return user
+
+async def create_user_with_role(payload: UserSignup, role_name: str, db: AsyncSession):
+    user_query = UserQuery(db)
+    role_query = RoleQuery(db)
+
+    user = await user_query.get_user(payload.username)
+    if user:
+        raise HTTPException(status_code=409, detail="User already exists")
+
+    role = await role_query.get_role(role_name)
+    if not role:
+        raise HTTPException(status_code=500, detail=f"{role_name} role not configured")
+
+    hashedpwd = PasswordHash.from_password(payload.password).to_str()
+
+    user = User(
+        username=payload.username,
+        email=payload.email,
+        password_hash=hashedpwd,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        phone=payload.phone,
+        status=True,
+    )
+
+    db.add(user)
+    await db.flush()
+
+    await role_query.assign_role_to_user(user, role)
+    await role_query.put_role(user.user_id, role_name)
+    await db.commit()
     await db.refresh(user)
     return user
 

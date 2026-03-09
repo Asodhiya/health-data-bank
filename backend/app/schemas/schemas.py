@@ -44,6 +44,10 @@ class SurveyRequest(BaseModel):
 class Role_schema(BaseModel):
     role_name: str
 
+class Role_user_link(BaseModel):
+    role_name : str
+    username: str
+
 class Permissions_schema(BaseModel):
     code: str
     description: str
@@ -62,3 +66,26 @@ class UpdatePersonalInfoPayload(BaseModel):
 
 class ForgotPasswordIn(BaseModel):
     email: EmailStr
+
+class Link_role_permission_schema(BaseModel):
+    code: str
+    role_name: str
+
+class SignupInviteRequest(BaseModel):
+    email: EmailStr
+    target_role: str
+
+class HealthGoalPayload(BaseModel):
+    target_value: float
+    unit: str
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+
+class HealthGoalUpdate(BaseModel):
+    target_value: Optional[float] = None
+    unit: Optional[str] = None
+    status: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+
+

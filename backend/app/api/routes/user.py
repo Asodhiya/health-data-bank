@@ -8,6 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter()
 
 @router.post("/update_user")
-async def update_user(Payload:UpdatePersonalInfoPayload ,user: User = Depends(check_current_user),db: AsyncSession = Depends(get_db)):
+async def update_user_profile(Payload:UpdatePersonalInfoPayload ,user: User = Depends(check_current_user),db: AsyncSession = Depends(get_db)):
     await update_user(Payload,user,db)
     return "detail : User updated sucessfully"

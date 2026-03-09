@@ -1,13 +1,24 @@
-import bcrypt
-from datetime import datetime, timedelta, timezone
-from jose import jwt, JWTError
-import os
-from dotenv import load_dotenv
-import secrets
 import hashlib
+import os
+import secrets
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+
+import bcrypt
+from dotenv import load_dotenv
+from jose import jwt, JWTError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import SignupInvite, Role
+from sqlalchemy import select
+from fastapi import HTTPException
+
+
 
 
 load_dotenv()
+
+
 class PasswordHash:
     __slots__ = ("_value",)
 
@@ -34,8 +45,51 @@ class PasswordHash:
     @classmethod
     def from_str(cls, value: str):
         return cls(value.encode("utf-8"))
-    
 
+
+@dataclass
+class InviteTokenGenerator:
+    current_user_id: int
+    current_user_role: str
+    target_role: str
+    target_email: str
+    expires_in_hours: int = 48
+    base_url: str = "https://yourapp.com"
+
+    token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
+    expires_at: datetime = field(init=False)
+
+    def __post_init__(self):
+        self.target_role = self.target_role.lower()
+        self.expires_at = datetime.utcnow() + timedelta(hours=self.expires_in_hours)
+
+
+    def build_model(self, role_id) -> SignupInvite:
+        return SignupInvite(
+            email=self.target_email,
+            token_hash=hash_reset_token(self.token),
+            role_id=role_id,
+            expires_at=self.expires_at,
+            used=False,
+            invited_by=self.current_user_id,
+        )
+
+    async def save(self, db: AsyncSession) -> dict:
+        role_result = await db.execute(select(Role).where(Role.role_name == self.target_role))
+        role = role_result.scalar_one_or_none()
+        if not role:
+            raise HTTPException(status_code=400, detail=f"Role '{self.target_role}' not found")
+
+        invite = self.build_model(role.role_id)
+        db.add(invite)
+        await db.commit()
+        await db.refresh(invite)
+
+        return {
+            "invite_url": f"{self.base_url}/register?token={self.token}",
+            "role": self.target_role,
+            "expires_at": self.expires_at,
+        }
 
 def create_access_token(data: dict, expires_minutes: int | None = None) -> str:
     to_encode = data.copy()

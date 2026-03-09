@@ -27,12 +27,16 @@ import IntakePage from "./pages/onboarding/IntakePage";
 
 // ── Shared pages ──
 import ProfilePage from "./pages/shared/ProfilePage";
+import SurveyBuilderPage from "./pages/shared/SurveyBuilderPage";
 
 // ── Participant pages ──
 import FormListPage from "./pages/participant/FormListPage";
+import SurveyFillPage from "./pages/participant/SurveyFillPage";
+import HealthGoals from "./pages/participant/HealthGoals";
+import Messages from "./pages/participant/Message";
 
 function App() {
-  const [userRole, setUserRole] = useState("participant"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
+  const [userRole, setUserRole] = useState("admin"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
 
   return (
     <BrowserRouter>
@@ -48,43 +52,68 @@ function App() {
         {/* ── Onboarding routes (participant only) ── */}
         <Route element={<ParticipantRoute userRole={userRole} />}>
           <Route element={<OnboardingLayout />}>
-            <Route path="/onboarding/background" element={<BackgroundInfoPage />} />
+            <Route
+              path="/onboarding/background"
+              element={<BackgroundInfoPage />}
+            />
             <Route path="/onboarding/consent" element={<ConsentPage />} />
             <Route path="/onboarding/intake" element={<IntakePage />} />
           </Route>
         </Route>
 
-        
         <Route path="/" element={<DefaultRoute userRole={userRole} />} />
-        <Route path="/dashboard" element={<DefaultRoute userRole={userRole} />} />
+        <Route
+          path="/dashboard"
+          element={<DefaultRoute userRole={userRole} />}
+        />
         <Route path="/logout" element={<Navigate to="/login" replace />} />
 
         <Route element={<AdminRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/admin/profile" element={<ProfilePage role="admin" />} />
+            <Route
+              path="/admin/profile"
+              element={<ProfilePage role="admin" />}
+            />
+            <Route path="/surveys" element={<SurveyBuilderPage />} />
           </Route>
         </Route>
 
         <Route element={<ParticipantRoute userRole={userRole} />}>
           <Route element={<NoSideDashboardLayout role={userRole} />}>
             <Route path="/participant" element={<ParticipantDashboard />} />
-            <Route path="/participant/profile" element={<ProfilePage role="participant" />} />
+            <Route
+              path="/participant/profile"
+              element={<ProfilePage role="participant" />}
+            />
+            <Route path="/participant/healthgoals" element={<HealthGoals />} />
+            <Route path="/participant/messages" element={<Messages />} />
             <Route path="/participant/survey" element={<FormListPage />} />
+            <Route
+              path="/participant/surveys/:id"
+              element={<SurveyFillPage />}
+            />
           </Route>
         </Route>
 
         <Route element={<CaretakerRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/caretaker" element={<CaretakerDashboard />} />
-            <Route path="/caretaker/profile" element={<ProfilePage role="caretaker" />} />
+            <Route
+              path="/caretaker/profile"
+              element={<ProfilePage role="caretaker" />}
+            />
           </Route>
         </Route>
 
         <Route element={<ResearcherRoute userRole={userRole} />}>
           <Route element={<DashboardLayout role={userRole} />}>
             <Route path="/researcher" element={<ResearcherDashboard />} />
-            <Route path="/researcher/profile" element={<ProfilePage role="researcher" />} />
+            <Route
+              path="/researcher/profile"
+              element={<ProfilePage role="researcher" />}
+            />
+            <Route path="/survey-builder" element={<SurveyBuilderPage />} />
           </Route>
         </Route>
       </Routes>

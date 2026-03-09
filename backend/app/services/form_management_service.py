@@ -58,7 +58,7 @@ async def create_survey_form(form_data: SurveyCreate, user_id: UUID, db: AsyncSe
 
 async def list_researcher_forms(db: AsyncSession):
     """List all researcher forms""" #the entire researcher forms
-    query = select(SurveyForm).order_by(desc(SurveyForm.created_at))
+    query = select(SurveyForm).options(selectinload(SurveyForm.fields).selectinload(FormField.options)).order_by(desc(SurveyForm.created_at))
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -123,8 +123,8 @@ async def delete_survey_form(form_id: UUID,user_id: UUID,db: AsyncSession):
     return {"msg": "form deleted"}
 
 
-async def publish_survey_form(form_id: UUID,group_id: UUID, user_id: UUID,db: AsyncSession):
-    """Publish form"""
+async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: AsyncSession):
+    """Publish form and assign to a group"""
     form = await get_form_by_id(form_id, db)
     if not form:
         return {"msg": "form not found"}
@@ -137,6 +137,12 @@ async def publish_survey_form(form_id: UUID,group_id: UUID, user_id: UUID,db: As
     if not group_result.scalar_one_or_none():
         raise ValueError("Group not found")
 
+    existing_deployment = await db.execute(
+        select(FormDeployment).where(FormDeployment.form_id == form_id, FormDeployment.group_id == group_id)
+    )
+    if existing_deployment.scalar_one_or_none():
+        raise ValueError("This form is already deployed to this group")
+
     deployment = FormDeployment(
         form_id=form_id,
         group_id=group_id,
@@ -146,7 +152,7 @@ async def publish_survey_form(form_id: UUID,group_id: UUID, user_id: UUID,db: As
 
     form.status = "PUBLISHED"
     await db.commit()
-    return {"msg": "form has been published"}
+    return {"msg": "form has been published and assigned to group"}
 
 
 async def unpublish_survey_form(form_id: UUID,user_id: UUID,db: AsyncSession):
@@ -156,9 +162,14 @@ async def unpublish_survey_form(form_id: UUID,user_id: UUID,db: AsyncSession):
         return {"msg": "form not found"}
 
     if form.created_by != user_id:
-        raise PermissionError("Not authorized to publish this form")
+        raise PermissionError("Not authorized to unpublish this form")
+
+    deployment_query = select(FormDeployment).where(FormDeployment.form_id == form_id)
+    deployment_result = await db.execute(deployment_query)
+    deployments = deployment_result.scalars().all()
+    for deployment in deployments:
+        await db.delete(deployment)
 
     form.status = "DRAFT"
     await db.commit()
     return {"msg": "form has been unpublished, back to DRAFT status"}
-

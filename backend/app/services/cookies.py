@@ -11,5 +11,5 @@ def _set_cookie(response: Response, token: str):
         secure=False, # Set to True in production (HTTPS)
         samesite="lax",
         path="/",
-        max_age=  60 
+        max_age= expire_minutes * 60
     )

@@ -8,6 +8,7 @@ What we are testing:
 
 Run with:
     pytest tests/services/test_user_updates.py -v
+    pytest tests/services/test_user_updates.py -v --html=tests/services/test_user_updates_report.html --self-contained-html 
 """
 
 import pytest

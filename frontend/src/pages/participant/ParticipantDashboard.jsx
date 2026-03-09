@@ -1,6 +1,20 @@
-import { Link } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
+import { useState } from "react";
 
 export default function ParticipantDashboard() {
+  // For now we are setting up our use mock data here :
+
+  const { user } = useOutletContext();
+
+  console.log(user);
+
+  // Current Date:
+  const todayFormatted = new Date().toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
   return (
     <div className="max-w-6xl mx-auto space-y-6 p-2 md:p-0">
       {/* STEP 1: TOP WELCOME BANNER */}
@@ -8,7 +22,7 @@ export default function ParticipantDashboard() {
         {/* Left Side: Greeting & Pill */}
         <div className="space-y-3">
           <h1 className="text-2xl md:text-3xl font-bold text-slate-800">
-            Good morning, Bobo Boys! ☀️
+            Good morning, {user?.firstName}! ☀️
           </h1>
 
           {/* Hydration Pill */}
@@ -52,7 +66,7 @@ export default function ParticipantDashboard() {
           {/* Date Info */}
           <div>
             <p className="text-sm font-medium text-slate-500">Today</p>
-            <p className="text-lg font-bold text-slate-800">Feb 19, 2026</p>
+            <p className="text-lg font-bold text-slate-800">{todayFormatted}</p>
           </div>
         </div>
       </div>
