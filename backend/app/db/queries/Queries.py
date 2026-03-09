@@ -4,8 +4,11 @@ from app.db.models import Role, User, UserRole, Permission, ParticipantProfile, 
 from fastapi import HTTPException, status
 import uuid
 from sqlalchemy.exc import IntegrityError
-from app.schemas.schemas import HealthGoalUpdate, GoalTemplateCreate, GoalTemplateUpdate
+from app.schemas.schemas import HealthGoalUpdate, GoalTemplateCreate, GoalTemplateUpdate, GoalProgressLog
 from app.schemas.data_element_schema import DataElementCreate
+from app.services.participant_survey_service import _get_deployed_forms
+from datetime import date, datetime, timezone
+from app.db.models import FormField
 
 def get_participant_id(current_user: User) -> uuid.UUID:
     """
@@ -141,6 +144,7 @@ class ParticipantQuery:
         return HealthDataPoint(
             participant_id=participant_id,
             element_id=goal.element_id,
+            observed_at=datetime.now(timezone.utc),
             source_type="goal",
             source_submission_id=None,
             source_field_id=None,
@@ -213,6 +217,49 @@ class ParticipantQuery:
         await self.db.delete(goal)
         await self.db.flush()
 
+    async def log_progress(self, goal_id: uuid.UUID, participant_id: uuid.UUID, payload: GoalProgressLog):
+        result = await self.db.execute(
+            select(HealthGoal).where(
+                HealthGoal.goal_id == goal_id,
+                HealthGoal.participant_id == participant_id
+            )
+        )
+        goal = result.scalar_one_or_none()
+        if not goal:
+            raise HTTPException(status_code=404, detail="Goal not found")
+
+        log_date = (payload.observed_at or datetime.now(timezone.utc)).date()
+
+        # Look for an existing goal data point for this element today
+        existing_result = await self.db.execute(
+            select(HealthDataPoint).where(
+                HealthDataPoint.participant_id == participant_id,
+                HealthDataPoint.element_id == goal.element_id,
+                HealthDataPoint.source_type == "goal",
+                func.date(HealthDataPoint.observed_at) == log_date,
+            ).order_by(HealthDataPoint.observed_at.desc()).limit(1)
+        )
+        data_point = existing_result.scalar_one_or_none()
+
+        if data_point:
+            data_point.value_number = float(data_point.value_number or 0) + payload.value
+            if payload.notes:
+                data_point.notes = payload.notes
+        else:
+            data_point = HealthDataPoint(
+                participant_id=participant_id,
+                element_id=goal.element_id,
+                observed_at=payload.observed_at or datetime.now(timezone.utc),
+                source_type="goal",
+                value_number=payload.value,
+                notes=payload.notes,
+            )
+            self.db.add(data_point)
+
+        await self.db.flush()
+        await self.db.refresh(data_point)
+        return data_point
+
 class GoalTemplateQuery:
 
     def __init__(self, db: AsyncSession):
@@ -269,50 +316,99 @@ class DataElementQuery:
         result = await self.db.execute(
             select(DataElement).where(DataElement.element_id == element_id)
         )
-        return result.scalar_one_or_none()
+        element = result.scalar_one_or_none()
+        if not element:
+            raise HTTPException(status_code=404, detail="Data element not found")
+        return element
 
-    async def add_data_element(self,payload: DataElementCreate):
+    async def add_data_element(self, payload: DataElementCreate):
         data_element = DataElement(**payload.model_dump())
         self.db.add(data_element)
         try:
             await self.db.flush()
         except IntegrityError:
-            raise HTTPException(status_code=409, detail="data_element already exists")
+            raise HTTPException(status_code=409, detail="A data element with this code already exists")
         await self.db.refresh(data_element)
         return data_element
 
     async def delete_data_element(self, element_id: uuid.UUID):
         result = await self.db.execute(
-            select(DataElement).where(
-                DataElement.element_id == element_id,
-            )
+            select(DataElement).where(DataElement.element_id == element_id)
         )
         element = result.scalar_one_or_none()
         if not element:
-            raise HTTPException(status_code=404, detail=" data element not found")
-
-        await self.db.delete(element)
-        await self.db.flush()
+            raise HTTPException(status_code=404, detail="Data element not found")
+        try:
+            await self.db.delete(element)
+            await self.db.flush()
+        except IntegrityError:
+            raise HTTPException(status_code=409, detail="Cannot delete data element: it is referenced by existing mappings or health data points")
 
     async def map_field(self, field_id: uuid.UUID, element_id: uuid.UUID, transform_rule: dict | None = None):
+        # Verify the field exists
+        
+        field = await self.db.get(FormField, field_id)
+        if not field:
+            raise HTTPException(status_code=404, detail="Form field not found")
+
+        # Verify the element exists and is active
+        element = await self.db.get(DataElement, element_id)
+        if not element:
+            raise HTTPException(status_code=404, detail="Data element not found")
+        if not element.is_active:
+            raise HTTPException(status_code=400, detail="Data element is inactive and cannot be mapped")
+
+        # Check if this exact mapping already exists
+        existing = await self.db.execute(
+            select(FieldElementMap).where(
+                FieldElementMap.field_id == field_id,
+                FieldElementMap.element_id == element_id,
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="This field is already mapped to the specified element")
+
         mapping = FieldElementMap(field_id=field_id, element_id=element_id, transform_rule=transform_rule)
         self.db.add(mapping)
         try:
             await self.db.flush()
         except IntegrityError:
-            raise HTTPException(status_code=409, detail="Field already mapped to this element")
+            raise HTTPException(status_code=409, detail="This field is already mapped to the specified element")
         await self.db.refresh(mapping)
         return mapping
 
     async def get_field_mappings(self, field_id: uuid.UUID):
+        # Verify the field exists
+        from app.db.models import FormField
+        field = await self.db.get(FormField, field_id)
+        if not field:
+            raise HTTPException(status_code=404, detail="Form field not found")
+
         result = await self.db.execute(
             select(FieldElementMap, DataElement)
             .join(DataElement, DataElement.element_id == FieldElementMap.element_id)
             .where(FieldElementMap.field_id == field_id)
         )
-        return result.all()
+        return [
+            {
+                **{k: v for k, v in mapping.__dict__.items() if not k.startswith("_")},
+                "element": {k: v for k, v in element.__dict__.items() if not k.startswith("_")},
+            }
+            for mapping, element in result.all()
+        ]
 
     async def unmap_field(self, field_id: uuid.UUID, element_id: uuid.UUID):
+        # Verify the field exists
+        from app.db.models import FormField
+        field = await self.db.get(FormField, field_id)
+        if not field:
+            raise HTTPException(status_code=404, detail="Form field not found")
+
+        # Verify the element exists
+        element = await self.db.get(DataElement, element_id)
+        if not element:
+            raise HTTPException(status_code=404, detail="Data element not found")
+
         result = await self.db.execute(
             select(FieldElementMap).where(
                 FieldElementMap.field_id == field_id,
@@ -321,7 +417,7 @@ class DataElementQuery:
         )
         mapping = result.scalar_one_or_none()
         if not mapping:
-            raise HTTPException(status_code=404, detail="Mapping not found")
+            raise HTTPException(status_code=404, detail="No mapping found between this field and element")
         await self.db.delete(mapping)
         await self.db.flush()
 
@@ -332,19 +428,16 @@ class StatsQuery:
 
     async def get_participant_summary(self, participant_id: uuid.UUID) -> dict:
         # Active forms: deployments for groups the participant belongs to, not revoked
-        active_forms_result = await self.db.execute(
-            select(func.count(distinct(FormDeployment.form_id)))
-            .join(GroupMember, GroupMember.group_id == FormDeployment.group_id)
-            .where(
-                GroupMember.participant_id == participant_id,
-                FormDeployment.revoked_at.is_(None),
-            )
-        )
-        active_forms = active_forms_result.scalar() or 0
+        deployed = await _get_deployed_forms(participant_id, self.db)
+        active_forms = len(deployed)
 
         # Forms filled today: distinct form_ids submitted on the current calendar day
         forms_filled_result = await self.db.execute(
-            select
+            select(func.count(distinct(FormSubmission.form_id)))
+            .where(
+                FormSubmission.participant_id == participant_id,
+                func.date(FormSubmission.submitted_at) == date.today()
+            )
         )
         forms_filled = forms_filled_result.scalar() or 0
 
@@ -355,19 +448,20 @@ class StatsQuery:
         )
         active_goals = active_goals_result.scalar() or 0
 
-
         # Goals met: latest survey data point per element >= target_value
         # Subquery: most recent survey observation per element for this participant
         latest_obs = (
             select(
                 HealthDataPoint.element_id,
-                func.date(HealthDataPoint.observed_at).func.current_date(),
+                func.max(HealthDataPoint.observed_at).label("latest_at")
             )
             .where(
                 HealthDataPoint.participant_id == participant_id,
-                HealthDataPoint.source_type == "health_goals",
+                HealthDataPoint.source_type == "goal",
+                func.date(HealthDataPoint.observed_at) == date.today(),
             )
             .group_by(HealthDataPoint.element_id)
+            .subquery()
         )
 
         goals_met_result = await self.db.execute(
@@ -378,7 +472,7 @@ class StatsQuery:
                 (HealthDataPoint.element_id == HealthGoal.element_id)
                 & (HealthDataPoint.observed_at == latest_obs.c.latest_at)
                 & (HealthDataPoint.participant_id == participant_id)
-                & (HealthDataPoint.source_type == "survey"),
+                & (HealthDataPoint.source_type == "goal"),
             )
             .where(
                 HealthGoal.participant_id == participant_id,
@@ -392,5 +486,6 @@ class StatsQuery:
             "forms_filled": forms_filled,
             "active_goals": active_goals,
             "goals_met": goals_met,
+            "goal_remaining": active_goals - goals_met
         }
 

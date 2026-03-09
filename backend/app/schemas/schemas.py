@@ -110,6 +110,11 @@ class HealthGoalUpdate(BaseModel):
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
 
+class GoalProgressLog(BaseModel):
+    value: float
+    notes: Optional[str] = None
+    observed_at: Optional[datetime] = None
+
 
 # ── Data Visualization ────────────────────────────────────────────────────────
 
@@ -162,13 +167,14 @@ class ParticipantSummaryOut(BaseModel):
     active_forms    — forms currently deployed/assigned to the participant.
     forms_filled    — how many of those they have submitted at least once.
     active_goals    — number of health goals the participant is tracking.
-    goals_met       — goals where the most recent survey data point for that
+    goals_met       — goals where today's most recent goal data point for that
                       element meets or exceeds the target value.
     """
     active_forms: int
     forms_filled: int
     active_goals: int
     goals_met: int
+    goal_remaining: int
 
 
 class GroupComparisonElementOut(BaseModel):

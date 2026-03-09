@@ -458,6 +458,10 @@ class DataElement(Base):
     is_active: Mapped[bool | None] = mapped_column(Boolean, server_default=text("TRUE"))
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 
+    health_data_points: Mapped[list["HealthDataPoint"]] = relationship(
+        "HealthDataPoint", back_populates="data_element", cascade="all, delete-orphan"
+    )
+
 
 class FieldElementMap(Base):
     __tablename__ = "field_element_map"
@@ -476,7 +480,7 @@ class HealthDataPoint(Base):
 
     data_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     participant_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("participant_profile.participant_id"))
-    element_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("data_elements.element_id"))
+    element_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("data_elements.element_id", ondelete="CASCADE"))
     observed_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
     source_type: Mapped[str | None] = mapped_column(Text)
     source_submission_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True))
@@ -488,6 +492,8 @@ class HealthDataPoint(Base):
     value_json: Mapped[dict | None] = mapped_column(JSONB)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+    data_element: Mapped["DataElement"] = relationship("DataElement", back_populates="health_data_points")
 
 
 

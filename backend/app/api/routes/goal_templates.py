@@ -12,6 +12,7 @@ from uuid import UUID
 from app.db.session import get_db
 from app.db.models import User
 from app.core.dependency import require_permissions
+from app.core.permissions import GOAL_TEMPLATE_VIEW, GOAL_TEMPLATE_CREATE, GOAL_TEMPLATE_EDIT
 from app.db.queries.Queries import GoalTemplateQuery
 from app.schemas.schemas import GoalTemplateCreate, GoalTemplateUpdate
 
@@ -20,7 +21,7 @@ router = APIRouter()
 
 @router.get("")
 async def list_goal_templates(db: AsyncSession = Depends(get_db),
-                               _=Depends(require_permissions("goal_template:view"))):
+                               _=Depends(require_permissions(GOAL_TEMPLATE_VIEW))):
     """List all active goal templates with their linked data element."""
     return await GoalTemplateQuery(db).list_templates()
 
@@ -29,7 +30,7 @@ async def list_goal_templates(db: AsyncSession = Depends(get_db),
 async def create_goal_template(
     payload: GoalTemplateCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions("goal_template:create")),
+    current_user: User = Depends(require_permissions(GOAL_TEMPLATE_CREATE)),
 ):
     """Create a new goal template linked to a data element."""
     return await GoalTemplateQuery(db).create_template(payload, current_user.user_id)
@@ -40,7 +41,7 @@ async def update_goal_template(
     template_id: UUID,
     payload: GoalTemplateUpdate,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_permissions("goal_template:edit")),
+    _=Depends(require_permissions(GOAL_TEMPLATE_EDIT)),
 ):
     """Update name, description, default target, or active status of a template."""
     return await GoalTemplateQuery(db).update_template(template_id, payload)
@@ -50,7 +51,7 @@ async def update_goal_template(
 async def deactivate_goal_template(
     template_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_permissions("goal_template:edit")),
+    _=Depends(require_permissions(GOAL_TEMPLATE_EDIT)),
 ):
     """Soft-delete a goal template (sets is_active=False)."""
     await GoalTemplateQuery(db).delete_template(template_id)

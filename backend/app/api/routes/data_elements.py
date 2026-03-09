@@ -24,13 +24,14 @@ from uuid import UUID
 
 from app.db.session import get_db
 from app.core.dependency import require_permissions
+from app.core.permissions import ELEMENT_VIEW, ELEMENT_CREATE, ELEMENT_DELETE, ELEMENT_MAP
 from app.db.queries.Queries import DataElementQuery
 from app.schemas.data_element_schema import DataElementCreate, FieldMapPayload
 
 router = APIRouter()
 
 
-@router.get("/elements", dependencies=[Depends(require_permissions("element:view"))])
+@router.get("/elements", dependencies=[Depends(require_permissions(ELEMENT_VIEW))])
 async def list_data_elements(db: AsyncSession = Depends(get_db)):
     """Return all active data elements.
 
@@ -43,7 +44,7 @@ async def list_data_elements(db: AsyncSession = Depends(get_db)):
     return await data_element_queries.get_data_elements()
 
 
-@router.post("/data_element", dependencies=[Depends(require_permissions("element:create"))])
+@router.post("/data_element", dependencies=[Depends(require_permissions(ELEMENT_CREATE))])
 async def create_data_element(payload: DataElementCreate, db: AsyncSession = Depends(get_db)):
     """Create a new data element.
 
@@ -67,7 +68,7 @@ async def create_data_element(payload: DataElementCreate, db: AsyncSession = Dep
     return await data_element_queries.add_data_element(payload)
 
 
-@router.get("/{element_id}", dependencies=[Depends(require_permissions("element:view"))])
+@router.get("/{element_id}", dependencies=[Depends(require_permissions(ELEMENT_VIEW))])
 async def get_data_element(element_id: UUID, db: AsyncSession = Depends(get_db)):
     """Fetch a single data element by its UUID.
 
@@ -85,7 +86,7 @@ async def get_data_element(element_id: UUID, db: AsyncSession = Depends(get_db))
     return element
 
 
-@router.delete("/{element_id}", dependencies=[Depends(require_permissions("element:delete"))])
+@router.delete("/{element_id}", dependencies=[Depends(require_permissions(ELEMENT_DELETE))])
 async def delete_data_element(element_id: UUID, db: AsyncSession = Depends(get_db)):
     """Permanently delete a data element.
 
@@ -103,7 +104,7 @@ async def delete_data_element(element_id: UUID, db: AsyncSession = Depends(get_d
     return await data_element_queries.delete_data_element(element_id)
 
 
-@router.post("/fields/{field_id}/map", dependencies=[Depends(require_permissions("element:map"))])
+@router.post("/fields/{field_id}/map", dependencies=[Depends(require_permissions(ELEMENT_MAP))])
 async def map_field_to_element(field_id: UUID, payload: FieldMapPayload, db: AsyncSession = Depends(get_db)):
     """Map a form field to a data element.
 
@@ -133,7 +134,7 @@ async def map_field_to_element(field_id: UUID, payload: FieldMapPayload, db: Asy
     return await q.map_field(field_id, payload.element_id, payload.transform_rule)
 
 
-@router.delete("/fields/{field_id}/map", dependencies=[Depends(require_permissions("element:map"))])
+@router.delete("/fields/{field_id}/map", dependencies=[Depends(require_permissions(ELEMENT_MAP))])
 async def unmap_field(field_id: UUID, element_id: UUID, db: AsyncSession = Depends(get_db)):
     """Remove the mapping between a form field and a data element.
 
@@ -153,7 +154,7 @@ async def unmap_field(field_id: UUID, element_id: UUID, db: AsyncSession = Depen
     await q.unmap_field(field_id, element_id)
 
 
-@router.get("/fields/{field_id}/map", dependencies=[Depends(require_permissions("element:view"))])
+@router.get("/fields/{field_id}/map", dependencies=[Depends(require_permissions(ELEMENT_VIEW))])
 async def get_field_mapping(field_id: UUID, db: AsyncSession = Depends(get_db)):
     """Return all data element mappings for a form field.
 

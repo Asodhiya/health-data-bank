@@ -109,4 +109,29 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(answers),
     }),
+
+  // ── Participant Goals ──
+  getGoals: () =>
+    request('/participant/goals'),
+
+  getGoal: (goalId) =>
+    request(`/participant/goals/${goalId}`),
+
+  addGoalFromTemplate: (templateId, targetValue) =>
+    request(`/participant/goals/add/${templateId}${targetValue != null ? `?target_value=${targetValue}` : ''}`, {
+      method: 'POST',
+    }),
+
+  updateGoal: (goalId, payload) =>
+    request(`/participant/goals/${goalId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteGoal: (goalId) =>
+    request(`/participant/goals/${goalId}`, { method: 'DELETE' }),
+
+  // ── Goal Templates (participant browse) ──
+  getGoalTemplates: () =>
+    request('/participant/goal-templates'),
 };

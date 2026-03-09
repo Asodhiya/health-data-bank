@@ -5,6 +5,7 @@ from app.db.session import get_db
 from app.db.models import Role
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependency import require_permissions
+from app.core.permissions import ROLE_READ_ALL
 router = APIRouter()
 
 
@@ -13,7 +14,7 @@ async def add_roles(Payload: Role_schema,db: AsyncSession = Depends(get_db)):
     role = await(addroles(Payload,db))
     return role
 
-@router.get("/view_roles",dependencies=[Depends(require_permissions("role:read_all"))])
+@router.get("/view_roles",dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def view_roles( db: AsyncSession = Depends(get_db)):
     roles = await(viewroles(db))
     return roles
