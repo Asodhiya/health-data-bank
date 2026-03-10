@@ -1,21 +1,19 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../services/api';
 
 const PASSWORD_RULES = [
   { label: 'Min 8 characters', test: (p) => p.length >= 8 },
-  { label: 'uppercase', test: (p) => /[A-Z]/.test(p) },
-  { label: 'lowercase', test: (p) => /[a-z]/.test(p) },
-  { label: 'number', test: (p) => /\d/.test(p) },
-  { label: 'special character', test: (p) => /[^A-Za-z0-9]/.test(p) },
+  { label: 'uppercase',        test: (p) => /[A-Z]/.test(p) },
+  { label: 'lowercase',        test: (p) => /[a-z]/.test(p) },
+  { label: 'number',           test: (p) => /\d/.test(p) },
+  { label: 'special character',test: (p) => /[^A-Za-z0-9]/.test(p) },
 ];
 
-// strips everything except digits
 function digitsOnly(value) {
   return value.replace(/\D/g, '');
 }
 
-// formats as (902) 555-1234
 function formatPhone(digits) {
   if (digits.length <= 3) return digits;
   if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
@@ -24,37 +22,62 @@ function formatPhone(digits) {
 
 function getPhoneHint(digits) {
   if (digits.length === 0) return null;
-  if (digits.length < 10) return { text: `${10 - digits.length} more digit${10 - digits.length === 1 ? '' : 's'} needed`, valid: false };
+  if (digits.length < 10)  return { text: `${10 - digits.length} more digit${10 - digits.length === 1 ? '' : 's'} needed`, valid: false };
   if (digits.length === 10) return { text: 'Valid phone number', valid: true };
   return { text: 'Too many digits (10 required)', valid: false };
 }
 
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token');
+
+  // ── Invite validation state ──
+  const [inviteStatus, setInviteStatus] = useState('loading'); // 'loading' | 'valid' | 'invalid'
+  const [inviteError, setInviteError]   = useState('');
+  const [inviteRole, setInviteRole]     = useState('');
+
+  // ── Form state ──
   const [form, setForm] = useState({
-    first_name: '',
-    last_name: '',
-    email: '',
-    username: '',
-    phone: '',
-    phoneDisplay: '',
-    password: '',
+    first_name:       '',
+    last_name:        '',
+    email:            '',          // pre-filled from invite, read-only
+    username:         '',
+    phone:            '',
+    phoneDisplay:     '',
+    password:         '',
     confirm_password: '',
   });
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [showConfirm,  setShowConfirm]  = useState(false);
+  const [error,        setError]        = useState('');
+  const [loading,      setLoading]      = useState(false);
+
+  // ── Validate token on mount ──
+  useEffect(() => {
+    if (!token) {
+      setInviteStatus('invalid');
+      setInviteError('No invite token found. You need a valid invite link to register.');
+      return;
+    }
+
+    api.validateInvite(token)
+      .then((data) => {
+        setForm((prev) => ({ ...prev, email: data.email }));
+        setInviteRole(data.role);
+        setInviteStatus('valid');
+      })
+      .catch((err) => {
+        setInviteStatus('invalid');
+        setInviteError(err.message || 'This invite link is invalid or has expired.');
+      });
+  }, [token]);
 
   const set = (field) => (e) => setForm({ ...form, [field]: e.target.value });
 
   const handlePhoneChange = (e) => {
     const digits = digitsOnly(e.target.value).slice(0, 10);
-    setForm({
-      ...form,
-      phone: digits,
-      phoneDisplay: formatPhone(digits),
-    });
+    setForm({ ...form, phone: digits, phoneDisplay: formatPhone(digits) });
   };
 
   const handleSubmit = async (e) => {
@@ -77,16 +100,17 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      await api.register({
-        first_name: form.first_name,
-        last_name: form.last_name,
-        email: form.email,
-        username: form.username,
-        phone: form.phone,
-        password: form.password,
+      await api.registerWithInvite(token, {
+        first_name:       form.first_name,
+        last_name:        form.last_name,
+        email:            form.email,
+        username:         form.username,
+        phone:            form.phone,
+        password:         form.password,
         confirm_password: form.confirm_password,
       });
-      navigate('/onboarding/background');
+      // Registration successful — send to login with a success flag
+      navigate('/login', { state: { registered: true } });
     } catch (err) {
       setError(err.message || 'Registration failed');
     } finally {
@@ -96,15 +120,47 @@ export default function RegisterPage() {
 
   const phoneHint = getPhoneHint(form.phone);
 
+  // ── Loading state while validating invite ──
+  if (inviteStatus === 'loading') {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 gap-3">
+        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-slate-500">Validating your invite link…</p>
+      </div>
+    );
+  }
+
+  // ── Invalid / missing token ──
+  if (inviteStatus === 'invalid') {
+    return (
+      <>
+        <div className="text-center mb-6">
+          <h2 className="text-2xl font-bold text-slate-800 mb-2">Invalid Invite</h2>
+        </div>
+        <div className="bg-rose-50 border border-rose-100 text-rose-700 text-sm px-4 py-4 rounded-lg mb-6 text-center">
+          {inviteError}
+        </div>
+        <p className="text-center text-sm text-slate-500">
+          Already have an account?{' '}
+          <Link to="/login" className="font-semibold text-blue-600 hover:underline italic">
+            Login
+          </Link>
+        </p>
+      </>
+    );
+  }
+
+  // ── Valid invite — show registration form ──
   return (
     <>
       <div className="text-center mb-6">
-        <h2 className="text-2xl font-bold text-slate-800 mb-2">
-          Create Account
-        </h2>
-        <p className="text-sm text-slate-500">
-          Fill in your details to get started
-        </p>
+        <h2 className="text-2xl font-bold text-slate-800 mb-2">Create Account</h2>
+        <p className="text-sm text-slate-500">Fill in your details to get started</p>
+        {inviteRole && (
+          <span className="inline-block mt-2 px-3 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-full uppercase tracking-wider">
+            Registering as: {inviteRole}
+          </span>
+        )}
       </div>
 
       {error && (
@@ -152,7 +208,7 @@ export default function RegisterPage() {
           </div>
         </div>
 
-        {/* Email */}
+        {/* Email — read-only, pre-filled from invite */}
         <div className="relative">
           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -162,16 +218,15 @@ export default function RegisterPage() {
           </span>
           <input
             type="email"
-            className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
-            placeholder="Email Address"
+            className="w-full pl-12 pr-4 py-3 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-500 cursor-not-allowed"
             value={form.email}
-            onChange={set('email')}
-            required
-            autoComplete="email"
+            readOnly
+            tabIndex={-1}
           />
+          <p className="text-xs text-slate-400 mt-1 ml-1">Email is set by your invite and cannot be changed</p>
         </div>
 
-        {/* Phone with live validation hint */}
+        {/* Phone */}
         <div>
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
@@ -300,7 +355,7 @@ export default function RegisterPage() {
                 key={i}
                 className={`transition-colors ${passed ? 'text-emerald-600 font-medium' : ''}`}
               >
-                {rule.label}{i < PASSWORD_RULES.length - 1 ? ' \u00B7' : ''}
+                {rule.label}{i < PASSWORD_RULES.length - 1 ? ' ·' : ''}
               </span>
             );
           })}
@@ -312,17 +367,13 @@ export default function RegisterPage() {
           className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors text-sm mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={loading}
         >
-          {loading ? 'Creating Account\u2026' : 'Create Account'}
+          {loading ? 'Creating Account…' : 'Create Account'}
         </button>
       </form>
 
-      {/* Login link */}
       <p className="text-center mt-6 text-sm text-slate-500">
         Already have an account?{' '}
-        <Link
-          to="/login"
-          className="font-semibold text-blue-600 hover:underline italic"
-        >
+        <Link to="/login" className="font-semibold text-blue-600 hover:underline italic">
           Login!
         </Link>
       </p>

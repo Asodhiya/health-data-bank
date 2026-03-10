@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const { refetch } = useAuth();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -17,7 +20,16 @@ export default function LoginPage() {
 
     try {
       await api.login(email, password);
-      navigate('/');
+      // Cookie is now set — hydrate the auth context to get the real role
+      await refetch();
+      // Re-call api.me() directly so we have the role in scope for the navigate
+      const me = await api.me();
+      const role = me.Role?.[0] ?? null;
+      if (role) {
+        navigate(`/${role}`, { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
     } catch (err) {
       setError(err.message || 'Invalid email or password');
     } finally {
@@ -57,7 +69,7 @@ export default function LoginPage() {
           <input
             type="email"
             className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
-            placeholder="Username or Email"
+            placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
@@ -117,7 +129,7 @@ export default function LoginPage() {
           className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors text-sm mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={loading}
         >
-          {loading ? 'Signing in\u2026' : 'Login'}
+          {loading ? 'Signing in…' : 'Login'}
         </button>
       </form>
 

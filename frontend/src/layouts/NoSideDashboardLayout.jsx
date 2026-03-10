@@ -1,6 +1,7 @@
-import { Outlet, Link, useLocation } from "react-router-dom";
+import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import api from "../utils/axiosInstance";
+import { api as authApi } from "../services/api";
 import { PARTICIPANT_NAV } from "../config/navigation";
 
 export default function NoSidebarDashboardLayout() {
@@ -9,6 +10,7 @@ export default function NoSidebarDashboardLayout() {
   const role = "Participant"; // Hardcoded since this layout is exclusive to them
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationMenuOpen, setIsNotificationMenuOpen] = useState(false);
+  const navigate = useNavigate();
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -174,7 +176,7 @@ export default function NoSidebarDashboardLayout() {
               }}
               className="w-8 h-8 rounded-full bg-green-600 hover:bg-green-700 text-white flex items-center justify-center font-bold transition-colors"
             >
-              {user.firstName.charAt(0)}
+              {user?.firstName?.charAt(0) ?? '?'}
             </button>
 
             {/* The Profile Dropdown Menu */}
@@ -195,13 +197,16 @@ export default function NoSidebarDashboardLayout() {
                   Settings
                 </Link>
                 <div className="border-t border-slate-100 my-1"></div>
-                <Link
-                  to="/logout"
-                  onClick={() => setIsProfileMenuOpen(false)}
-                  className="block px-4 py-2 text-sm text-rose-600 hover:bg-slate-50"
+                <button
+                  onClick={async () => {
+                    setIsProfileMenuOpen(false);
+                    await authApi.logout();
+                    navigate("/login");
+                  }}
+                  className="block w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-slate-50"
                 >
                   Logout
-                </Link>
+                </button>
               </div>
             )}
           </div>

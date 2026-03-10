@@ -23,12 +23,6 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
 
-  register: (payload) =>
-    request('/auth/register_participant', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
   logout: () =>
     request('/auth/logout', { method: 'POST' }),
 
@@ -105,28 +99,21 @@ export const api = {
     }),
 
   // ── Survey Fill (participant) ──
-  // Backend: GET /api/v1/participant/surveys/assigned
   getDeployedForms: () =>
     request('/participant/surveys/assigned'),
 
-  // Backend: GET /api/v1/participant/surveys/:formId
   getParticipantFormDetail: (formId) =>
     request(`/participant/surveys/${formId}`),
 
-  // Backend: GET /api/v1/participant/surveys/:formId/response
   getSurveyResponse: (formId) =>
     request(`/participant/surveys/${formId}/response`),
 
-  // Backend: POST /api/v1/participant/surveys/:formId/save
-  // Body: [{field_id, value}, ...]
   saveDraftAnswers: (formId, answers) =>
     request(`/participant/surveys/${formId}/save`, {
       method: 'POST',
       body: JSON.stringify(answers),
     }),
 
-  // Backend: POST /api/v1/participant/surveys/:formId/submit
-  // Body: [{field_id, value}, ...]
   submitSurvey: (formId, answers) =>
     request(`/participant/surveys/${formId}/submit`, {
       method: 'POST',
