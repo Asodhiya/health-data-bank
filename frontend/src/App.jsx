@@ -36,7 +36,7 @@ import HealthGoals from "./pages/participant/HealthGoals";
 import Messages from "./pages/participant/Message";
 
 function App() {
-  const [userRole, setUserRole] = useState("admin"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
+  const [userRole, setUserRole] = useState("participant"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
 
   return (
     <BrowserRouter>

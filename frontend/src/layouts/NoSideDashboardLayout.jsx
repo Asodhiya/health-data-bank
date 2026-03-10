@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
-import axios from "axios";
+import api from "../utils/axiosInstance";
 import { PARTICIPANT_NAV } from "../config/navigation";
 
 export default function NoSidebarDashboardLayout() {
@@ -10,21 +10,38 @@ export default function NoSidebarDashboardLayout() {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationMenuOpen, setIsNotificationMenuOpen] = useState(false);
 
-  const [user, setUser] = useState({
-    firstName: "Nima",
-    lastName: "Sherpa",
-  });
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    axios
-      .get("http://localhost:8000/api/v1/auth/me")
+    // 2. Make the API call
+    api
+      .get("/auth/me")
       .then((response) => {
-        setUser(response.data);
+        setUser({
+          firstName: response.data.first_name,
+          lastName: response.data.last_name,
+        });
       })
       .catch((error) => {
         console.error("Error fetching user:", error);
+      })
+      .finally(() => {
+        // 3. This ALWAYS runs, success or failure
+        setLoading(false);
       });
   }, []);
+
+  // 4. The "Safety Shield" - If loading, show a nice message instead of the app
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+        <p className="text-xl font-semibold animate-pulse text-blue-600">
+          Loading Health Data Bank... 🩺
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900">

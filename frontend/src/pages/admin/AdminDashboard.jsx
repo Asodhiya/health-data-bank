@@ -1,4 +1,101 @@
 import { useState, useEffect } from "react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+  PieChart,
+  Pie,
+} from "recharts";
+import api from "../../utils/axiosInstance";
+import { useOutletContext } from "react-router-dom";
+// Mock data array (This mimics what the backend will eventually send)
+const mockSecurityLogs = [
+  {
+    id: 1,
+    type: "critical",
+    title: "Failed Login Attempt",
+    desc: "IP: 192.168.1.45 • Unknown Device",
+    status: "Failed",
+    time: "2 mins ago",
+  },
+  {
+    id: 2,
+    type: "success",
+    title: "Caretaker Login",
+    desc: "User: Nayan • Chrome / Mac OS",
+    status: "Success",
+    time: "15 mins ago",
+  },
+  {
+    id: 3,
+    type: "info",
+    title: "Password Policy Updated",
+    desc: "Admin: You • System Settings",
+    status: "Modified",
+    time: "1 hour ago",
+  },
+  {
+    id: 4,
+    type: "success",
+    title: "Data Export Completed",
+    desc: "Researcher: Dr. Smith • Weekly Report",
+    status: "Success",
+    time: "2 hours ago",
+  },
+  {
+    id: 5,
+    type: "critical",
+    title: "Multiple Failed Logins",
+    desc: "IP: 45.33.22.11 • 5 attempts blocked",
+    status: "Blocked",
+    time: "3 hours ago",
+  },
+  {
+    id: 6,
+    type: "info",
+    title: "System Backup Created",
+    desc: "Automated Routine • Server US-East",
+    status: "Success",
+    time: "5 hours ago",
+  },
+  {
+    id: 7,
+    type: "success",
+    title: "Participant Account Created",
+    desc: "Admin: You • ID: #8849",
+    status: "Success",
+    time: "6 hours ago",
+  },
+  {
+    id: 8,
+    type: "critical",
+    title: "Unrecognized Device Detected",
+    desc: "Caretaker Account • Mobile App",
+    status: "Flagged",
+    time: "12 hours ago",
+  },
+  {
+    id: 9,
+    type: "info",
+    title: "API Keys Regenerated",
+    desc: "System Settings • Automated Rotation",
+    status: "Modified",
+    time: "1 day ago",
+  },
+  {
+    id: 10,
+    type: "success",
+    title: "Database Sync Complete",
+    desc: "Health Records • Version 2.4",
+    status: "Success",
+    time: "1 day ago",
+  },
+];
 import { api } from "../../services/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -81,6 +178,23 @@ function getLogStyles(type) {
 
 export default function AdminDashboard() {
   const [showAllLogs, setShowAllLogs] = useState(false);
+  const [users, setUsers] = useState([]);
+
+  // Fetch users for the management part
+  useEffect(() => {
+    api
+      .get("/admin_only/view_roles")
+      .then((res) => setUsers(res.data))
+      .catch((err) => console.log("Waiting for Admin Role API...", err));
+  }, []);
+
+  // THE CHART DATA (Keep this mock for your demo)
+  const distributionData = [
+    { name: "Participants", count: 850, color: "#3b82f6" },
+    { name: "Caretakers", count: 120, color: "#10b981" },
+    { name: "Researchers", count: 45, color: "#6366f1" },
+    { name: "Admins", count: 10, color: "#f43f5e" },
+  ];
   const [logs, setLogs] = useState([]);
   const [totalLogs, setTotalLogs] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -251,34 +365,89 @@ export default function AdminDashboard() {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
         <div className="flex justify-between items-end mb-6">
           <div>
-            <h2 className="text-lg font-bold text-slate-800">User Distribution</h2>
-            <p className="text-sm text-slate-500 mt-1">Active accounts across the platform</p>
+            <h2 className="text-lg font-bold text-slate-800">
+              User Distribution
+            </h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Real-time account breakdown
+            </p>
           </div>
           <div className="text-right">
             <p className="text-2xl font-extrabold text-blue-600">1,025</p>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-0.5">Total Users</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+              Total Users
+            </p>
           </div>
         </div>
-        <div className="space-y-5">
-          {[
-            { label: "Participants", color: "bg-blue-500", pct: 83, count: 850 },
-            { label: "Caretakers", color: "bg-emerald-500", pct: 11, count: 120 },
-            { label: "Researchers", color: "bg-indigo-500", pct: 5, count: 45 },
-            { label: "Admins", color: "bg-rose-500", pct: 1, count: 10 },
-          ].map(({ label, color, pct, count }) => (
-            <div key={label}>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="font-bold text-slate-700 flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full ${color}`}></span>
-                  {label}
-                </span>
-                <span className="text-slate-500 font-medium">{count} users ({pct}%)</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                <div className={`${color} h-2.5 rounded-full transition-all duration-1000 ease-out`} style={{ width: `${pct}%` }}></div>
-              </div>
-            </div>
-          ))}
+
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={distributionData}
+              layout="vertical"
+              margin={{ left: 30, right: 30 }}
+            >
+              <XAxis type="number" hide />
+              <YAxis
+                dataKey="name"
+                type="category"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "#64748b", fontSize: 12, fontWeight: 600 }}
+              />
+              <Tooltip
+                cursor={{ fill: "transparent" }}
+                contentStyle={{
+                  borderRadius: "12px",
+                  border: "none",
+                  boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)",
+                }}
+              />
+              <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={20}>
+                {distributionData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mt-6">
+          <div className="p-6 border-b border-slate-50">
+            <h2 className="text-lg font-bold text-slate-800">
+              User Management
+            </h2>
+          </div>
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50/50 text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                <th className="px-6 py-4">Full Name</th>
+                <th className="px-6 py-4">Email</th>
+                <th className="px-6 py-4">Role</th>
+                <th className="px-6 py-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {/* Later you will map real 'users' here */}
+              <tr className="hover:bg-slate-50/50 transition-colors">
+                <td className="px-6 py-4 text-sm font-bold text-slate-700">
+                  Monkey D. Luffy
+                </td>
+                <td className="px-6 py-4 text-sm text-slate-500">
+                  luffy@grandline.com
+                </td>
+                <td className="px-6 py-4">
+                  <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded-md text-[10px] font-bold uppercase">
+                    Participant
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <button className="text-blue-600 hover:underline text-xs font-bold">
+                    Edit
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
