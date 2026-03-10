@@ -96,7 +96,7 @@ const mockSecurityLogs = [
     time: "1 day ago",
   },
 ];
-import { api } from "../../services/api";
+import { api as authApi } from "../../services/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -205,7 +205,7 @@ export default function AdminDashboard() {
     setLoading(true);
     setError(null);
 
-    api
+    authApi
       .getAuditLogs({ limit: showAllLogs ? 20 : 3 })
       .then((data) => {
         setLogs(data.logs);
