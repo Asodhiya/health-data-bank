@@ -11,7 +11,6 @@ export default function DashboardLayout({ role }) {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // ADD THIS: Fetch who is logged in when the layout loads
   useEffect(() => {
     api
       .get("/auth/me")
@@ -19,7 +18,18 @@ export default function DashboardLayout({ role }) {
       .catch((error) => console.error("Not logged in:", error));
   }, []);
 
-  // ... keep your return statement exactly the same until the Outlet ...
+  useEffect(() => {
+    if (!isProfileMenuOpen) return;
+
+    function handleClickOutside(e) {
+      if (!e.target.closest("#profile-dropdown")) {
+        setIsProfileMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isProfileMenuOpen]);
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900">
@@ -54,7 +64,7 @@ export default function DashboardLayout({ role }) {
         </div>
 
         {/* Avatar + Dropdown */}
-        <div className="relative">
+        <div className="relative" id="profile-dropdown">
           <button
             onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
             className="w-8 h-8 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center font-bold transition-colors"
