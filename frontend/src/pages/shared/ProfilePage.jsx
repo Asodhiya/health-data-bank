@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../../services/api';
 
 /*
@@ -696,7 +697,8 @@ function DangerZoneSection() {
    Pure content — renders inside a layout's <Outlet />.
    ══════════════════════════════════════════════ */
 export default function ProfilePage({ role = 'participant' }) {
-  const [tab, setTab] = useState('profile');
+  const location = useLocation();
+  const [tab, setTab] = useState(location.hash === '#settings' ? 'settings' : 'profile');
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState({ ...EMPTY_PROFILE });
 
