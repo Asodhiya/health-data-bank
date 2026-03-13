@@ -158,9 +158,10 @@ class GroupCreateRequest(BaseModel):
 
 
 class GroupItem(BaseModel):
-    group_id: int
+    group_id: UUID
     name: str
     description: Optional[str] = None
+    caretaker_id: Optional[UUID] = None
 
 
 class GroupUpdateRequest(BaseModel):

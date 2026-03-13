@@ -1,13 +1,18 @@
 from fastapi import APIRouter, Depends, Query
 from app.schemas.schemas import Role_schema, Permissions_schema, Role_user_link, Link_role_permission_schema
+from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResponse, UnassignCaretakerResponse, CaretakerItem, DeleteGroupResponse
+from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem
 from app.services.role_service import addroles, viewroles, add_permissions, link_user_roles, link_role_permisson
+from app.services.admin_service import assign_caretaker_to_group, unassign_caretaker_from_group, create_group, delete_group, list_groups, list_caretakers
+from typing import List
 from app.db.session import get_db
 from app.db.models import Role, AuditLog, User
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
 from app.core.dependency import require_permissions
 from typing import Optional
-from app.core.permissions import ROLE_READ_ALL
+from app.core.permissions import ROLE_READ_ALL, GROUP_READ, GROUP_WRITE, GROUP_DELETE, CARETAKER_READ, CARETAKER_ASSIGN
+from uuid import UUID
 
 router = APIRouter()
 
@@ -112,3 +117,48 @@ async def get_audit_logs(
         "limit": limit,
         "logs": logs,
     }
+    
+    
+    
+# ── admin-only Assign Caretaker endpoints made by Job (SPRINT 6)  ────────────────────────────────────────────
+
+@router.get("/groups", response_model=List[GroupItem], dependencies=[Depends(require_permissions(GROUP_READ))])
+async def list_groups_endpoint(db: AsyncSession = Depends(get_db)):
+    return await list_groups(db)
+
+
+@router.get("/caretakers", response_model=List[CaretakerItem], dependencies=[Depends(require_permissions(CARETAKER_READ))])
+async def list_caretakers_endpoint(db: AsyncSession = Depends(get_db)):
+    return await list_caretakers(db)
+
+
+@router.post("/groups", response_model=GroupItem, status_code=201, dependencies=[Depends(require_permissions(GROUP_WRITE))])
+async def create_group_endpoint(
+    payload: GroupCreateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await create_group(payload, db)
+
+
+@router.delete("/groups/{group_id}", response_model=DeleteGroupResponse, dependencies=[Depends(require_permissions(GROUP_DELETE))])
+async def delete_group_endpoint(
+    group_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    return await delete_group(group_id, db)
+
+
+@router.post("/assign-caretaker", response_model=AssignCaretakerResponse, dependencies=[Depends(require_permissions(CARETAKER_ASSIGN))])
+async def assign_caretaker(
+    payload: AssignCaretakerRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await assign_caretaker_to_group(payload, db)
+
+
+@router.delete("/assign-caretaker/{group_id}", response_model=UnassignCaretakerResponse, dependencies=[Depends(require_permissions(CARETAKER_ASSIGN))])
+async def unassign_caretaker(
+    group_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    return await unassign_caretaker_from_group(group_id, db)
