@@ -69,6 +69,11 @@ export const DASHBOARD_NAV = [
     to: "/exports",
     roles: ["researcher"],
   },
+  {
+    label: "Data Elements",
+    to: "/researcher/data-elements",
+    roles: ["researcher"],
+  },
 
   /* =====================
      CARETAKER
