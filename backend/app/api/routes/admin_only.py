@@ -132,12 +132,13 @@ async def list_caretakers_endpoint(db: AsyncSession = Depends(get_db)):
     return await list_caretakers(db)
 
 
-@router.post("/groups", response_model=GroupItem, status_code=201, dependencies=[Depends(require_permissions(GROUP_WRITE))])
+@router.post("/groups", response_model=GroupItem, status_code=201)
 async def create_group_endpoint(
     payload: GroupCreateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(GROUP_WRITE)),
 ):
-    return await create_group(payload, db)
+    return await create_group(payload, current_user.user_id, db)
 
 
 @router.delete("/groups/{group_id}", response_model=DeleteGroupResponse, dependencies=[Depends(require_permissions(GROUP_DELETE))])

@@ -89,6 +89,7 @@ async def assign_caretaker_to_group(
 
 async def create_group(
     payload: GroupCreateRequest,
+    created_by: UUID,
     db: AsyncSession,
 ) -> GroupItem:
     """Create a new group. Raises 409 if a group with the same name already exists."""
@@ -105,6 +106,7 @@ async def create_group(
     new_group = Group(
         name=payload.name,
         description=payload.description,
+        created_by=created_by,
     )
     db.add(new_group)
     await db.commit()
@@ -129,13 +131,13 @@ async def delete_group(
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    # Collect affected participant IDs before deletion
+    group_name = group.name
+
     members_result = await db.execute(
         select(GroupMember.participant_id).where(GroupMember.group_id == group_id)
     )
     ungrouped = [str(row[0]) for row in members_result.all()]
 
-    # Null out group_id on deployments and submissions to avoid FK violations
     await db.execute(
         update(FormDeployment).where(FormDeployment.group_id == group_id).values(group_id=None)
     )
@@ -148,7 +150,7 @@ async def delete_group(
 
     return DeleteGroupResponse(
         group_id=group_id,
-        message=f"Group '{group.name}' has been deleted.",
+        message=f"Group '{group_name}' has been deleted.",
         ungrouped_participants=ungrouped,
     )
 
