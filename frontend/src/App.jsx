@@ -41,6 +41,7 @@ import DataElementManager from "./pages/researcher/DataElementMangaer";
 
 // ── Caretaker pages ──
 import MyParticipantsPage from "./pages/caretaker/MyParticipantsPage";
+import ParticipantDetailPage from "./pages/caretaker/ParticipantDetailPage";
 
 function App() {
   const { role } = useAuth();
@@ -114,6 +115,10 @@ function App() {
             <Route
               path="/caretaker/participants"
               element={<MyParticipantsPage />}
+            />
+            <Route
+              path="/caretaker/participants/:id"
+              element={<ParticipantDetailPage />}
             />
           </Route>
         </Route>

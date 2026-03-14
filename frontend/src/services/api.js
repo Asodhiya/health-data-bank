@@ -169,4 +169,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
+    
+  caretakerGetParticipant: (participantId) =>
+    request(`/caretaker/participants/${participantId}`),
+
+  caretakerListSubmissions: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/caretaker/submissions${qs ? `?${qs}` : ""}`);
+  },
+
+  caretakerGetSubmission: (submissionId) =>
+    request(`/caretaker/submissions/${submissionId}`),
+
+  caretakerGetParticipantGoals: (participantId) =>
+    request(`/caretaker/participants/${participantId}/goals`),
+
+  caretakerListNotes: (participantId) =>
+    request(`/caretaker/participants/${participantId}/notes`),
 };

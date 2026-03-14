@@ -90,11 +90,11 @@ export const DASHBOARD_NAV = [
     roles: ["caretaker"],
   },
 
-  {
-    label: "Notes & Feedback",
-    to: "/notes-feedback",
-    roles: ["caretaker"],
-  },
+  //{
+  //  label: "Notes & Feedback",
+  //  to: "/notes-feedback",
+  //  roles: ["caretaker"],
+  //},
   
 
   /* =====================

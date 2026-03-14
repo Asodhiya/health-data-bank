@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 
 // ─── Mock Data (removed once backend is live) ───────────────────────────────────
@@ -307,7 +307,7 @@ function NoteModal({ participant, onSave, onCancel }) {
 
 // ─── Detail Panel ───────────────────────────────────────────────────────────────
 
-function ParticipantDetailPanel({ participant: p, onClose, onWriteNote }) {
+function ParticipantDetailPanel({ participant: p, onClose, onViewFull }) {
   const sPct = Math.round(pct(p.surveysDone, p.surveysTotal));
   const gPct = Math.round(pct(p.healthGoals, p.healthGoalsTotal));
   return (
@@ -374,18 +374,11 @@ function ParticipantDetailPanel({ participant: p, onClose, onWriteNote }) {
             )}
           </div>
         </div>
-        <div className="px-5 py-4 border-t border-slate-100 bg-slate-50 space-y-2 shrink-0">
-          <button onClick={onWriteNote} className="w-full py-2.5 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 transition-colors flex items-center justify-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-            Write Feedback / Note
-          </button>
-          <button className="w-full py-2.5 text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-            Generate Report
-          </button>
-          <button className="w-full py-2.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-            View Health Trends
+        <div className="px-5 py-4 border-t border-slate-100 bg-slate-50 shrink-0">
+          <button onClick={onViewFull}
+            className="w-full py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+            View Full Profile
           </button>
         </div>
       </div>
@@ -399,6 +392,7 @@ const DEFAULT_FILTERS = { status: "all", gender: "all", flagged: "all", ageMin: 
 
 export default function MyParticipantsPage() {
   const { user } = useOutletContext();
+  const navigate = useNavigate();
   const [participants, setParticipants] = useState([]);
   const [group, setGroup] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -520,7 +514,7 @@ export default function MyParticipantsPage() {
       )}
       {showInvite && group && <InviteModal group={group} onDone={email => { showToastMsg(`Invite sent to ${email}. Admin notified.`); setShowInvite(false); }} onCancel={() => setShowInvite(false)} />}
       {noteTarget && <NoteModal participant={noteTarget} onSave={text => { showToastMsg(`Feedback saved for ${noteTarget.firstName} ${noteTarget.lastName}.`); setNoteTarget(null); }} onCancel={() => setNoteTarget(null)} />}
-      {detailParticipant && <ParticipantDetailPanel participant={detailParticipant} onClose={() => setDetailParticipant(null)} onWriteNote={() => setNoteTarget(detailParticipant)} />}
+      {detailParticipant && <ParticipantDetailPanel participant={detailParticipant} onClose={() => setDetailParticipant(null)} onViewFull={() => { setDetailParticipant(null); navigate(`/caretaker/participants/${detailParticipant.id}`); }} />}
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
