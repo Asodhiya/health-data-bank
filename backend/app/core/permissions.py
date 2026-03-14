@@ -41,3 +41,10 @@ ELEMENT_MAP    = "element:map"
 # ── Admin: Roles & Auth ───────────────────────────────────────────────────────
 ROLE_READ_ALL = "role:readAll"
 SEND_INVITE   = "send:invite"
+
+# ── Admin: Group & Caretaker Management ───────────────────────────
+GROUP_READ    = "group:read"
+GROUP_WRITE   = "group:write"
+GROUP_DELETE  = "group:delete"
+CARETAKER_READ   = "caretaker:read"
+CARETAKER_ASSIGN = "caretaker:assign"
