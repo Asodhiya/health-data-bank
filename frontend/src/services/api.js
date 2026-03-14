@@ -156,23 +156,23 @@ export const api = {
       method: "DELETE",
     }),
 
-    // ── Caretaker ──
+  // ── Caretaker ──
+  // Backend stubs: backend/app/api/routes/Caretakers.py
+  // All calls fall back to mock data on the frontend when backend returns 404.
+
+  // Participants
   caretakerListParticipants: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/caretaker/participants${qs ? `?${qs}` : ""}`);
   },
 
-  caretakerGetGroups: () => request("/caretaker/groups"),
-
-  caretakerCreateNote: (participantId, text) =>
-    request(`/caretaker/participants/${participantId}/notes`, {
-      method: "POST",
-      body: JSON.stringify({ text }),
-    }),
-    
   caretakerGetParticipant: (participantId) =>
     request(`/caretaker/participants/${participantId}`),
 
+  // Groups
+  caretakerGetGroups: () => request("/caretaker/groups"),
+
+  // Submissions (read-only for caretaker)
   caretakerListSubmissions: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/caretaker/submissions${qs ? `?${qs}` : ""}`);
@@ -181,9 +181,54 @@ export const api = {
   caretakerGetSubmission: (submissionId) =>
     request(`/caretaker/submissions/${submissionId}`),
 
+  // Health Goals (read-only for caretaker)
   caretakerGetParticipantGoals: (participantId) =>
     request(`/caretaker/participants/${participantId}/goals`),
 
+  // Health Trends
+  caretakerGetHealthTrends: (participantId, params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/caretaker/participants/${participantId}/health-trends${qs ? `?${qs}` : ""}`);
+  },
+
+  // Notes & Feedback
   caretakerListNotes: (participantId) =>
     request(`/caretaker/participants/${participantId}/notes`),
+
+  caretakerCreateNote: (participantId, text, tag) =>
+    request(`/caretaker/participants/${participantId}/notes`, {
+      method: "POST",
+      body: JSON.stringify({ text, tag }),
+    }),
+
+  caretakerUpdateNote: (noteId, text) =>
+    request(`/caretaker/notes/${noteId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ text }),
+    }),
+
+  caretakerDeleteNote: (noteId) =>
+    request(`/caretaker/notes/${noteId}`, { method: "DELETE" }),
+
+  // Reports
+  caretakerGenerateGroupReport: (groupId, payload) =>
+    request(`/caretaker/reports/group?group_id=${groupId}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  caretakerGenerateComparisonReport: (participantId, payload) =>
+    request(`/caretaker/reports/comparison?participant_id=${participantId}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  caretakerGenerateParticipantReport: (participantId, payload) =>
+    request(`/caretaker/reports/participant?participant_id=${participantId}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  caretakerGetReport: (reportId) =>
+    request(`/caretaker/reports/${reportId}`),
 };

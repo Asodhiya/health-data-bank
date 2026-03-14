@@ -86,7 +86,7 @@ export const DASHBOARD_NAV = [
 
   {
     label: "Reports",
-    to: "/reports",
+    to: "/caretaker/reports",
     roles: ["caretaker"],
   },
 
