@@ -23,6 +23,22 @@ const MOCK_PARTICIPANTS = [
 
 const MOCK_GROUP = { id: "g1", name: "Morning Cohort A" };
 
+const MOCK_INVITES = [
+  { id: "inv1", email: "new.participant1@example.com", status: "pending", sentAt: "2026-03-12", expiresAt: "2026-03-19" },
+  { id: "inv2", email: "new.participant2@example.com", status: "pending", sentAt: "2026-03-10", expiresAt: "2026-03-17" },
+  { id: "inv3", email: "sarah.chen@example.com", status: "accepted", sentAt: "2025-10-28", acceptedAt: "2025-11-03", expiresAt: "2025-11-04" },
+  { id: "inv4", email: "marcus.webb@example.com", status: "accepted", sentAt: "2025-11-01", acceptedAt: "2025-11-10", expiresAt: "2025-11-08" },
+  { id: "inv5", email: "aiko.tanaka@example.com", status: "accepted", sentAt: "2025-12-20", acceptedAt: "2026-01-05", expiresAt: "2025-12-27" },
+  { id: "inv6", email: "omar.diallo@example.com", status: "accepted", sentAt: "2026-02-20", acceptedAt: "2026-02-28", expiresAt: "2026-02-27" },
+  { id: "inv7", email: "old.invite@example.com", status: "expired", sentAt: "2025-09-01", expiresAt: "2025-09-08" },
+  { id: "inv8", email: "never.replied@example.com", status: "expired", sentAt: "2026-01-15", expiresAt: "2026-01-22" },
+  { id: "inv9", email: "james.kowalski@example.com", status: "accepted", sentAt: "2025-09-08", acceptedAt: "2025-09-15", expiresAt: "2025-09-15" },
+  { id: "inv10", email: "priya.sharma@example.com", status: "accepted", sentAt: "2025-10-12", acceptedAt: "2025-10-20", expiresAt: "2025-10-19" },
+  { id: "inv11", email: "lily.hartmann@example.com", status: "accepted", sentAt: "2025-08-05", acceptedAt: "2025-08-14", expiresAt: "2025-08-12" },
+  { id: "inv12", email: "fatima.alrashid@example.com", status: "accepted", sentAt: "2025-11-22", acceptedAt: "2025-12-01", expiresAt: "2025-11-29" },
+  { id: "inv13", email: "revoked.person@example.com", status: "revoked", sentAt: "2026-02-05", revokedAt: "2026-02-08", expiresAt: "2026-02-12" },
+];
+
 // ─── Utilities ──────────────────────────────────────────────────────────────────
 
 function fmt(dateStr) {
@@ -46,6 +62,7 @@ function getAge(dob) {
   return age;
 }
 function pct(val, total) { return total > 0 ? (val / total) * 100 : 0; }
+function daysUntil(d) { if (!d) return ""; const diff = Math.floor((new Date(d).getTime() - Date.now()) / 86400000); if (diff < 0) return "Expired"; if (diff === 0) return "Today"; if (diff === 1) return "Tomorrow"; return `${diff}d left`; }
 
 // ─── Sub-Components ─────────────────────────────────────────────────────────────
 
@@ -305,6 +322,179 @@ function NoteModal({ participant, onSave, onCancel }) {
   );
 }
 
+// ─── Tooltip ────────────────────────────────────────────────────────────────────
+
+function Tip({ text, children }) {
+  return (
+    <div className="relative group/tip inline-flex">
+      {children}
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg opacity-0 group-hover/tip:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-lg">
+        {text}
+        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-800 rotate-45" />
+      </div>
+    </div>
+  );
+}
+
+// ─── Invite Status Badge ────────────────────────────────────────────────────────
+
+function InviteStatusBadge({ status }) {
+  const styles = { pending: "bg-amber-50 text-amber-700 border-amber-200", accepted: "bg-emerald-50 text-emerald-700 border-emerald-200", expired: "bg-slate-100 text-slate-500 border-slate-200", revoked: "bg-rose-50 text-rose-700 border-rose-200" };
+  const icons = {
+    pending: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+    accepted: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+    expired: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+    revoked: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>,
+  };
+  return <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${styles[status] || styles.pending}`}>{icons[status]} {status}</span>;
+}
+
+// ─── Invites Panel ──────────────────────────────────────────────────────────────
+
+function InvitesPanel({ invites, onRevoke, onResend, onOpenInviteModal }) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sort, setSort] = useState({ field: "sentAt", dir: "desc" });
+  const [confirmRevoke, setConfirmRevoke] = useState(null);
+
+  const counts = useMemo(() => {
+    const c = { all: invites.length, pending: 0, accepted: 0, expired: 0, revoked: 0 };
+    invites.forEach(inv => { c[inv.status] = (c[inv.status] || 0) + 1; });
+    return c;
+  }, [invites]);
+
+  const filtered = useMemo(() => {
+    let list = invites.filter(inv => {
+      if (search && !inv.email.toLowerCase().includes(search.toLowerCase())) return false;
+      if (statusFilter !== "all" && inv.status !== statusFilter) return false;
+      return true;
+    });
+    const dir = sort.dir === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      if (sort.field === "sentAt") return dir * (new Date(a.sentAt) - new Date(b.sentAt));
+      if (sort.field === "email") return dir * a.email.localeCompare(b.email);
+      if (sort.field === "status") { const order = { pending: 0, expired: 1, revoked: 2, accepted: 3 }; return dir * ((order[a.status] ?? 9) - (order[b.status] ?? 9)); }
+      return 0;
+    });
+    return list;
+  }, [invites, search, statusFilter, sort]);
+
+  function toggleSort(field) {
+    setSort(prev => prev.field === field ? { field, dir: prev.dir === "asc" ? "desc" : "asc" } : { field, dir: "desc" });
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Invite button */}
+      <div className="flex justify-end">
+        <button onClick={onOpenInviteModal} className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
+          Invite Participant
+        </button>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-slate-800">{counts.all}</p><p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Total Sent</p></div>
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-amber-600">{counts.pending}</p><p className="text-xs font-semibold text-amber-500 uppercase tracking-wider mt-1">Pending</p></div>
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-emerald-600">{counts.accepted}</p><p className="text-xs font-semibold text-emerald-500 uppercase tracking-wider mt-1">Accepted</p></div>
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-slate-400">{counts.expired + counts.revoked}</p><p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Expired / Revoked</p></div>
+      </div>
+
+      {/* Controls */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
+        <div className="relative">
+          <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by email…"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-300" />
+        </div>
+        <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Status</span>
+          {["all", "pending", "accepted", "expired", "revoked"].map(s => (
+            <button key={s} onClick={() => setStatusFilter(s)} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap capitalize shrink-0 ${statusFilter === s ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+              {s === "all" ? "All" : s}
+              <span className={`text-xs ${statusFilter === s ? "text-blue-200" : "text-slate-400"}`}>({counts[s] || 0})</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Sort</span>
+          {[{ field: "sentAt", label: "Date Sent" }, { field: "email", label: "Email" }, { field: "status", label: "Status" }].map(s => (
+            <button key={s.field} onClick={() => toggleSort(s.field)} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${sort.field === s.field ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+              {s.label}
+              {sort.field === s.field && <ChevronIcon direction={sort.dir === "asc" ? "up" : "down"} className="text-white" />}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <p className="text-xs text-slate-400 px-1">Showing {filtered.length} of {invites.length} invites</p>
+
+      {/* List */}
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-slate-200 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+          <p className="text-sm text-slate-400">No invites match your search.</p>
+          <button onClick={() => { setSearch(""); setStatusFilter("all"); }} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear filters</button>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden divide-y divide-slate-100">
+          <div className="hidden md:flex items-center gap-3 px-5 py-3 bg-slate-50">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex-1">Email</span>
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider w-20 text-center">Status</span>
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider w-24 text-center">Sent</span>
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider w-24 text-center">Outcome</span>
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider w-24 text-right">Actions</span>
+          </div>
+          {filtered.map(inv => (
+            <div key={inv.id} className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 px-5 py-3.5 hover:bg-slate-50/50 transition-colors">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-slate-800 truncate">{inv.email}</p>
+                <div className="md:hidden flex items-center gap-2 mt-1.5 flex-wrap">
+                  <InviteStatusBadge status={inv.status} />
+                  <span className="text-xs text-slate-400">Sent {daysSince(inv.sentAt)}</span>
+                  {inv.status === "pending" && <span className="text-xs text-amber-600 font-medium">{daysUntil(inv.expiresAt)}</span>}
+                  {inv.status === "accepted" && inv.acceptedAt && <span className="text-xs text-emerald-600">Joined {fmt(inv.acceptedAt)}</span>}
+                  {inv.status === "revoked" && inv.revokedAt && <span className="text-xs text-rose-500">Revoked {fmt(inv.revokedAt)}</span>}
+                </div>
+              </div>
+              <div className="hidden md:block w-20 text-center"><InviteStatusBadge status={inv.status} /></div>
+              <div className="hidden md:block w-24 text-center"><span className="text-xs text-slate-500">{fmt(inv.sentAt)}</span></div>
+              <div className="hidden md:block w-24 text-center">
+                {inv.status === "pending" && <span className="text-xs text-amber-600 font-medium">{daysUntil(inv.expiresAt)}</span>}
+                {inv.status === "accepted" && <span className="text-xs text-emerald-600">{fmt(inv.acceptedAt)}</span>}
+                {inv.status === "expired" && <span className="text-xs text-slate-400">Expired {fmt(inv.expiresAt)}</span>}
+                {inv.status === "revoked" && <span className="text-xs text-rose-500">{fmt(inv.revokedAt)}</span>}
+              </div>
+              <div className="flex items-center gap-1 md:w-24 md:justify-end">
+                {inv.status === "pending" && (
+                  confirmRevoke === inv.id ? (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => { onRevoke(inv.id); setConfirmRevoke(null); }} className="px-2 py-1 text-xs font-bold text-white bg-rose-600 rounded-lg hover:bg-rose-700 transition-colors">Revoke</button>
+                      <button onClick={() => setConfirmRevoke(null)} className="px-2 py-1 text-xs font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">Cancel</button>
+                    </div>
+                  ) : (
+                    <>
+                      <Tip text="Resend invite"><button onClick={() => onResend(inv.email)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button></Tip>
+                      <Tip text="Revoke invite"><button onClick={() => setConfirmRevoke(inv.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg></button></Tip>
+                    </>
+                  )
+                )}
+                {(inv.status === "expired" || inv.status === "revoked") && (
+                  <Tip text="Resend invite"><button onClick={() => onResend(inv.email)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button></Tip>
+                )}
+                {inv.status === "accepted" && (
+                  <span className="text-xs text-emerald-500"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Detail Panel ───────────────────────────────────────────────────────────────
 
 function ParticipantDetailPanel({ participant: p, onClose, onViewFull }) {
@@ -395,6 +585,8 @@ export default function MyParticipantsPage() {
   const navigate = useNavigate();
   const [participants, setParticipants] = useState([]);
   const [group, setGroup] = useState(null);
+  const [invites, setInvites] = useState([]);
+  const [view, setView] = useState("participants");
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
@@ -407,6 +599,36 @@ export default function MyParticipantsPage() {
 
   function showToastMsg(msg) { setToast(msg); setTimeout(() => setToast(null), 3000); }
 
+  // ── Invite handlers ─────────────────────────────────────────────────────────
+
+  async function handleRevokeInvite(inviteId) {
+    setInvites(prev => prev.map(inv => inv.id === inviteId ? { ...inv, status: "revoked", revokedAt: new Date().toISOString().split("T")[0] } : inv));
+    showToastMsg("Invite revoked successfully.");
+    try {
+      await api.caretakerRevokeInvite(inviteId);
+    } catch (err) {
+      console.warn("Revoke via API failed:", err.message);
+    }
+  }
+
+  async function handleResendInvite(email) {
+    const newInv = { id: `inv${Date.now()}`, email, status: "pending", sentAt: new Date().toISOString().split("T")[0], expiresAt: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0] };
+    setInvites(prev => [newInv, ...prev]);
+    showToastMsg(`Invite resent to ${email}.`);
+    try {
+      await api.sendInvite(email, "participant");
+    } catch (err) {
+      console.warn("Resend via API failed:", err.message);
+    }
+  }
+
+  function handleInviteSent(email) {
+    const newInv = { id: `inv${Date.now()}`, email, status: "pending", sentAt: new Date().toISOString().split("T")[0], expiresAt: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0] };
+    setInvites(prev => [newInv, ...prev]);
+    showToastMsg(`Invite sent to ${email}. Admin notified.`);
+    setShowInvite(false);
+  }
+
   // ── Data fetching (falls back to mock) ──────────────────────────────────────
 
   const fetchData = useCallback(async () => {
@@ -417,15 +639,20 @@ export default function MyParticipantsPage() {
         api.caretakerGetGroups(),
       ]);
       setParticipants(participantData);
-      // Caretaker has one group — take the first
       setGroup(groupData?.[0] ?? null);
     } catch (err) {
       console.warn("Backend not ready, using mock data:", err.message);
       setParticipants(MOCK_PARTICIPANTS);
       setGroup(MOCK_GROUP);
-    } finally {
-      setLoading(false);
     }
+    // Fetch invites separately (non-blocking)
+    try {
+      const inviteData = await api.caretakerListInvites();
+      setInvites(inviteData);
+    } catch {
+      setInvites(MOCK_INVITES);
+    }
+    setLoading(false);
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -512,7 +739,7 @@ export default function MyParticipantsPage() {
           <span className="truncate">{toast}</span>
         </div>
       )}
-      {showInvite && group && <InviteModal group={group} onDone={email => { showToastMsg(`Invite sent to ${email}. Admin notified.`); setShowInvite(false); }} onCancel={() => setShowInvite(false)} />}
+      {showInvite && group && <InviteModal group={group} onDone={handleInviteSent} onCancel={() => setShowInvite(false)} />}
       {noteTarget && <NoteModal participant={noteTarget} onSave={text => { showToastMsg(`Feedback saved for ${noteTarget.firstName} ${noteTarget.lastName}.`); setNoteTarget(null); }} onCancel={() => setNoteTarget(null)} />}
       {detailParticipant && <ParticipantDetailPanel participant={detailParticipant} onClose={() => setDetailParticipant(null)} onViewFull={() => { setDetailParticipant(null); navigate(`/caretaker/participants/${detailParticipant.id}`); }} />}
 
@@ -530,11 +757,30 @@ export default function MyParticipantsPage() {
             <span className="text-xs text-slate-400">{counts.total} participants</span>
           </div>
         </div>
-        <button onClick={() => setShowInvite(true)} className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm shrink-0">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
-          Invite Participant
+      </div>
+
+      {/* View toggle */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-1.5 flex gap-1">
+        <button onClick={() => setView("participants")}
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${view === "participants" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"}`}>
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+          Participants
+        </button>
+        <button onClick={() => setView("invites")}
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${view === "invites" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"}`}>
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+          Invites
+          {invites.filter(i => i.status === "pending").length > 0 && <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${view === "invites" ? "bg-blue-500 text-white" : "bg-amber-100 text-amber-700"}`}>{invites.filter(i => i.status === "pending").length}</span>}
         </button>
       </div>
+
+      {/* Invites view */}
+      {view === "invites" && (
+        <InvitesPanel invites={invites} onRevoke={handleRevokeInvite} onResend={handleResendInvite} onOpenInviteModal={() => setShowInvite(true)} />
+      )}
+
+      {/* Participants view */}
+      {view === "participants" && (<>
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -618,8 +864,8 @@ export default function MyParticipantsPage() {
                   <div className="hidden md:block w-24 text-center"><span className={`text-xs font-medium ${p.status === "inactive" ? "text-amber-600" : "text-slate-400"}`}>{daysSince(p.lastActive)}</span></div>
                   <div className="hidden md:flex w-20 items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
                     <button onClick={() => setNoteTarget(p)} title="Write feedback" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg></button>
-                    <button onClick={() => navigate(`/caretaker/reports?tab=comparison&participant=${p.id}`)} title="Generate report" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg></button>
-                    <button onClick={() => navigate(`/caretaker/participants/${p.id}`)} title="View full profile" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg></button>
+                    <button title="View report" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg></button>
+                    <button title="Health trends" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg></button>
                   </div>
                 </div>
               );
@@ -627,6 +873,7 @@ export default function MyParticipantsPage() {
           </div>
         )}
       </div>
+      </>)}
     </div>
   );
 }

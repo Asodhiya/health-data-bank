@@ -1,5 +1,4 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { useParams, useNavigate, useOutletContext } from "react-router-dom";
 import { api } from "../../services/api";
 
@@ -77,6 +76,8 @@ const MOCK_GOALS = [
   { id: "g2", title: "Lower Blood Pressure", emoji: "❤️", baseline: 150, current: 142, target: 130, unit: "mmHg", status: "active", startDate: "2025-11-01", targetDate: "2026-05-01" },
   { id: "g3", title: "Water Intake", emoji: "💧", baseline: 3, current: 8, target: 8, unit: "glasses/day", status: "completed", startDate: "2025-10-01", targetDate: "2026-01-01" },
   { id: "g4", title: "Weight Loss", emoji: "⚖️", baseline: 105, current: 98.7, target: 90, unit: "kg", status: "active", startDate: "2025-09-15", targetDate: "2026-06-15" },
+  { id: "g5", title: "Reduce Stress", emoji: "🧘", baseline: 30, current: 28, target: 15, unit: "/40", status: "paused", startDate: "2025-10-01", targetDate: "2026-03-01" },
+  { id: "g6", title: "Sleep 7+ Hours", emoji: "🌙", baseline: 5.5, current: 6.8, target: 7, unit: "hrs", status: "active", startDate: "2026-01-15", targetDate: "2026-04-15" },
 ];
 
 const MOCK_NOTES = [
@@ -84,15 +85,8 @@ const MOCK_NOTES = [
   { id: "n2", text: "Reviewed latest PSS scores — stress levels remain elevated. Recommended exploring community walking group for both exercise and social support.", createdAt: "2026-02-25", tag: "recommendation" },
   { id: "n3", text: "Weight down 1.5 kg from last month. Positive trend. Encouraged continuing current dietary changes. Flagged chest pain reported in PAR-Q — follow up with GP.", createdAt: "2026-02-15", tag: "progress" },
   { id: "n4", text: "Initial assessment complete. Baseline BP 150/96, weight 105 kg. Set goals for daily steps, BP reduction, water intake, and weight loss. James is motivated but will need regular check-ins.", createdAt: "2025-09-15", tag: "initial" },
-];
-
-const MOCK_TRENDS = [
-  { date: "Oct", bpSystolic: 150, bpDiastolic: 96, weight: 104.2, painLevel: 7 },
-  { date: "Nov", bpSystolic: 148, bpDiastolic: 94, weight: 103.0, painLevel: 7 },
-  { date: "Dec", bpSystolic: 145, bpDiastolic: 93, weight: 101.5, painLevel: 6 },
-  { date: "Jan", bpSystolic: 143, bpDiastolic: 92, weight: 100.2, painLevel: 6 },
-  { date: "Feb", bpSystolic: 140, bpDiastolic: 90, weight: 99.5, painLevel: 5 },
-  { date: "Mar", bpSystolic: 142, bpDiastolic: 92, weight: 98.7, painLevel: 6 },
+  { id: "n5", text: "Discussed dietary sodium intake. James reports reducing processed food consumption. Weight trending downward. Encouraged to maintain current routine.", createdAt: "2025-12-20", tag: "progress" },
+  { id: "n6", text: "Flagged concern about elevated stress scores. Suggesting referral to campus counseling services if next PSS remains high.", createdAt: "2026-01-12", tag: "concern" },
 ];
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
@@ -103,6 +97,14 @@ function daysSince(d) { if (!d) return null; const diff = Math.floor((Date.now()
 function pctVal(v, t) { return t > 0 ? Math.round((v / t) * 100) : 0; }
 
 // ─── Shared Components ──────────────────────────────────────────────────────────
+
+function ChevronIcon({ direction = "down", className = "" }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      {direction === "up" ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />}
+    </svg>
+  );
+}
 
 function Avatar({ firstName, lastName, size = "md" }) {
   const i = `${firstName?.[0] ?? ""}${lastName?.[0] ?? ""}`.toUpperCase();
@@ -176,6 +178,31 @@ function OverviewTab({ p }) {
 
 function SubmissionsTab({ submissions }) {
   const [viewingSubmission, setViewingSubmission] = useState(null);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [sort, setSort] = useState({ field: "date", dir: "desc" });
+
+  const categories = useMemo(() => ["all", ...new Set(submissions.map(s => s.category))], [submissions]);
+
+  const filtered = useMemo(() => {
+    let list = submissions.filter(s => {
+      if (search && !s.formName.toLowerCase().includes(search.toLowerCase())) return false;
+      if (categoryFilter !== "all" && s.category !== categoryFilter) return false;
+      return true;
+    });
+    const dir = sort.dir === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      if (sort.field === "date") return dir * (new Date(a.submittedAt) - new Date(b.submittedAt));
+      if (sort.field === "name") return dir * a.formName.localeCompare(b.formName);
+      if (sort.field === "questions") return dir * (a.fields.length - b.fields.length);
+      return 0;
+    });
+    return list;
+  }, [submissions, search, categoryFilter, sort]);
+
+  function toggleSort(field) {
+    setSort(prev => prev.field === field ? { field, dir: prev.dir === "asc" ? "desc" : "asc" } : { field, dir: "desc" });
+  }
 
   if (viewingSubmission) {
     const s = viewingSubmission;
@@ -233,8 +260,39 @@ function SubmissionsTab({ submissions }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-slate-400">{submissions.length} form submissions (read-only)</p>
-      {submissions.map(s => (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
+        <div className="relative">
+          <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search forms by name…"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-300" />
+        </div>
+        <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Category</span>
+          {categories.map(c => (
+            <button key={c} onClick={() => setCategoryFilter(c)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap capitalize shrink-0 ${categoryFilter === c ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+              {c === "all" ? "All" : c}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Sort</span>
+          {[{ field: "date", label: "Date" }, { field: "name", label: "Name" }, { field: "questions", label: "Questions" }].map(s => (
+            <button key={s.field} onClick={() => toggleSort(s.field)}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${sort.field === s.field ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+              {s.label}
+              {sort.field === s.field && <ChevronIcon direction={sort.dir === "asc" ? "up" : "down"} className="text-white" />}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-xs text-slate-400 px-1">Showing {filtered.length} of {submissions.length} submissions (read-only)</p>
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
+          <p className="text-sm text-slate-400">No submissions match your search.</p>
+          <button onClick={() => { setSearch(""); setCategoryFilter("all"); }} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear filters</button>
+        </div>
+      ) : filtered.map(s => (
         <button key={s.id} onClick={() => setViewingSubmission(s)}
           className="w-full text-left bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-4 flex items-center justify-between gap-3 hover:bg-slate-50 hover:border-slate-200 transition-all group">
           <div className="flex-1 min-w-0">
@@ -258,282 +316,94 @@ function SubmissionsTab({ submissions }) {
 // ─── Tab: Health Goals ──────────────────────────────────────────────────────────
 
 function GoalsTab({ goals }) {
-  return (
-    <div className="space-y-4">
-      <p className="text-xs text-slate-400">{goals.length} goals — read-only view (participant manages their own goals)</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {goals.map(g => {
-          const range = Math.abs(g.target - g.baseline);
-          const progress = range > 0 ? Math.min(100, Math.round((Math.abs(g.current - g.baseline) / range) * 100)) : (g.current >= g.target ? 100 : 0);
-          const isComplete = g.status === "completed";
-          const statusColors = isComplete ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200";
-          return (
-            <div key={g.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-xl">{g.emoji}</div>
-                  <div><h3 className="font-bold text-slate-800">{g.title}</h3><p className="text-xs text-slate-400 mt-0.5">{fmt(g.startDate)} → {fmt(g.targetDate)}</p></div>
-                </div>
-                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border capitalize ${statusColors}`}>{g.status}</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                <div className="text-center"><p className="text-xs text-slate-400">Baseline</p><p className="text-sm font-bold text-slate-600">{g.baseline} <span className="text-xs font-normal text-slate-400">{g.unit}</span></p></div>
-                <div className="text-center"><p className="text-xs text-slate-400">Current</p><p className="text-sm font-bold text-blue-600">{g.current} <span className="text-xs font-normal text-slate-400">{g.unit}</span></p></div>
-                <div className="text-center"><p className="text-xs text-slate-400">Target</p><p className="text-sm font-bold text-emerald-600">{g.target} <span className="text-xs font-normal text-slate-400">{g.unit}</span></p></div>
-              </div>
-              <div>
-                <div className="flex justify-between text-xs mb-1"><span className="text-slate-400">Progress</span><span className="font-semibold text-slate-600">{progress}%</span></div>
-                <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden"><div className={`h-2 rounded-full transition-all ${isComplete ? "bg-emerald-500" : "bg-blue-500"}`} style={{ width: `${progress}%` }} /></div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sort, setSort] = useState({ field: "progress", dir: "desc" });
 
-// ─── Tab: Health Trends ─────────────────────────────────────────────────────────
+  function calcProgress(g) {
+    const range = Math.abs(g.target - g.baseline);
+    return range > 0 ? Math.min(100, Math.round((Math.abs(g.current - g.baseline) / range) * 100)) : (g.current >= g.target ? 100 : 0);
+  }
 
-const ALL_TREND_METRICS = [
-  { key: "bpSystolic", label: "Systolic BP", unit: "mmHg", category: "Vitals" },
-  { key: "bpDiastolic", label: "Diastolic BP", unit: "mmHg", category: "Vitals" },
-  { key: "weight", label: "Weight", unit: "kg", category: "Vitals" },
-  { key: "painLevel", label: "Pain Level", unit: "/10", category: "Vitals" },
-  { key: "stressScore", label: "Stress Score (PSS)", unit: "/40", category: "Mental Health" },
-  { key: "sleepHours", label: "Sleep Duration", unit: "hrs", category: "Lifestyle" },
-  { key: "waterIntake", label: "Water Intake", unit: "glasses", category: "Lifestyle" },
-  { key: "exerciseMinutes", label: "Exercise", unit: "min/day", category: "Lifestyle" },
-];
-
-const TREND_CATEGORIES = [...new Set(ALL_TREND_METRICS.map(m => m.category))];
-
-const TREND_COLORS = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#6366f1", "#ec4899", "#14b8a6", "#f97316"];
-
-function generateMockTrends(months, metrics) {
-  return months.map((month, i) => {
-    const row = { month };
-    metrics.forEach(mk => {
-      const ranges = { bpSystolic: [125, 150], bpDiastolic: [78, 96], weight: [90, 105], painLevel: [2, 8], stressScore: [10, 30], sleepHours: [5, 8], waterIntake: [3, 9], exerciseMinutes: [10, 45] };
-      const [lo, hi] = ranges[mk] || [0, 100];
-      row[mk] = Math.round((hi - (hi - lo) * (i / (months.length - 1 || 1)) + (Math.random() - 0.5) * 5) * 10) / 10;
+  const filtered = useMemo(() => {
+    let list = goals.filter(g => {
+      if (statusFilter !== "all" && g.status !== statusFilter) return false;
+      return true;
     });
-    return row;
-  });
-}
+    const dir = sort.dir === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      if (sort.field === "progress") return dir * (calcProgress(a) - calcProgress(b));
+      if (sort.field === "title") return dir * a.title.localeCompare(b.title);
+      if (sort.field === "targetDate") return dir * (new Date(a.targetDate) - new Date(b.targetDate));
+      if (sort.field === "startDate") return dir * (new Date(a.startDate) - new Date(b.startDate));
+      return 0;
+    });
+    return list;
+  }, [goals, statusFilter, sort]);
 
-function TrendsTab({ participantId }) {
-  // Config state
-  const [selectedMetrics, setSelectedMetrics] = useState(["bpSystolic", "bpDiastolic"]);
-  const [dateFrom, setDateFrom] = useState("2025-09-01");
-  const [dateTo, setDateTo] = useState("2026-03-14");
-  const [chartMode, setChartMode] = useState("individual");
-  const [generated, setGenerated] = useState(false);
-  const [metricsExpanded, setMetricsExpanded] = useState(false);
+  const statuses = useMemo(() => {
+    const counts = { all: goals.length };
+    goals.forEach(g => { counts[g.status] = (counts[g.status] || 0) + 1; });
+    return counts;
+  }, [goals]);
 
-  // Data
-  const months = ["Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-  const trends = useMemo(() => generated ? generateMockTrends(months, selectedMetrics) : null, [generated, selectedMetrics]);
-
-  const ttStyle = { borderRadius: "12px", border: "none", boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)", fontSize: "12px" };
-
-  function toggleMetric(key) {
-    setSelectedMetrics(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  function toggleSort(field) {
+    setSort(prev => prev.field === field ? { field, dir: prev.dir === "asc" ? "desc" : "asc" } : { field, dir: "desc" });
   }
 
-  function toggleCategory(cat) {
-    const catKeys = ALL_TREND_METRICS.filter(m => m.category === cat).map(m => m.key);
-    const allSelected = catKeys.every(k => selectedMetrics.includes(k));
-    if (allSelected) setSelectedMetrics(prev => prev.filter(k => !catKeys.includes(k)));
-    else setSelectedMetrics(prev => [...new Set([...prev, ...catKeys])]);
-  }
+  const statusStyles = { active: "bg-amber-50 text-amber-700 border-amber-200", completed: "bg-emerald-50 text-emerald-700 border-emerald-200", paused: "bg-slate-100 text-slate-600 border-slate-200" };
 
-  // ── Configuration view ──
-  if (!generated) {
-    return (
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-5">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-          </div>
-          <div>
-            <h2 className="text-base font-bold text-slate-800">Configure Health Trends</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Select which metrics to track and the time range</p>
-          </div>
-        </div>
-
-        {/* Metric picker */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Metrics</label>
-            <button onClick={() => setMetricsExpanded(!metricsExpanded)} className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">
-              {metricsExpanded ? "Collapse" : `${selectedMetrics.length} selected — Edit`}
-            </button>
-          </div>
-          {!metricsExpanded ? (
-            <div className="flex flex-wrap gap-1.5">
-              {selectedMetrics.length === 0 ? (
-                <span className="text-xs text-slate-400 italic">No metrics selected</span>
-              ) : selectedMetrics.map(key => {
-                const m = ALL_TREND_METRICS.find(x => x.key === key);
-                return m ? (
-                  <span key={key} className="inline-flex items-center gap-1 text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded-full">
-                    {m.label}
-                    <button onClick={() => toggleMetric(key)} className="text-blue-400 hover:text-blue-700 transition-colors">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                  </span>
-                ) : null;
-              })}
-            </div>
-          ) : (
-            <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 space-y-3 max-h-60 overflow-y-auto">
-              {TREND_CATEGORIES.map(cat => {
-                const catMetrics = ALL_TREND_METRICS.filter(m => m.category === cat);
-                const allCatSelected = catMetrics.every(m => selectedMetrics.includes(m.key));
-                const someCatSelected = catMetrics.some(m => selectedMetrics.includes(m.key));
-                return (
-                  <div key={cat}>
-                    <button onClick={() => toggleCategory(cat)} className="flex items-center gap-2 mb-1.5 group">
-                      <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${allCatSelected ? "bg-blue-600 border-blue-600" : someCatSelected ? "bg-blue-200 border-blue-400" : "border-slate-300 group-hover:border-slate-400"}`}>
-                        {(allCatSelected || someCatSelected) && <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allCatSelected ? "M5 13l4 4L19 7" : "M20 12H4"} /></svg>}
-                      </div>
-                      <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">{cat}</span>
-                    </button>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 ml-6">
-                      {catMetrics.map(m => (
-                        <label key={m.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white cursor-pointer transition-colors">
-                          <input type="checkbox" checked={selectedMetrics.includes(m.key)} onChange={() => toggleMetric(m.key)} className="w-3.5 h-3.5 rounded accent-blue-600" />
-                          <span className="text-xs text-slate-700">{m.label}</span>
-                          <span className="text-xs text-slate-300 ml-auto">{m.unit}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-              <div className="flex gap-2 pt-2 border-t border-slate-200">
-                <button onClick={() => setSelectedMetrics(ALL_TREND_METRICS.map(m => m.key))} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Select All</button>
-                <span className="text-xs text-slate-300">·</span>
-                <button onClick={() => setSelectedMetrics([])} className="text-xs font-semibold text-slate-500 hover:text-slate-700">Clear All</button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Date range */}
-        <div>
-          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Date Range</label>
-          <div className="flex items-center gap-2">
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700" />
-            <span className="text-xs text-slate-300">to</span>
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700" />
-          </div>
-        </div>
-
-        {/* Chart mode */}
-        <div>
-          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Display Mode</label>
-          <div className="flex gap-1.5">
-            <button onClick={() => setChartMode("individual")} className={`flex-1 px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${chartMode === "individual" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>
-              Individual Charts (one per metric)
-            </button>
-            <button onClick={() => setChartMode("overlay")} className={`flex-1 px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${chartMode === "overlay" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>
-              Overlay (all on one chart)
-            </button>
-          </div>
-        </div>
-
-        <button onClick={() => setGenerated(true)} disabled={selectedMetrics.length === 0}
-          className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-          Generate Trends
-        </button>
-      </div>
-    );
-  }
-
-  // ── Results view ──
   return (
-    <div className="space-y-5">
-      <button onClick={() => setGenerated(false)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-        Back to Configuration
-      </button>
-
-      {/* Config summary */}
-      <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span className="font-bold text-slate-700">{selectedMetrics.length} metrics</span>
-        <span>·</span>
-        <span>{fmt(dateFrom)} — {fmt(dateTo)}</span>
-        <span>·</span>
-        <span className="capitalize">{chartMode === "individual" ? "Individual charts" : "Overlay mode"}</span>
-      </div>
-
-      {/* Overlay mode — all metrics on one chart */}
-      {chartMode === "overlay" && trends && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">All Selected Metrics — Overlay</p>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trends}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                <Tooltip contentStyle={ttStyle} />
-                <Legend wrapperStyle={{ fontSize: "11px" }} />
-                {selectedMetrics.map((mk, i) => {
-                  const m = ALL_TREND_METRICS.find(x => x.key === mk);
-                  return <Line key={mk} type="monotone" dataKey={mk} name={m?.label || mk} stroke={TREND_COLORS[i % TREND_COLORS.length]} strokeWidth={2} dot={{ r: 3 }} />;
-                })}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          {selectedMetrics.length > 4 && <p className="text-xs text-slate-400 italic mt-2 text-center">Many metrics overlaid — consider switching to individual charts for clarity.</p>}
+    <div className="space-y-3">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
+        <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Status</span>
+          {["all", "active", "completed", "paused"].map(s => (
+            <button key={s} onClick={() => setStatusFilter(s)}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap capitalize shrink-0 ${statusFilter === s ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+              {s === "all" ? "All" : s}
+              <span className={`text-xs ${statusFilter === s ? "text-blue-200" : "text-slate-400"}`}>({statuses[s] || 0})</span>
+            </button>
+          ))}
         </div>
-      )}
-
-      {/* Individual mode — one chart per metric */}
-      {chartMode === "individual" && trends && selectedMetrics.map((mk, idx) => {
-        const m = ALL_TREND_METRICS.find(x => x.key === mk);
-        return (
-          <div key={mk} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">{m?.label || mk} <span className="text-slate-300 font-normal normal-case">({m?.unit})</span></p>
-            <div className="h-52">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trends}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                  <Tooltip contentStyle={ttStyle} formatter={(v) => `${v} ${m?.unit || ""}`} />
-                  <Line type="monotone" dataKey={mk} name={m?.label} stroke={TREND_COLORS[idx % TREND_COLORS.length]} strokeWidth={2} dot={{ r: 4 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        );
-      })}
-
-      {/* Trend summary cards — computed from first and last data points */}
-      {trends && trends.length >= 2 && (
-        <div className={`grid grid-cols-1 ${selectedMetrics.length >= 3 ? "md:grid-cols-3" : selectedMetrics.length === 2 ? "md:grid-cols-2" : ""} gap-3`}>
-          {selectedMetrics.slice(0, 6).map(mk => {
-            const m = ALL_TREND_METRICS.find(x => x.key === mk);
-            const first = trends[0]?.[mk];
-            const last = trends[trends.length - 1]?.[mk];
-            if (first == null || last == null) return null;
-            const diff = Math.round((last - first) * 10) / 10;
-            const lowerBetter = !["sleepHours", "waterIntake", "exerciseMinutes"].includes(mk);
-            const improving = lowerBetter ? diff < 0 : diff > 0;
+        <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Sort</span>
+          {[{ field: "progress", label: "Progress" }, { field: "title", label: "Title" }, { field: "targetDate", label: "Target Date" }, { field: "startDate", label: "Start Date" }].map(s => (
+            <button key={s.field} onClick={() => toggleSort(s.field)}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${sort.field === s.field ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+              {s.label}
+              {sort.field === s.field && <ChevronIcon direction={sort.dir === "asc" ? "up" : "down"} className="text-white" />}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-xs text-slate-400 px-1">Showing {filtered.length} of {goals.length} goals — read-only view</p>
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
+          <p className="text-sm text-slate-400">No goals match this filter.</p>
+          <button onClick={() => setStatusFilter("all")} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Show all goals</button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {filtered.map(g => {
+            const progress = calcProgress(g);
             return (
-              <div key={mk} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 text-center">
-                <p className="text-xs text-slate-400 mb-1">{m?.label} Trend</p>
-                <p className={`text-lg font-extrabold ${improving ? "text-emerald-600" : diff === 0 ? "text-slate-400" : "text-rose-600"}`}>
-                  {diff > 0 ? "↑" : diff < 0 ? "↓" : "→"} {Math.abs(diff)} {m?.unit}
-                </p>
-                <p className={`text-xs ${improving ? "text-emerald-500" : diff === 0 ? "text-slate-400" : "text-rose-500"}`}>
-                  {improving ? "Improving" : diff === 0 ? "No change" : "Needs attention"}
-                </p>
+              <div key={g.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-xl">{g.emoji}</div>
+                    <div><h3 className="font-bold text-slate-800">{g.title}</h3><p className="text-xs text-slate-400 mt-0.5">{fmt(g.startDate)} → {fmt(g.targetDate)}</p></div>
+                  </div>
+                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full border capitalize ${statusStyles[g.status] || statusStyles.active}`}>{g.status}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  <div className="text-center"><p className="text-xs text-slate-400">Baseline</p><p className="text-sm font-bold text-slate-600">{g.baseline} <span className="text-xs font-normal text-slate-400">{g.unit}</span></p></div>
+                  <div className="text-center"><p className="text-xs text-slate-400">Current</p><p className="text-sm font-bold text-blue-600">{g.current} <span className="text-xs font-normal text-slate-400">{g.unit}</span></p></div>
+                  <div className="text-center"><p className="text-xs text-slate-400">Target</p><p className="text-sm font-bold text-emerald-600">{g.target} <span className="text-xs font-normal text-slate-400">{g.unit}</span></p></div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-xs mb-1"><span className="text-slate-400">Progress</span><span className="font-semibold text-slate-600">{progress}%</span></div>
+                  <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden"><div className={`h-2 rounded-full transition-all ${g.status === "completed" ? "bg-emerald-500" : g.status === "paused" ? "bg-slate-400" : "bg-blue-500"}`} style={{ width: `${progress}%` }} /></div>
+                </div>
               </div>
             );
           })}
@@ -548,22 +418,41 @@ function TrendsTab({ participantId }) {
 function NotesTab({ participantId, participantName, initialNotes }) {
   const [notes, setNotes] = useState(initialNotes);
   const [newNote, setNewNote] = useState("");
-  const [tag, setTag] = useState("check-in");
+  const [writeTag, setWriteTag] = useState("check-in");
   const [saving, setSaving] = useState(false);
+
+  // Filter/sort state
+  const [search, setSearch] = useState("");
+  const [tagFilter, setTagFilter] = useState("all");
+  const [sortDir, setSortDir] = useState("desc");
 
   async function handleSave() {
     if (!newNote.trim()) return;
     setSaving(true);
     try {
-      await api.caretakerCreateNote(participantId, newNote.trim(), tag);
+      await api.caretakerCreateNote(participantId, newNote.trim(), writeTag);
     } catch (err) {
       console.warn("Note save via API failed (backend may not be ready):", err.message);
     }
-    // Optimistic update regardless
-    setNotes(prev => [{ id: `n${Date.now()}`, text: newNote.trim(), createdAt: new Date().toISOString().split("T")[0], tag }, ...prev]);
+    setNotes(prev => [{ id: `n${Date.now()}`, text: newNote.trim(), createdAt: new Date().toISOString().split("T")[0], tag: writeTag }, ...prev]);
     setNewNote("");
     setSaving(false);
   }
+
+  const allTags = useMemo(() => ["all", ...new Set(notes.map(n => n.tag))], [notes]);
+
+  const filtered = useMemo(() => {
+    let list = notes.filter(n => {
+      if (search && !n.text.toLowerCase().includes(search.toLowerCase())) return false;
+      if (tagFilter !== "all" && n.tag !== tagFilter) return false;
+      return true;
+    });
+    list.sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      return dir * (new Date(a.createdAt) - new Date(b.createdAt));
+    });
+    return list;
+  }, [notes, search, tagFilter, sortDir]);
 
   const tagColors = {
     "check-in": "bg-blue-50 text-blue-700 border-blue-100",
@@ -575,6 +464,7 @@ function NotesTab({ participantId, participantName, initialNotes }) {
 
   return (
     <div className="space-y-5">
+      {/* Write new note */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-3">
         <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">New Feedback / Note</p>
         <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={3} placeholder={`Write feedback for ${participantName}...`}
@@ -582,7 +472,7 @@ function NotesTab({ participantId, participantName, initialNotes }) {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex gap-1.5 overflow-x-auto">
             {["check-in", "recommendation", "progress", "concern"].map(t => (
-              <button key={t} onClick={() => setTag(t)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap capitalize ${tag === t ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{t}</button>
+              <button key={t} onClick={() => setWriteTag(t)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap capitalize ${writeTag === t ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{t}</button>
             ))}
           </div>
           <button onClick={handleSave} disabled={!newNote.trim() || saving} className="px-4 py-2 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
@@ -590,18 +480,52 @@ function NotesTab({ participantId, participantName, initialNotes }) {
           </button>
         </div>
       </div>
-      <div className="space-y-3">
-        <p className="text-xs text-slate-400">{notes.length} notes</p>
-        {notes.map(n => (
-          <div key={n.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xs text-slate-400">{fmt(n.createdAt)}</span>
-              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${tagColors[n.tag] || tagColors["check-in"]}`}>{n.tag}</span>
-            </div>
-            <p className="text-sm text-slate-700 leading-relaxed">{n.text}</p>
+
+      {/* Search + filter + sort */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
+        <div className="relative">
+          <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search notes…"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-300" />
+        </div>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Tag</span>
+            {allTags.map(t => (
+              <button key={t} onClick={() => setTagFilter(t)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap capitalize shrink-0 ${tagFilter === t ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+                {t === "all" ? "All" : t}
+              </button>
+            ))}
           </div>
-        ))}
+          <button onClick={() => setSortDir(prev => prev === "desc" ? "asc" : "desc")}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-500 hover:bg-slate-200 transition-all whitespace-nowrap shrink-0">
+            {sortDir === "desc" ? "Newest first" : "Oldest first"}
+            <ChevronIcon direction={sortDir === "desc" ? "down" : "up"} />
+          </button>
+        </div>
       </div>
+
+      {/* Notes list */}
+      <p className="text-xs text-slate-400 px-1">Showing {filtered.length} of {notes.length} notes</p>
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
+          <p className="text-sm text-slate-400">No notes match your search.</p>
+          <button onClick={() => { setSearch(""); setTagFilter("all"); }} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear filters</button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map(n => (
+            <div key={n.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xs text-slate-400">{fmt(n.createdAt)}</span>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${tagColors[n.tag] || tagColors["check-in"]}`}>{n.tag}</span>
+              </div>
+              <p className="text-sm text-slate-700 leading-relaxed">{n.text}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -612,7 +536,6 @@ const TABS = [
   { key: "overview", label: "Overview", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
   { key: "submissions", label: "Submissions", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
   { key: "goals", label: "Health Goals", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
-  { key: "trends", label: "Health Trends", icon: "M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" },
   { key: "notes", label: "Notes & Feedback", icon: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" },
 ];
 
@@ -621,11 +544,7 @@ export default function ParticipantDetailPage() {
   const navigate = useNavigate();
   const { user } = useOutletContext();
 
-  // Support deep-linking to a specific tab via ?tab=trends
-  //const [searchParams] = useState(() => new URLSearchParams(window.location.search));
-  //const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "overview");
-
-  const [activeTab, setActiveTab] = useState("overview"); 
+  const [activeTab, setActiveTab] = useState("overview");
   const [participant, setParticipant] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [goals, setGoals] = useState([]);
@@ -725,7 +644,6 @@ export default function ParticipantDetailPage() {
       {activeTab === "overview" && <OverviewTab p={p} />}
       {activeTab === "submissions" && <SubmissionsTab submissions={submissions} />}
       {activeTab === "goals" && <GoalsTab goals={goals} />}
-      {activeTab === "trends" && <TrendsTab participantId={p.id} />}
       {activeTab === "notes" && <NotesTab participantId={p.id} participantName={`${p.firstName} ${p.lastName}`} initialNotes={notes} />}
     </div>
   );

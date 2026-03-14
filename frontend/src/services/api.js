@@ -231,4 +231,12 @@ export const api = {
 
   caretakerGetReport: (reportId) =>
     request(`/caretaker/reports/${reportId}`),
+
+  caretakerListInvites: () =>
+    request("/caretaker/invites"),
+
+  caretakerRevokeInvite: (inviteId) =>
+    request(`/caretaker/invites/${inviteId}/revoke`, {
+      method: "POST",
+    }),
 };
