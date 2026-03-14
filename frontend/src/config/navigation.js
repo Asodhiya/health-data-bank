@@ -99,15 +99,15 @@ export const DASHBOARD_NAV = [
   /* =====================
      PROFILE (per-role path)
   ====================== */
-  { label: "Profile", to: "/admin/profile", roles: ["admin"] },
-  { label: "Profile", to: "/researcher/profile", roles: ["researcher"] },
-  { label: "Profile", to: "/caretaker/profile", roles: ["caretaker"] },
+  //{ label: "Profile", to: "/admin/profile", roles: ["admin"] },
+  //{ label: "Profile", to: "/researcher/profile", roles: ["researcher"] },
+  //{ label: "Profile", to: "/caretaker/profile", roles: ["caretaker"] },
 
-  {
-    label: "Logout",
-    to: "/logout",
-    roles: ["admin", "researcher", "caretaker"],
-  },
+  //{
+  //  label: "Logout",
+  //  to: "/logout",
+  //  roles: ["admin", "researcher", "caretaker"],
+  //},
 ];
 
 export const PARTICIPANT_NAV = [

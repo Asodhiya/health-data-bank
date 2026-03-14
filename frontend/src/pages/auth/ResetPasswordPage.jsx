@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
-// import { api } from '../../services/api';   // uncomment when backend endpoint exists
+import { api } from '../../services/api';
 
 const PASSWORD_RULES = [
   { label: 'Min 8 characters', test: (p) => p.length >= 8 },
@@ -39,9 +39,7 @@ export default function ResetPasswordPage() {
 
     setLoading(true);
     try {
-      // TODO: call api.resetPassword when backend endpoint exists
-      // await api.resetPassword({ token, new_password: password });
-
+      await api.resetPassword(token, password);
       setSuccess(true);
     } catch (err) {
       setError(err.message || 'Failed to reset password. The link may have expired.');

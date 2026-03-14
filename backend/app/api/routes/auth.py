@@ -9,8 +9,8 @@ from app.db.session import get_db
 from app.core.security import PasswordHash, create_access_token, generate_reset_token, hash_reset_token, reset_token_expiry
 from app.schemas.schemas import UserSignup
 from app.services.cookies import _set_cookie
-from app.services.auth_service import authenticate_user, reset_forgot_password, create_user_with_role
-from app.schemas.schemas import LoginRequest, UserResponse, ForgotPasswordIn
+from app.services.auth_service import authenticate_user, reset_forgot_password, create_user_with_role, reset_password
+from app.schemas.schemas import LoginRequest, UserResponse, ForgotPasswordIn, ResetPasswordIn
 from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import SEND_INVITE
 from app.services.email_sender import send_reset_email, send_invite_email
@@ -200,6 +200,29 @@ async def forgot_password(
     )
 
     return {"message": "If the email exists, a reset link has been sent."}
+
+
+@router.post("/reset-password")
+async def reset_password_endpoint(
+    payload: ResetPasswordIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Validates the reset token and updates the user's password."""
+    ip = _get_client_ip(request)
+
+    await reset_password(payload, db)
+
+    await write_audit_log(
+        db,
+        action="PASSWORD_RESET_SUCCESS",
+        ip_address=ip,
+        actor_user_id=None,
+        entity_type="user",
+        details={},
+    )
+
+    return {"message": "Password has been reset successfully."}
 
 
 @router.post("/signup_invite")

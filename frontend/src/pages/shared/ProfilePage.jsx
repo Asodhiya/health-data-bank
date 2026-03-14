@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../../services/api';
 
 /*
@@ -215,6 +216,8 @@ function ToggleSwitch({ checked, onChange }) {
 function SearchableSelect({ value, onChange, options, placeholder = 'Search...' }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+  const inputRef = useRef(null);
 
   const filtered = query
     ? options.filter((o) => o.toLowerCase().includes(query.toLowerCase()))
@@ -226,19 +229,31 @@ function SearchableSelect({ value, onChange, options, placeholder = 'Search...' 
     setOpen(false);
   };
 
+  const handleFocus = () => {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    }
+    setOpen(true);
+  };
+
   return (
     <div className="relative">
       <input
+        ref={inputRef}
         className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         placeholder={placeholder}
         value={open ? query : value || ''}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
+        onFocus={handleFocus}
       />
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <ul className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
+          <ul
+            className="fixed z-20 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"
+            style={{ top: `${dropdownPos.top}px`, left: `${dropdownPos.left}px`, width: `${dropdownPos.width}px` }}
+          >
             {filtered.length === 0 ? (
               <li className="px-3 py-2.5 text-sm text-slate-400">No results</li>
             ) : (
@@ -682,7 +697,8 @@ function DangerZoneSection() {
    Pure content — renders inside a layout's <Outlet />.
    ══════════════════════════════════════════════ */
 export default function ProfilePage({ role = 'participant' }) {
-  const [tab, setTab] = useState('profile');
+  const location = useLocation();
+  const [tab, setTab] = useState(location.hash === '#settings' ? 'settings' : 'profile');
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState({ ...EMPTY_PROFILE });
 
