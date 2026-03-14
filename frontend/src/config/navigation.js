@@ -13,7 +13,7 @@ export const DASHBOARD_NAV = [
   {
     label: "Groups / Cohorts",
     to: "/groups",
-    roles: ["admin", "researcher", "caretaker"],
+    roles: ["admin", "researcher"], //removed caretaker for now since they won't be managing groups
   },
 
   /* =====================
@@ -80,21 +80,22 @@ export const DASHBOARD_NAV = [
   ====================== */
   {
     label: "My Participants",
-    to: "/participants",
-    roles: ["admin", "caretaker"],
-  },
-
-  {
-    label: "Check-ins / Review",
-    to: "/checkins",
+    to: "/caretaker/participants",
     roles: ["caretaker"],
   },
 
   {
-    label: "Reminders",
-    to: "/reminders",
+    label: "Reports",
+    to: "/reports",
     roles: ["caretaker"],
   },
+
+  {
+    label: "Notes & Feedback",
+    to: "/notes-feedback",
+    roles: ["caretaker"],
+  },
+  
 
   /* =====================
      PROFILE (per-role path)

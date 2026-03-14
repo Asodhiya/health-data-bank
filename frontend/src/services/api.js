@@ -155,4 +155,18 @@ export const api = {
     request(`/data-elements/fields/${field_id}/map?element_id=${element_id}`, {
       method: "DELETE",
     }),
+
+    // ── Caretaker ──
+  caretakerListParticipants: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/caretaker/participants${qs ? `?${qs}` : ""}`);
+  },
+
+  caretakerGetGroups: () => request("/caretaker/groups"),
+
+  caretakerCreateNote: (participantId, text) =>
+    request(`/caretaker/participants/${participantId}/notes`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
 };
