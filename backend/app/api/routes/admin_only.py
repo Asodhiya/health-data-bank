@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
 from app.core.dependency import require_permissions
 from typing import Optional
-from app.core.permissions import ROLE_READ_ALL, GROUP_READ, GROUP_WRITE, GROUP_DELETE, CARETAKER_READ, CARETAKER_ASSIGN, BACKUP_CREATE, BACKUP_RESTORE
+from app.core.permissions import ROLE_READ_ALL, GROUP_READ, GROUP_WRITE, GROUP_DELETE, CARETAKER_READ, CARETAKER_ASSIGN, BACKUP_CREATE
 from uuid import UUID
 
 router = APIRouter()
@@ -182,8 +182,7 @@ async def backup_endpoint(
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
-
-@router.post("/restore", response_model=RestoreResponse, dependencies=[Depends(require_permissions(BACKUP_RESTORE))])
+@router.post("/restore", response_model=RestoreResponse)
 async def restore_endpoint(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
