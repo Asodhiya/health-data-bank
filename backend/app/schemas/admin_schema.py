@@ -34,3 +34,17 @@ class DeleteGroupResponse(BaseModel):
     group_id: UUID
     message: str
     ungrouped_participants: List[str]  # participant IDs that lost their group
+
+
+# ── Admin Backup & Restore schemas added by Job (SPRINT 7) ──────────────────
+
+class BackupMetaResponse(BaseModel):
+    snapshot_name: str
+    created_at: str
+    table_row_counts: dict  # {"users": 10, "groups": 3, ...}
+
+
+class RestoreResponse(BaseModel):
+    restored_from: str   # snapshot_name from the file
+    tables_restored: int
+    message: str

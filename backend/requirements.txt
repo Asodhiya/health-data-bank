@@ -11,3 +11,4 @@ email-validator
 sqlalchemy[asyncio]
 asyncpg
 alembic
+python-multipart
