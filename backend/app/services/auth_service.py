@@ -1,6 +1,6 @@
 from fastapi import HTTPException, status, BackgroundTasks
 
-from app.core.security import PasswordHash, generate_reset_token, hash_reset_token, reset_token_expiry
+from app.core.security import PasswordHash, verify_password_async, generate_reset_token, hash_reset_token, reset_token_expiry
 from app.middleware.signup_validation import UserSignup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -10,6 +10,18 @@ from datetime import datetime, timezone
 from app.schemas.schemas import ForgotPasswordIn,Role_user_link
 from app.services.email_sender import send_reset_email
 from app.db.queries.Queries import RoleQuery, UserQuery
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def update_last_login(user: User, db: AsyncSession):
+    try:
+        user.last_login_at = datetime.now(timezone.utc)
+        await db.commit()
+    except Exception:
+        logger.warning(f"Failed to update last_login_at for user {user.user_id}")
+
 
 async def authenticate_user(email: str, password: str, db: AsyncSession):
     """Checks email and password if in db or not"""
@@ -21,18 +33,14 @@ async def authenticate_user(email: str, password: str, db: AsyncSession):
             status_code=401,
             detail="Incorrect email or password"
         )
-    
+
     stored_hash = user.password_hash
     # verify hashed pass if it matches with the stored hashed db
-    if not PasswordHash.from_str(stored_hash).verify(password):
+    if not await verify_password_async(password, stored_hash.encode("utf-8")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
-
-    user.last_login_at = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(user)
 
     return user
 
@@ -125,4 +133,3 @@ async def reset_forgot_password( payload: ForgotPasswordIn, background: Backgrou
     # background.add_task(send_reset_email, user.email, reset_link)
 
     return {"message": "If the email exists, a reset link has been sent."}
-   

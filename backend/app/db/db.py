@@ -19,4 +19,8 @@ engine = create_async_engine(
     DATABASE_URL,
     echo=False,
     pool_pre_ping=True,
-    connect_args={"ssl": "require"},  )
+    pool_size=5,
+    max_overflow=10,
+    pool_recycle=1800,
+    connect_args={"ssl": "require"},
+)

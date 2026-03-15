@@ -9,7 +9,7 @@ from app.db.session import get_db
 from app.core.security import PasswordHash, create_access_token, generate_reset_token, hash_reset_token, reset_token_expiry
 from app.schemas.schemas import UserSignup
 from app.services.cookies import _set_cookie
-from app.services.auth_service import authenticate_user, reset_forgot_password, create_user_with_role
+from app.services.auth_service import authenticate_user, reset_forgot_password, create_user_with_role, update_last_login
 from app.schemas.schemas import LoginRequest, UserResponse, ForgotPasswordIn
 from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import SEND_INVITE
@@ -40,6 +40,7 @@ async def login(
     data: LoginRequest,
     response: Response,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """Authenticates user by checking email and hashed password."""
@@ -70,6 +71,7 @@ async def login(
         details={"email": user.email},
     )
 
+    background_tasks.add_task(update_last_login, user, db)
     token = create_access_token({"sub": str(user.user_id)})
     _set_cookie(response, token)
     return {"detail": "Login successful"}
