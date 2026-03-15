@@ -39,6 +39,11 @@ import UserManagementPage from "./pages/admin/UserManagementPage";
 // --- Researcher pages ---
 import DataElementManager from "./pages/researcher/DataElementMangaer";
 
+// ── Caretaker pages ──
+import MyParticipantsPage from "./pages/caretaker/MyParticipantsPage";
+import ParticipantDetailPage from "./pages/caretaker/ParticipantDetailPage";
+import ReportsPage from "./pages/caretaker/ReportsPage";
+
 function App() {
   const { role } = useAuth();
 
@@ -107,6 +112,18 @@ function App() {
             <Route
               path="/caretaker/profile"
               element={<ProfilePage role="caretaker" />}
+            />
+            <Route
+              path="/caretaker/participants"
+              element={<MyParticipantsPage />}
+            />
+            <Route
+              path="/caretaker/participants/:id"
+              element={<ParticipantDetailPage />}
+            />
+            <Route
+              path="/caretaker/reports"
+              element={<ReportsPage />}
             />
           </Route>
         </Route>

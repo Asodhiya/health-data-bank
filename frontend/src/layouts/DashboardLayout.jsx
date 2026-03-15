@@ -1,16 +1,17 @@
-import { Outlet, Link, useLocation } from "react-router-dom";
-import { useState, useEffect } from "react"; // Add useEffect
-import api from "../utils/axiosInstance"; // Bring in your superpower!
+import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import api from "../utils/axiosInstance";
+import { api as authApi } from "../services/api";
 import { DASHBOARD_NAV } from "../config/navigation";
+import NotificationBell from "../components/NotificationBell";
 
 export default function DashboardLayout({ role }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const location = useLocation();
-
-  // ADD THIS: Create a bucket for the user data
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [user, setUser] = useState(null);
+  const location = useLocation();
+  const navigate = useNavigate();
 
-  // ADD THIS: Fetch who is logged in when the layout loads
   useEffect(() => {
     api
       .get("/auth/me")
@@ -18,12 +19,23 @@ export default function DashboardLayout({ role }) {
       .catch((error) => console.error("Not logged in:", error));
   }, []);
 
-  // ... keep your return statement exactly the same until the Outlet ...
+  useEffect(() => {
+    if (!isProfileMenuOpen) return;
+
+    function handleClickOutside(e) {
+      if (!e.target.closest("#profile-dropdown")) {
+        setIsProfileMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isProfileMenuOpen]);
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900">
       {/* Top Header */}
-      <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm z-10">
+      <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm z-30">
         <div className="flex items-center gap-4">
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -52,10 +64,48 @@ export default function DashboardLayout({ role }) {
           </Link>
         </div>
 
-        <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold">
-          {/* Use the user's first name initial, or fallback to the Role initial if still loading */}
-          {user?.first_name?.charAt(0).toUpperCase() ||
-            role.charAt(0).toUpperCase()}
+        {/* Bell + Avatar */}
+        <div className="flex items-center gap-3">
+          <NotificationBell role={role} />
+          <div className="relative" id="profile-dropdown">
+          <button
+            onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+            className="w-8 h-8 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center font-bold transition-colors"
+          >
+            {user?.first_name?.charAt(0).toUpperCase() ||
+              role.charAt(0).toUpperCase()}
+          </button>
+
+          {isProfileMenuOpen && (
+            <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg py-2 border border-slate-100 z-50">
+              <Link
+                to={`/${role.toLowerCase()}/profile`}
+                onClick={() => setIsProfileMenuOpen(false)}
+                className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Profile
+              </Link>
+              <Link
+                to={`/${role.toLowerCase()}/profile#settings`}
+                onClick={() => setIsProfileMenuOpen(false)}
+                className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Settings
+              </Link>
+              <div className="border-t border-slate-100 my-1"></div>
+              <button
+                onClick={async () => {
+                  setIsProfileMenuOpen(false);
+                  await authApi.logout();
+                  navigate("/login");
+                }}
+                className="block w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-slate-50"
+              >
+                Logout
+              </button>
+            </div>
+          )}
+        </div>
         </div>
       </header>
 

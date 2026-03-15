@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../../services/api';
 
 /*
@@ -89,12 +90,21 @@ const DEV_PROFILES = {
   caretaker: {
     first_name: 'William', last_name: 'Montelpare',
     email: 'w.montelpare@upei.ca', phone: '902-566-0001',
-    address: '', dob: '', sex: '', pronouns: '', pronounsCustom: '',
+    address: '550 University Ave, Charlottetown, PE C1A 4P3',
+    dob: '', sex: '', pronouns: '', pronounsCustom: '',
     program: '', year: '', language: '', intl: '', country: '',
     title: 'Dr.', organization: 'UPEI Faculty of Science',
-    department: '', research_pattern: '',
+    department: 'Applied Human Sciences', research_pattern: '',
+    specialty: 'Community Health & Wellness',
+    credentials: 'PhD, CSEP-CEP',
+    bio: 'Professor and researcher in applied health sciences with over 20 years of experience in community-based wellness programs. Currently leading the Health Data Bank initiative.',
     username: 'dr_montelpare',
     program_group: '', caretaker: '',
+    groupName: 'Morning Cohort A', participantCount: 8, activeParticipants: 6,
+    lastReportGenerated: 'Mar 10, 2026',
+    workingHours: { start: '09:00', end: '17:00' },
+    availableDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+    contactPreference: 'email',
     created_at: 'Oct 5, 2025', last_login: 'Feb 5, 2026 at 10:12 AM',
     mfa_enabled: true, enrolled_at: 'Oct 5, 2025',
   },
@@ -130,7 +140,13 @@ const EMPTY_PROFILE = {
   dob: '', sex: '', pronouns: '', pronounsCustom: '',
   program: '', year: '', language: '', intl: 'No', country: '',
   title: '', organization: '', department: '', research_pattern: '',
+  specialty: '', credentials: '', bio: '',
   username: '', program_group: '', caretaker: '',
+  groupName: '', participantCount: 0, activeParticipants: 0,
+  lastReportGenerated: '',
+  workingHours: { start: '09:00', end: '17:00' },
+  availableDays: [],
+  contactPreference: 'email',
   created_at: '', last_login: '', mfa_enabled: false, enrolled_at: '',
 };
 
@@ -139,19 +155,28 @@ const EMPTY_PROFILE = {
    REUSABLE SUB-COMPONENTS
    ══════════════════════════════════════════════ */
 
-function ChipSelect({ options, value, onChange }) {
+function ChipSelect({ options, value, onChange, multi = false }) {
   return (
     <div className="flex flex-wrap gap-2 mt-1">
-      {options.map((opt) => (
-        <button key={opt} type="button"
-          className={`px-3.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
-            value === opt
-              ? 'bg-blue-50 text-blue-700 border-blue-200'
-              : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-          }`}
-          onClick={() => onChange(opt)}
-        >{opt}</button>
-      ))}
+      {options.map((opt) => {
+        const isSelected = multi ? (value || []).includes(opt) : value === opt;
+        return (
+          <button key={opt} type="button"
+            className={`px-3.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+              isSelected
+                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+            }`}
+            onClick={() => {
+              if (multi) {
+                onChange(isSelected ? (value || []).filter(v => v !== opt) : [...(value || []), opt]);
+              } else {
+                onChange(opt);
+              }
+            }}
+          >{opt}</button>
+        );
+      })}
     </div>
   );
 }
@@ -215,6 +240,8 @@ function ToggleSwitch({ checked, onChange }) {
 function SearchableSelect({ value, onChange, options, placeholder = 'Search...' }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+  const inputRef = useRef(null);
 
   const filtered = query
     ? options.filter((o) => o.toLowerCase().includes(query.toLowerCase()))
@@ -226,19 +253,31 @@ function SearchableSelect({ value, onChange, options, placeholder = 'Search...' 
     setOpen(false);
   };
 
+  const handleFocus = () => {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    }
+    setOpen(true);
+  };
+
   return (
     <div className="relative">
       <input
+        ref={inputRef}
         className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         placeholder={placeholder}
         value={open ? query : value || ''}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
+        onFocus={handleFocus}
       />
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <ul className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
+          <ul
+            className="fixed z-20 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"
+            style={{ top: `${dropdownPos.top}px`, left: `${dropdownPos.left}px`, width: `${dropdownPos.width}px` }}
+          >
             {filtered.length === 0 ? (
               <li className="px-3 py-2.5 text-sm text-slate-400">No results</li>
             ) : (
@@ -373,9 +412,58 @@ function CaretakerFields({ form, set, editing, profile }) {
             ? <ChipSelect options={['Dr.', 'Prof.', 'Mr.', 'Ms.', 'Mx.']} value={form.title} onChange={set('title')} />
             : <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{profile.title || '—'}</span>}
         </div>
+        <ProfileField icon={null} label="CREDENTIALS"
+          value={editing ? form.credentials : profile.credentials}
+          editing={editing} onChange={set('credentials')} placeholder="e.g. PhD, RN, CSEP-CEP" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
         <ProfileField icon={<BriefcaseIcon />} label="ORGANIZATION"
           value={editing ? form.organization : profile.organization}
           editing={editing} onChange={set('organization')} />
+        <ProfileField icon={null} label="DEPARTMENT"
+          value={editing ? form.department : profile.department}
+          editing={editing} onChange={set('department')} />
+      </div>
+      <ProfileField icon={null} label="SPECIALTY / FOCUS AREA"
+        value={editing ? form.specialty : profile.specialty}
+        editing={editing} onChange={set('specialty')} placeholder="e.g. Community Health, Chronic Disease Management" />
+      <div className="mb-3.5">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">BIO</span>
+        {editing ? (
+          <textarea className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+            rows={3} value={form.bio || ''} onChange={(e) => set('bio')(e.target.value)} placeholder="Tell participants and colleagues about your background…" />
+        ) : (
+          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 whitespace-pre-wrap">{profile.bio || '—'}</span>
+        )}
+      </div>
+
+      <hr className="border-slate-100 my-5" />
+      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Availability & Contact Preferences</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+        <div className="mb-3.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">WORKING HOURS</span>
+          {editing ? (
+            <div className="flex items-center gap-2">
+              <input type="time" value={form.workingHours?.start || '09:00'} onChange={(e) => set('workingHours')({ ...(form.workingHours || {}), start: e.target.value })} className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <span className="text-xs text-slate-300">to</span>
+              <input type="time" value={form.workingHours?.end || '17:00'} onChange={(e) => set('workingHours')({ ...(form.workingHours || {}), end: e.target.value })} className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          ) : (
+            <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{profile.workingHours?.start || '—'} — {profile.workingHours?.end || '—'}</span>
+          )}
+        </div>
+        <div className="mb-3.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">CONTACT PREFERENCE</span>
+          {editing
+            ? <ChipSelect options={['Email', 'Phone', 'Either']} value={(form.contactPreference || 'email').charAt(0).toUpperCase() + (form.contactPreference || 'email').slice(1)} onChange={(v) => set('contactPreference')(v.toLowerCase())} />
+            : <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 capitalize">{profile.contactPreference || '—'}</span>}
+        </div>
+      </div>
+      <div className="mb-3.5">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">AVAILABLE DAYS</span>
+        {editing
+          ? <ChipSelect options={['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']} value={form.availableDays || []} onChange={set('availableDays')} multi />
+          : <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{(profile.availableDays || []).join(', ') || '—'}</span>}
       </div>
     </>
   );
@@ -515,6 +603,12 @@ function AccountDetailsSection({ profile, role }) {
       { label: 'Caretaker', value: profile.caretaker || 'Not assigned' },
     );
   }
+  if (role === 'caretaker') {
+    details.splice(1, 0,
+      { label: 'Assigned Group', value: profile.groupName || 'Not assigned' },
+      { label: 'Last Report Generated', value: profile.lastReportGenerated || 'None' },
+    );
+  }
 
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-5">
@@ -522,6 +616,22 @@ function AccountDetailsSection({ profile, role }) {
         <span className="text-blue-600"><ShieldIcon /></span>
         <h2 className="text-base font-bold text-slate-800">Account Details</h2>
       </div>
+      {role === 'caretaker' && (
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-3 text-center">
+            <p className="text-2xl font-extrabold text-emerald-600">{profile.participantCount || 0}</p>
+            <p className="text-xs text-emerald-500 mt-0.5">Participants</p>
+          </div>
+          <div className="rounded-xl bg-blue-50 border border-blue-100 px-3 py-3 text-center">
+            <p className="text-2xl font-extrabold text-blue-600">{profile.activeParticipants || 0}</p>
+            <p className="text-xs text-blue-500 mt-0.5">Active</p>
+          </div>
+          <div className="rounded-xl bg-indigo-50 border border-indigo-100 px-3 py-3 text-center">
+            <p className="text-2xl font-extrabold text-indigo-600">{(profile.participantCount || 0) - (profile.activeParticipants || 0)}</p>
+            <p className="text-xs text-indigo-500 mt-0.5">Inactive</p>
+          </div>
+        </div>
+      )}
       <div>
         {details.map((d, i) => (
           <div key={i} className="flex items-center justify-between py-3 border-b border-slate-50 last:border-b-0 last:pb-0">
@@ -620,7 +730,12 @@ function SecuritySection() {
 }
 
 function NotificationsSection({ role }) {
-  const [prefs, setPrefs] = useState({ email: true, survey: true, weekly: false, receiveResults: true });
+  const [prefs, setPrefs] = useState({
+    email: true, survey: true, weekly: false, receiveResults: true,
+    newSubmission: true, flagAlerts: true, goalDeadlines: true,
+    weeklyGroupSummary: true, participantInactivity: true,
+    inviteAccepted: true, monthlyReport: false,
+  });
   const toggle = (key) => () => setPrefs({ ...prefs, [key]: !prefs[key] });
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-5">
@@ -632,14 +747,18 @@ function NotificationsSection({ role }) {
         <span className="text-sm text-slate-600">Email notifications</span>
         <ToggleSwitch checked={prefs.email} onChange={toggle('email')} />
       </div>
-      <div className="flex items-center justify-between py-3 border-b border-slate-50">
-        <span className="text-sm text-slate-600">Survey reminders</span>
-        <ToggleSwitch checked={prefs.survey} onChange={toggle('survey')} />
-      </div>
-      <div className="flex items-center justify-between py-3">
-        <span className="text-sm text-slate-600">Weekly progress report</span>
-        <ToggleSwitch checked={prefs.weekly} onChange={toggle('weekly')} />
-      </div>
+      {role !== 'caretaker' && (
+        <>
+          <div className="flex items-center justify-between py-3 border-b border-slate-50">
+            <span className="text-sm text-slate-600">Survey reminders</span>
+            <ToggleSwitch checked={prefs.survey} onChange={toggle('survey')} />
+          </div>
+          <div className="flex items-center justify-between py-3">
+            <span className="text-sm text-slate-600">Weekly progress report</span>
+            <ToggleSwitch checked={prefs.weekly} onChange={toggle('weekly')} />
+          </div>
+        </>
+      )}
       {role === 'participant' && (
         <>
           <div className="border-t border-slate-100 mt-3 pt-3 mb-1">
@@ -651,6 +770,68 @@ function NotificationsSection({ role }) {
               <p className="text-xs text-slate-400 mt-0.5">Get notified when study results are available</p>
             </div>
             <ToggleSwitch checked={prefs.receiveResults} onChange={toggle('receiveResults')} />
+          </div>
+        </>
+      )}
+      {role === 'caretaker' && (
+        <>
+          <div className="border-t border-slate-100 mt-4 pt-4 mb-2">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Participant Activity</span>
+          </div>
+          <div className="flex items-center justify-between py-3 border-b border-slate-50">
+            <div>
+              <span className="text-sm text-slate-600">New form submission</span>
+              <p className="text-xs text-slate-400 mt-0.5">Get notified when a participant submits a survey</p>
+            </div>
+            <ToggleSwitch checked={prefs.newSubmission} onChange={toggle('newSubmission')} />
+          </div>
+          <div className="flex items-center justify-between py-3 border-b border-slate-50">
+            <div>
+              <span className="text-sm text-slate-600">Flag & alert notifications</span>
+              <p className="text-xs text-slate-400 mt-0.5">High BP, elevated pain, or other health alerts</p>
+            </div>
+            <ToggleSwitch checked={prefs.flagAlerts} onChange={toggle('flagAlerts')} />
+          </div>
+          <div className="flex items-center justify-between py-3 border-b border-slate-50">
+            <div>
+              <span className="text-sm text-slate-600">Participant inactivity</span>
+              <p className="text-xs text-slate-400 mt-0.5">Alert when a participant hasn't been active for 2+ weeks</p>
+            </div>
+            <ToggleSwitch checked={prefs.participantInactivity} onChange={toggle('participantInactivity')} />
+          </div>
+          <div className="border-t border-slate-100 mt-4 pt-4 mb-2">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Goals & Reports</span>
+          </div>
+          <div className="flex items-center justify-between py-3 border-b border-slate-50">
+            <div>
+              <span className="text-sm text-slate-600">Goal deadline reminders</span>
+              <p className="text-xs text-slate-400 mt-0.5">Remind when participant health goals are approaching their target date</p>
+            </div>
+            <ToggleSwitch checked={prefs.goalDeadlines} onChange={toggle('goalDeadlines')} />
+          </div>
+          <div className="flex items-center justify-between py-3 border-b border-slate-50">
+            <div>
+              <span className="text-sm text-slate-600">Weekly group summary</span>
+              <p className="text-xs text-slate-400 mt-0.5">Receive a weekly digest of group activity every Monday</p>
+            </div>
+            <ToggleSwitch checked={prefs.weeklyGroupSummary} onChange={toggle('weeklyGroupSummary')} />
+          </div>
+          <div className="flex items-center justify-between py-3 border-b border-slate-50">
+            <div>
+              <span className="text-sm text-slate-600">Monthly auto-report</span>
+              <p className="text-xs text-slate-400 mt-0.5">Automatically generate and email a group report on the 1st of each month</p>
+            </div>
+            <ToggleSwitch checked={prefs.monthlyReport} onChange={toggle('monthlyReport')} />
+          </div>
+          <div className="border-t border-slate-100 mt-4 pt-4 mb-2">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Admin & Invites</span>
+          </div>
+          <div className="flex items-center justify-between py-3">
+            <div>
+              <span className="text-sm text-slate-600">Invite accepted</span>
+              <p className="text-xs text-slate-400 mt-0.5">Get notified when an invited participant registers</p>
+            </div>
+            <ToggleSwitch checked={prefs.inviteAccepted} onChange={toggle('inviteAccepted')} />
           </div>
         </>
       )}
@@ -682,7 +863,8 @@ function DangerZoneSection() {
    Pure content — renders inside a layout's <Outlet />.
    ══════════════════════════════════════════════ */
 export default function ProfilePage({ role = 'participant' }) {
-  const [tab, setTab] = useState('profile');
+  const location = useLocation();
+  const [tab, setTab] = useState(location.hash === '#settings' ? 'settings' : 'profile');
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState({ ...EMPTY_PROFILE });
 
@@ -726,16 +908,17 @@ export default function ProfilePage({ role = 'participant' }) {
         </div>
         <div>
           <div className="flex items-center gap-2.5 flex-wrap">
-            <h1 className="text-xl font-bold text-slate-800">{profile.first_name} {profile.last_name}</h1>
+            <h1 className="text-xl font-bold text-slate-800">{role === 'caretaker' && profile.title ? `${profile.title} ` : ''}{profile.first_name} {profile.last_name}</h1>
             <span className="text-xs font-bold text-blue-600 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
               {roleLabel}
             </span>
           </div>
-          <p className="text-sm text-slate-400 mt-0.5">@{profile.username || 'username'}</p>
-          <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1">
+          <p className="text-sm text-slate-400 mt-0.5">@{profile.username || 'username'}{role === 'caretaker' && profile.credentials ? ` · ${profile.credentials}` : ''}</p>
+          <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1 flex-wrap">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
             <span>Active</span>
             <span className="mx-1">·</span>
+            {role === 'caretaker' && profile.groupName && (<><span>{profile.groupName}</span><span className="mx-1">·</span><span>{profile.participantCount || 0} participants</span><span className="mx-1">·</span></>)}
             <span>Enrolled {profile.enrolled_at || '—'}</span>
           </div>
         </div>
