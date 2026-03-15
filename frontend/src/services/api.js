@@ -239,4 +239,15 @@ export const api = {
     request(`/caretaker/invites/${inviteId}/revoke`, {
       method: "POST",
     }),
+
+  // ── Notifications (shared across roles) ──────────────────────────────────
+
+  getNotifications: (role) =>
+    request(`/${role}/notifications`),
+
+  markNotificationRead: (role, notificationId) =>
+    request(`/${role}/notifications/${notificationId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_read: true }),
+    }),
 };

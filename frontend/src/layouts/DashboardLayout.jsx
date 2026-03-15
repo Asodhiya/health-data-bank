@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import api from "../utils/axiosInstance";
 import { api as authApi } from "../services/api";
 import { DASHBOARD_NAV } from "../config/navigation";
+import NotificationBell from "../components/NotificationBell";
 
 export default function DashboardLayout({ role }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -34,7 +35,7 @@ export default function DashboardLayout({ role }) {
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900">
       {/* Top Header */}
-      <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm z-10">
+      <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm z-30">
         <div className="flex items-center gap-4">
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -63,8 +64,10 @@ export default function DashboardLayout({ role }) {
           </Link>
         </div>
 
-        {/* Avatar + Dropdown */}
-        <div className="relative" id="profile-dropdown">
+        {/* Bell + Avatar */}
+        <div className="flex items-center gap-3">
+          <NotificationBell role={role} />
+          <div className="relative" id="profile-dropdown">
           <button
             onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
             className="w-8 h-8 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center font-bold transition-colors"
@@ -102,6 +105,7 @@ export default function DashboardLayout({ role }) {
               </button>
             </div>
           )}
+        </div>
         </div>
       </header>
 
