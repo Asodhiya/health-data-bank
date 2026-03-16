@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useOutletContext } from "react-router-dom"; // 👈 Add this!
 import api from "../../utils/axiosInstance";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
+import NotificationsPanel from "../../components/NotificationsPanel";
 
 // Mock Data: This represents what Nayan's backend will eventually send
 const mockGroupMembers = [
@@ -358,6 +359,9 @@ export default function CaretakerDashboard() {
           </div>
         </div>
       </div>
+
+      {/* NOTIFICATIONS PANEL */}
+      <NotificationsPanel role="caretaker" />
     </div>
   );
 }

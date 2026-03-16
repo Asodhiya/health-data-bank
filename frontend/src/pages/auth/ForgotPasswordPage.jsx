@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { sanitizeEmail } from '../../utils/sanitize';
+import { api } from '../../services/api';
 
 const COOLDOWN_SECONDS = 90;  // 1 minute 30 seconds
 const MAX_RESENDS = 5;
@@ -49,7 +50,7 @@ export default function ForgotPasswordPage() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!email.trim()) {
       setError('Please enter your email address.');
       return;
@@ -60,27 +61,29 @@ export default function ForgotPasswordPage() {
     }
     setError('');
 
-    // TODO: Two backend calls needed here:
-    // 1. Send password reset link to user's email
-    //    await api.requestPasswordReset(email.trim());
-    //
-    // 2. Notify admin that a password reset was requested
-    //    await api.notifyAdminPasswordReset(email.trim());
-    //
-    // For security, always show the success state even if the
-    // email doesn't exist — this prevents email enumeration attacks.
+    try {
+      await api.forgotPassword(email.trim());
+    } catch {
+      // Only block on a true network failure (server unreachable).
+      // Any other outcome still shows success to prevent email enumeration.
+      setError('Unable to reach the server. Please try again later.');
+      return;
+    }
 
     setSent(true);
-    setResendCount(1);  // First send counts as attempt #1
+    setResendCount(1);
     startCooldown();
   };
 
-  const handleResend = () => {
+  const handleResend = async () => {
     if (cooldown > 0 || resendCount >= MAX_RESENDS) return;
 
-    // TODO: Resend reset link
-    // await api.requestPasswordReset(email.trim());
-    // await api.notifyAdminPasswordReset(email.trim());
+    try {
+      await api.forgotPassword(email.trim());
+    } catch {
+      setError('Unable to reach the server. Please try again later.');
+      return;
+    }
 
     setResendCount((prev) => prev + 1);
     startCooldown();

@@ -127,9 +127,34 @@ async def reset_forgot_password( payload: ForgotPasswordIn, background: Backgrou
     user.reset_token_expires_at = reset_token_expiry(15)
 
     await db.commit()
-    FRONTEND_URL = "http://localhost:3000"
-    reset_link = f"{FRONTEND_URL}/forgot-password?token={raw_token}"
+    FRONTEND_URL = "http://localhost:5173"
+    reset_link = f"{FRONTEND_URL}/reset-password?token={raw_token}"
     send_reset_email(user.email, reset_link)
     # background.add_task(send_reset_email, user.email, reset_link)
 
     return {"message": "If the email exists, a reset link has been sent."}
+
+async def reset_password(payload, db: AsyncSession):
+    """Validates reset token and updates the user's password."""
+    token_hash = hash_reset_token(payload.token)
+    result = await db.execute(select(User).where(User.reset_token_hash == token_hash))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+
+    if user.reset_token_expires_at is None or user.reset_token_expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Reset link has expired. Please request a new one.")
+
+    if PasswordHash.from_str(user.password_hash).verify(payload.new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="New password cannot be the same as your current password."
+        )
+
+    user.password_hash = PasswordHash.from_password(payload.new_password).to_str()
+    user.reset_token_hash = None
+    user.reset_token_expires_at = None
+
+    await db.commit()
+   

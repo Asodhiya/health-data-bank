@@ -67,6 +67,10 @@ class UpdatePersonalInfoPayload(BaseModel):
 class ForgotPasswordIn(BaseModel):
     email: EmailStr
 
+class ResetPasswordIn(BaseModel):
+    token: str
+    new_password: str
+
 class Link_role_permission_schema(BaseModel):
     code: str
     role_name: str

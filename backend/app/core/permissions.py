@@ -48,3 +48,6 @@ GROUP_WRITE   = "group:write"
 GROUP_DELETE  = "group:delete"
 CARETAKER_READ   = "caretaker:read"
 CARETAKER_ASSIGN = "caretaker:assign"
+
+# ── Admin: Backup & Restore ────────────────────────────────────────
+BACKUP_CREATE  = "backup:create"
