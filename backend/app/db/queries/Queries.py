@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from app.schemas.schemas import HealthGoalUpdate, GoalTemplateCreate, GoalTemplateUpdate, GoalProgressLog
 from app.schemas.data_element_schema import DataElementCreate
 from app.services.participant_survey_service import _get_deployed_forms
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from app.db.models import FormField
 
 def get_participant_id(current_user: User) -> uuid.UUID:
@@ -549,6 +549,42 @@ class CaretakersQuery:
             raise HTTPException(status_code=404, detail="Participant not found in this group")
         return row
 
+    async def get_participant_activity_counts(self, user_id: uuid.UUID, group_id: uuid.UUID | None = None):
+        today = date.today()
+        last_submission_sq = (
+            select(
+                FormSubmission.participant_id,
+                func.max(func.cast(FormSubmission.submitted_at, SADate)).label("last_submission_at"),
+            )
+            .group_by(FormSubmission.participant_id)
+            .subquery()
+        )
+        activity_expr = case(
+            (last_submission_sq.c.last_submission_at >= today - timedelta(days=7), "highly_active"),
+            (last_submission_sq.c.last_submission_at >= today - timedelta(days=14), "moderately_active"),
+            (last_submission_sq.c.last_submission_at >= today - timedelta(days=30), "low_active"),
+            else_="inactive",
+        ).label("activity")
+
+        stmt = (
+            select(activity_expr, func.count(ParticipantProfile.participant_id).label("cnt"))
+            .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+            .join(Group, Group.group_id == GroupMember.group_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .outerjoin(last_submission_sq, last_submission_sq.c.participant_id == ParticipantProfile.participant_id)
+            .where(CaretakerProfile.user_id == user_id)
+            .where(GroupMember.left_at == None)
+            .group_by(activity_expr)
+        )
+        if group_id:
+            stmt = stmt.where(GroupMember.group_id == group_id)
+
+        rows = (await self.db.execute(stmt)).all()
+        counts = {"highly_active": 0, "moderately_active": 0, "low_active": 0, "inactive": 0}
+        for row in rows:
+            counts[row.activity] = row.cnt
+        return counts
+
     async def get_participants(
         self,
         user_id: uuid.UUID,
@@ -629,8 +665,11 @@ class CaretakersQuery:
         #     else_="in_progress",
         # )
 
+        today = date.today()
         status_expr = case(
-            (GroupMember.left_at == None, "active"),
+            (func.cast(submissions_sq.c.last_submission_at, SADate) >= today - timedelta(days=7), "highly_active"),
+            (func.cast(submissions_sq.c.last_submission_at, SADate) >= today - timedelta(days=14), "moderately_active"),
+            (func.cast(submissions_sq.c.last_submission_at, SADate) >= today - timedelta(days=30), "low_active"),
             else_="inactive",
         )
 
@@ -662,10 +701,8 @@ class CaretakersQuery:
         # ── Filters ───────────────────────────────────────────────────────────
         if group_id:
             stmt = stmt.where(GroupMember.group_id == group_id)
-        if status == "active":
-            stmt = stmt.where(GroupMember.left_at == None)
-        elif status == "inactive":
-            stmt = stmt.where(GroupMember.left_at != None)
+        if status in ("highly_active", "moderately_active", "low_active", "inactive"):
+            stmt = stmt.where(status_expr == status)
         if gender:
             stmt = stmt.where(ParticipantProfile.gender == gender)
         if age_min is not None:

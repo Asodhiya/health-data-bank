@@ -62,12 +62,19 @@ class ParticipantListItem(BaseModel):
     name: str
     gender: Optional[str] = None
     age: Optional[int] = None
-    status: Literal["active", "inactive"]
+    status: Literal["highly_active", "moderately_active", "low_active", "inactive"]
     group_id: Optional[UUID] = None
     survey_progress: Literal["not_started", "in_progress", "completed"]
     goal_progress: Literal["not_started", "in_progress", "completed"]
     last_login_at: Optional[datetime] = None
     last_submission_at: Optional[date] = None
+
+
+class ParticipantActivityCounts(BaseModel):
+    highly_active: int = 0
+    moderately_active: int = 0
+    low_active: int = 0
+    inactive: int = 0
 
 
 class ParticipantDetail(BaseModel):

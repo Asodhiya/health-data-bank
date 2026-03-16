@@ -15,7 +15,7 @@ from app.schemas.caretaker_response_schema import (
     GroupItem, GroupUpdateRequest,
     GroupMemberAddRequest, GroupMemberItem,
     GroupDataElementItem,
-    ParticipantListItem, ParticipantDetail,
+    ParticipantListItem, ParticipantDetail, ParticipantActivityCounts,
     FeedbackCreate, FeedbackItem,
     ReportGenerateRequest, ReportResponse,
     SubmissionListItem,
@@ -131,7 +131,7 @@ async def list_group_elements(
 @router.get("/participants", response_model=list[ParticipantListItem])
 async def list_participants(
     group_id: Optional[UUID] = Query(default=None),
-    status: Optional[Literal["active", "inactive"]] = Query(default=None),
+    status: Optional[Literal["highly_active", "moderately_active", "low_active", "inactive"]] = Query(default=None),
     gender: Optional[str] = Query(default=None),
     age_min: Optional[int] = Query(default=None),
     age_max: Optional[int] = Query(default=None),
@@ -173,13 +173,14 @@ async def list_participants(
     ]
 
 
-@router.get("/participants/active", response_model=list[ParticipantListItem])
-async def list_active_participants(
+@router.get("/participants/activity-counts", response_model=ParticipantActivityCounts)
+async def get_participant_activity_counts(
     group_id: Optional[UUID] = Query(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    pass
+    counts = await CaretakersQuery(db).get_participant_activity_counts(current_user.user_id, group_id)
+    return ParticipantActivityCounts(**counts)
 
 
 @router.get("/participants/{participant_id}", response_model=ParticipantDetail)
