@@ -53,27 +53,12 @@ export const DASHBOARD_NAV = [
   },
 
   {
-    label: "Analytics",
-    to: "/analytics",
-    roles: ["admin", "researcher"],
-  },
-
-  {
-    label: "Reports",
-    to: "/reports",
-    roles: ["admin", "researcher"],
-  },
-
-  {
-    label: "Exports",
-    to: "/exports",
-    roles: ["researcher"],
-  },
-  {
     label: "Data Elements",
     to: "/researcher/data-elements",
     roles: ["researcher"],
   },
+
+  { label: "Create Golas", to: "researcher/goals", roles: ["researcher"] },
 
   /* =====================
      CARETAKER
@@ -95,7 +80,6 @@ export const DASHBOARD_NAV = [
   //  to: "/notes-feedback",
   //  roles: ["caretaker"],
   //},
-  
 
   /* =====================
      PROFILE (per-role path)

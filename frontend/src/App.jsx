@@ -38,11 +38,12 @@ import UserManagementPage from "./pages/admin/UserManagementPage";
 
 // --- Researcher pages ---
 import DataElementManager from "./pages/researcher/DataElementMangaer";
-
+import Groups from "./pages/researcher/Group_Chorts";
 // ── Caretaker pages ──
 import MyParticipantsPage from "./pages/caretaker/MyParticipantsPage";
 import ParticipantDetailPage from "./pages/caretaker/ParticipantDetailPage";
 import ReportsPage from "./pages/caretaker/ReportsPage";
+import GoalTemplates from "./pages/researcher/GoalTemplates";
 
 function App() {
   const { role } = useAuth();
@@ -121,10 +122,7 @@ function App() {
               path="/caretaker/participants/:id"
               element={<ParticipantDetailPage />}
             />
-            <Route
-              path="/caretaker/reports"
-              element={<ReportsPage />}
-            />
+            <Route path="/caretaker/reports" element={<ReportsPage />} />
           </Route>
         </Route>
 
@@ -141,6 +139,8 @@ function App() {
               path="/researcher/data-elements"
               element={<DataElementManager />}
             />
+            <Route path="/groups" element={<Groups />} />
+            <Route path="/researcher/goals" element={<GoalTemplates />} />
           </Route>
         </Route>
       </Routes>

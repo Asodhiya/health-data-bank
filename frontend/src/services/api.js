@@ -28,14 +28,14 @@ export const api = {
   me: () => request("/auth/me"),
 
   forgotPassword: (email) =>
-    request('/auth/forgot-password', {
-      method: 'POST',
+    request("/auth/forgot-password", {
+      method: "POST",
       body: JSON.stringify({ email }),
     }),
 
   resetPassword: (token, new_password) =>
-    request('/auth/reset-password', {
-      method: 'POST',
+    request("/auth/reset-password", {
+      method: "POST",
       body: JSON.stringify({ token, new_password }),
     }),
 
@@ -188,7 +188,9 @@ export const api = {
   // Health Trends
   caretakerGetHealthTrends: (participantId, params = {}) => {
     const qs = new URLSearchParams(params).toString();
-    return request(`/caretaker/participants/${participantId}/health-trends${qs ? `?${qs}` : ""}`);
+    return request(
+      `/caretaker/participants/${participantId}/health-trends${qs ? `?${qs}` : ""}`,
+    );
   },
 
   // Notes & Feedback
@@ -229,11 +231,9 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  caretakerGetReport: (reportId) =>
-    request(`/caretaker/reports/${reportId}`),
+  caretakerGetReport: (reportId) => request(`/caretaker/reports/${reportId}`),
 
-  caretakerListInvites: () =>
-    request("/caretaker/invites"),
+  caretakerListInvites: () => request("/caretaker/invites"),
 
   caretakerRevokeInvite: (inviteId) =>
     request(`/caretaker/invites/${inviteId}/revoke`, {
@@ -242,12 +242,67 @@ export const api = {
 
   // ── Notifications (shared across roles) ──────────────────────────────────
 
-  getNotifications: (role) =>
-    request(`/${role}/notifications`),
+  getNotifications: (role) => request(`/${role}/notifications`),
 
   markNotificationRead: (role, notificationId) =>
     request(`/${role}/notifications/${notificationId}`, {
       method: "PATCH",
       body: JSON.stringify({ is_read: true }),
+    }),
+
+  // ── Researcher Analytics ──
+
+  // 1. Get the list of published surveys for the dropdown
+  getAvailableSurveys: () => request("/researcher/query/available-surveys"),
+
+  // 2. Fetch the actual data and columns (accepts optional filters like survey_id)
+  getResearcherResults: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/researcher/query/results${qs ? `?${qs}` : ""}`);
+  },
+
+  // 3. Generate the CSV file download URL
+  // We don't use the standard request() here because we need to handle a file Blob, not JSON!
+  downloadResearcherResults: async (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    const res = await fetch(
+      `${API_BASE}/researcher/query/results/download${qs ? `?${qs}` : ""}`,
+      {
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      },
+    );
+
+    if (!res.ok) throw new Error("Failed to download CSV");
+
+    // Convert response to a blob and trigger browser download
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `research_export_${new Date().toISOString().split("T")[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  },
+
+  // ── Goal Templates (Researcher) ──
+  listGoalTemplates: () => request("/goal-templates"),
+
+  createGoalTemplate: (payload) =>
+    request("/goal-templates", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateGoalTemplate: (templateId, payload) =>
+    request(`/goal-templates/${templateId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteGoalTemplate: (templateId) =>
+    request(`/goal-templates/${templateId}`, {
+      method: "DELETE",
     }),
 };

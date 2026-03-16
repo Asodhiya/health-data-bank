@@ -61,43 +61,92 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
     conditions = []
     if survey_id:
         conditions.append(FormSubmission.form_id == survey_id)
-        
+        # change made by nima 
     if filters:
-        if filters.gender:
-            conditions.append(ParticipantProfile.gender == filters.gender)
-        if filters.pronouns:
-            conditions.append(ParticipantProfile.pronouns == filters.pronouns)
-        if filters.primary_language:
-            conditions.append(ParticipantProfile.primary_language == filters.primary_language)
-        if filters.occupation_status:
-            conditions.append(ParticipantProfile.occupation_status == filters.occupation_status)
-        if filters.living_arrangement:
-            conditions.append(ParticipantProfile.living_arrangement == filters.living_arrangement)
-        if filters.highest_education_level:
-            conditions.append(ParticipantProfile.highest_education_level == filters.highest_education_level)
-        if filters.dependents is not None:
-            conditions.append(ParticipantProfile.dependents == filters.dependents)
-        if filters.marital_status:
-            conditions.append(ParticipantProfile.marital_status == filters.marital_status)
-        if filters.status:
-            conditions.append(User.status == (filters.status.lower() == 'active'))
-        if filters.group_id:
+        if getattr(filters, 'gender', None):
+            conditions.append(ParticipantProfile.gender == getattr(filters, 'gender'))
+            
+        if getattr(filters, 'pronouns', None):  
+            conditions.append(ParticipantProfile.pronouns == getattr(filters, 'pronouns'))
+            
+        if getattr(filters, 'primary_language', None):
+            conditions.append(ParticipantProfile.primary_language == getattr(filters, 'primary_language'))
+            
+        if getattr(filters, 'occupation_status', None):
+            conditions.append(ParticipantProfile.occupation_status == getattr(filters, 'occupation_status'))
+            
+        if getattr(filters, 'living_arrangement', None):
+            conditions.append(ParticipantProfile.living_arrangement == getattr(filters, 'living_arrangement'))
+            
+        if getattr(filters, 'highest_education_level', None):
+            conditions.append(ParticipantProfile.highest_education_level == getattr(filters, 'highest_education_level'))
+            
+        if getattr(filters, 'dependents', None) is not None:
+            conditions.append(ParticipantProfile.dependents == getattr(filters, 'dependents'))
+            
+        if getattr(filters, 'marital_status', None):
+            conditions.append(ParticipantProfile.marital_status == getattr(filters, 'marital_status'))
+            
+        if getattr(filters, 'status', None):
+            conditions.append(User.status == (getattr(filters, 'status').lower() == 'active'))
+            
+        if getattr(filters, 'group_id', None):
             pass
-        if filters.age_min:
-            max_dob = date.today() - timedelta(days=filters.age_min * 365.25)
+            
+        if getattr(filters, 'age_min', None):
+            max_dob = date.today() - timedelta(days=getattr(filters, 'age_min') * 365.25)
             conditions.append(ParticipantProfile.dob <= max_dob)
-        if filters.age_max:
-            min_dob = date.today() - timedelta(days=(filters.age_max + 1) * 365.25)
+            
+        if getattr(filters, 'age_max', None):
+            min_dob = date.today() - timedelta(days=(getattr(filters, 'age_max') + 1) * 365.25)
             conditions.append(ParticipantProfile.dob >= min_dob)
-        if filters.search:
-            search_term = f"%{filters.search}%"
+            
+        if getattr(filters, 'search', None):
+            search_term = f"%{getattr(filters, 'search')}%"
             conditions.append(
                 or_(
                     User.first_name.ilike(search_term),
                     User.last_name.ilike(search_term),
                     User.email.ilike(search_term)
                 )
-            )
+            )    
+        
+    # if filters:
+    #     if filters.gender:
+    #         conditions.append(ParticipantProfile.gender == filters.gender)
+    #     if filters.pronouns:
+    #         conditions.append(ParticipantProfile.pronouns == filters.pronouns)
+    #     if filters.primary_language:
+    #         conditions.append(ParticipantProfile.primary_language == filters.primary_language)
+    #     if filters.occupation_status:
+    #         conditions.append(ParticipantProfile.occupation_status == filters.occupation_status)
+    #     if filters.living_arrangement:
+    #         conditions.append(ParticipantProfile.living_arrangement == filters.living_arrangement)
+    #     if filters.highest_education_level:
+    #         conditions.append(ParticipantProfile.highest_education_level == filters.highest_education_level)
+    #     if filters.dependents is not None:
+    #         conditions.append(ParticipantProfile.dependents == filters.dependents)
+    #     if filters.marital_status:
+    #         conditions.append(ParticipantProfile.marital_status == filters.marital_status)
+    #     if filters.status:
+    #         conditions.append(User.status == (filters.status.lower() == 'active'))
+    #     if filters.group_id:
+    #         pass
+    #     if filters.age_min:
+    #         max_dob = date.today() - timedelta(days=filters.age_min * 365.25)
+    #         conditions.append(ParticipantProfile.dob <= max_dob)
+    #     if filters.age_max:
+    #         min_dob = date.today() - timedelta(days=(filters.age_max + 1) * 365.25)
+    #         conditions.append(ParticipantProfile.dob >= min_dob)
+    #     if filters.search:
+    #         search_term = f"%{filters.search}%"
+    #         conditions.append(
+    #             or_(
+    #                 User.first_name.ilike(search_term),
+    #                 User.last_name.ilike(search_term),
+    #                 User.email.ilike(search_term)
+    #             )
+    #         )
 
     if conditions:
         stmt = stmt.where(and_(*conditions))

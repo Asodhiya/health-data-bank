@@ -68,44 +68,44 @@ export default function DashboardLayout({ role }) {
         <div className="flex items-center gap-3">
           <NotificationBell role={role} />
           <div className="relative" id="profile-dropdown">
-          <button
-            onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-            className="w-8 h-8 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center font-bold transition-colors"
-          >
-            {user?.first_name?.charAt(0).toUpperCase() ||
-              role.charAt(0).toUpperCase()}
-          </button>
+            <button
+              onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+              className="w-8 h-8 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center font-bold transition-colors"
+            >
+              {user?.first_name?.charAt(0).toUpperCase() ||
+                role.charAt(0).toUpperCase()}
+            </button>
 
-          {isProfileMenuOpen && (
-            <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg py-2 border border-slate-100 z-50">
-              <Link
-                to={`/${role.toLowerCase()}/profile`}
-                onClick={() => setIsProfileMenuOpen(false)}
-                className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                Profile
-              </Link>
-              <Link
-                to={`/${role.toLowerCase()}/profile#settings`}
-                onClick={() => setIsProfileMenuOpen(false)}
-                className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                Settings
-              </Link>
-              <div className="border-t border-slate-100 my-1"></div>
-              <button
-                onClick={async () => {
-                  setIsProfileMenuOpen(false);
-                  await authApi.logout();
-                  navigate("/login");
-                }}
-                className="block w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-slate-50"
-              >
-                Logout
-              </button>
-            </div>
-          )}
-        </div>
+            {isProfileMenuOpen && (
+              <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg py-2 border border-slate-100 z-50">
+                <Link
+                  to={`/${role.toLowerCase()}/profile`}
+                  onClick={() => setIsProfileMenuOpen(false)}
+                  className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  Profile
+                </Link>
+                <Link
+                  to={`/${role.toLowerCase()}/profile#settings`}
+                  onClick={() => setIsProfileMenuOpen(false)}
+                  className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  Settings
+                </Link>
+                <div className="border-t border-slate-100 my-1"></div>
+                <button
+                  onClick={async () => {
+                    setIsProfileMenuOpen(false);
+                    await authApi.logout();
+                    navigate("/login");
+                  }}
+                  className="block w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-slate-50"
+                >
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
