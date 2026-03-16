@@ -59,3 +59,9 @@ frontend/.env.*
 # ======================
 supabase/.temp/
 supabase/.env
+
+# ======================
+# Local / personal
+# ======================
+.claude/settings.local.json
+install.cmd
