@@ -40,6 +40,7 @@ async def login(
     data: LoginRequest,
     response: Response,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """Authenticates user by checking email and hashed password."""
@@ -70,6 +71,7 @@ async def login(
         details={"email": user.email},
     )
 
+    background_tasks.add_task(update_last_login, user, db)
     token = create_access_token({"sub": str(user.user_id)})
     _set_cookie(response, token)
     return {"detail": "Login successful"}
