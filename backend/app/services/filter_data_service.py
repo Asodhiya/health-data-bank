@@ -21,12 +21,23 @@ async def get_available_surveys(db: AsyncSession):
 async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, filters: ParticipantFilter = None):
     """Fetches and pivots survey results"""
     
+    demographic_columns = [
+        User.user_id.label("participant_id"),
+        ParticipantProfile.gender,
+        ParticipantProfile.pronouns,
+        ParticipantProfile.primary_language,
+        ParticipantProfile.occupation_status,
+        ParticipantProfile.living_arrangement,
+        ParticipantProfile.highest_education_level,
+        ParticipantProfile.dependents,
+        ParticipantProfile.marital_status,
+        ParticipantProfile.dob,
+    ]
+
     if survey_id:
         stmt = (
             select(
-                User.user_id.label("participant_id"),
-                ParticipantProfile.gender,
-                ParticipantProfile.dob,
+                *demographic_columns,
                 FormField.field_id.label("question_id"),
                 FormField.label.label("question_text"),
                 SubmissionAnswer.value_text,
@@ -42,11 +53,7 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
         )
     else:
         stmt = (
-            select(
-                User.user_id.label("participant_id"),
-                ParticipantProfile.gender,
-                ParticipantProfile.dob
-            )
+            select(*demographic_columns)
             .select_from(User)
             .join(ParticipantProfile, User.user_id == ParticipantProfile.user_id)
         )
@@ -58,10 +65,24 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
     if filters:
         if filters.gender:
             conditions.append(ParticipantProfile.gender == filters.gender)
+        if filters.pronouns:
+            conditions.append(ParticipantProfile.pronouns == filters.pronouns)
+        if filters.primary_language:
+            conditions.append(ParticipantProfile.primary_language == filters.primary_language)
+        if filters.occupation_status:
+            conditions.append(ParticipantProfile.occupation_status == filters.occupation_status)
+        if filters.living_arrangement:
+            conditions.append(ParticipantProfile.living_arrangement == filters.living_arrangement)
+        if filters.highest_education_level:
+            conditions.append(ParticipantProfile.highest_education_level == filters.highest_education_level)
+        if filters.dependents is not None:
+            conditions.append(ParticipantProfile.dependents == filters.dependents)
+        if filters.marital_status:
+            conditions.append(ParticipantProfile.marital_status == filters.marital_status)
         if filters.status:
             conditions.append(User.status == (filters.status.lower() == 'active'))
         if filters.group_id:
-            pass 
+            pass
         if filters.age_min:
             max_dob = date.today() - timedelta(days=filters.age_min * 365.25)
             conditions.append(ParticipantProfile.dob <= max_dob)
@@ -97,7 +118,14 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
             pivoted_data[participant_id] = {
                 "participant_id": participant_id,
                 "gender": row.gender,
-                "age": calculate_age(row.dob)
+                "pronouns": row.pronouns,
+                "primary_language": row.primary_language,
+                "occupation_status": row.occupation_status,
+                "living_arrangement": row.living_arrangement,
+                "highest_education_level": row.highest_education_level,
+                "dependents": row.dependents,
+                "marital_status": row.marital_status,
+                "age": calculate_age(row.dob),
             }
         
         if survey_id:
@@ -115,9 +143,16 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
                 questions_meta[question_id] = row.question_text
 
     columns_list = [
-        {"id": "participant_id", "text": "Participant ID"},
-        {"id": "gender", "text": "Gender"},
-        {"id": "age", "text": "Age"}
+        {"id": "participant_id",          "text": "Participant ID"},
+        {"id": "gender",                  "text": "Gender"},
+        {"id": "pronouns",                "text": "Pronouns"},
+        {"id": "primary_language",        "text": "Primary Language"},
+        {"id": "occupation_status",       "text": "Occupation / Status"},
+        {"id": "living_arrangement",      "text": "Living Arrangement"},
+        {"id": "highest_education_level", "text": "Highest Education Level"},
+        {"id": "dependents",              "text": "Dependents"},
+        {"id": "marital_status",          "text": "Marital Status"},
+        {"id": "age",                     "text": "Age"},
     ]
     columns_list.extend([{"id": q_id, "text": text} for q_id, text in questions_meta.items()])
 
