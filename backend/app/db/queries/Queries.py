@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, distinct
-from app.db.models import Role, User, UserRole, Permission, ParticipantProfile, CaretakerProfile, ResearcherProfile, SignupInvite, HealthGoal, GoalTemplate, DataElement, FieldElementMap, HealthDataPoint, FormDeployment, GroupMember, FormSubmission
+from sqlalchemy import select, func, distinct, case, and_, or_
+from sqlalchemy import Date as SADate
+from app.db.models import Role, User, UserRole, Permission, ParticipantProfile, CaretakerProfile, ResearcherProfile, SignupInvite, HealthGoal, GoalTemplate, DataElement, FieldElementMap, HealthDataPoint, FormDeployment, GroupMember, FormSubmission, Group, SurveyForm, CaretakerFeedback, Notification, Report
 from fastapi import HTTPException, status
 import uuid
 from sqlalchemy.exc import IntegrityError
@@ -488,4 +489,523 @@ class StatsQuery:
             "goals_met": goals_met,
             "goal_remaining": active_goals - goals_met
         }
+
+class CaretakersQuery:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_groups(self, user_id: uuid.UUID) -> list[Group]:
+        result = await self.db.execute(
+            select(Group)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(CaretakerProfile.user_id == user_id)
+        )
+        return result.scalars().all()
+    
+
+
+    async def get_group(self, group_id: uuid.UUID, user_id: uuid.UUID) -> Group:
+        # Check if the group exists at all
+        result = await self.db.execute(
+            select(Group).where(Group.group_id == group_id)
+        )
+        group = result.scalar_one_or_none()
+
+        if not group:
+            raise HTTPException(status_code=404, detail="No group found with that id")
+
+        # Check if this group belongs to the current caretaker via user_id
+        caretaker = await self.db.execute(
+            select(CaretakerProfile).where(CaretakerProfile.user_id == user_id)
+        )
+        caretaker_profile = caretaker.scalar_one_or_none()
+
+        if not caretaker_profile or group.caretaker_id != caretaker_profile.caretaker_id:
+            raise HTTPException(status_code=403, detail="This group is not assigned to you")
+
+        return group
+
+    async def get_group_participants(self, group_id: uuid.UUID, user_id: uuid.UUID):
+        result = await self.db.execute(
+            select(ParticipantProfile, User.first_name, User.last_name, GroupMember.joined_at)
+            .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+            .join(User, User.user_id == ParticipantProfile.user_id)
+            .where(GroupMember.group_id == group_id)
+            .where(GroupMember.left_at == None)
+        )
+        return result.all()
+
+    async def get_group_participant(self, group_id: uuid.UUID, participant_id: uuid.UUID):
+        result = await self.db.execute(
+            select(ParticipantProfile, User.first_name, User.last_name, GroupMember.joined_at)
+            .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+            .join(User, User.user_id == ParticipantProfile.user_id)
+            .where(GroupMember.group_id == group_id)
+            .where(ParticipantProfile.participant_id == participant_id)
+            .where(GroupMember.left_at == None)
+        )
+        row = result.one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Participant not found in this group")
+        return row
+
+    async def get_participants(
+        self,
+        user_id: uuid.UUID,
+        group_id: uuid.UUID | None = None,
+        status: str | None = None,
+        gender: str | None = None,
+        age_min: int | None = None,
+        age_max: int | None = None,
+        has_alerts: bool | None = None,
+        survey_progress: str | None = None,
+        # goal_progress: str | None = None,
+        sort_by: str | None = None,
+        submission_date_from: date | None = None,
+        submission_date_to: date | None = None,
+        # goal_date: date | None = None,
+    ):
+        deployed_sq = (
+            select(
+                FormDeployment.group_id,
+                func.count(FormDeployment.deployment_id).label("deployed_count"),
+            )
+            .where(FormDeployment.revoked_at == None)
+            .group_by(FormDeployment.group_id)
+            .subquery()
+        )
+
+        submissions_stmt = (
+            select(
+                FormSubmission.participant_id,
+                func.count(distinct(FormSubmission.form_id)).label("submitted_count"),
+                func.cast(func.max(FormSubmission.submitted_at), SADate).label("last_submission_at"),
+            )
+        )
+        if submission_date_from:
+            submissions_stmt = submissions_stmt.where(func.cast(FormSubmission.submitted_at, SADate) >= submission_date_from)
+        if submission_date_to:
+            submissions_stmt = submissions_stmt.where(func.cast(FormSubmission.submitted_at, SADate) <= submission_date_to)
+        submissions_sq = submissions_stmt.group_by(FormSubmission.participant_id).subquery()
+
+        # Goals reset daily — progress is based on today's HealthDataPoint vs target
+        # target_date = goal_date_from or date.today()
+        # goals_stmt = (
+        #     select(
+        #         HealthGoal.participant_id,
+        #         func.count(HealthGoal.goal_id).label("total_goals"),
+        #         func.count(
+        #             case(
+        #                 (and_(
+        #                     HealthDataPoint.value_number != None,
+        #                     HealthDataPoint.value_number >= HealthGoal.target_value,
+        #                 ), HealthGoal.goal_id),
+        #                 else_=None,
+        #             )
+        #         ).label("completed_goals"),
+        #     )
+        #     .outerjoin(HealthDataPoint, and_(
+        #         HealthDataPoint.participant_id == HealthGoal.participant_id,
+        #         HealthDataPoint.element_id == HealthGoal.element_id,
+        #         HealthDataPoint.source_type == "goal",
+        #         func.cast(HealthDataPoint.observed_at, date) == target_date,
+        #     ))
+        #     .where(HealthGoal.status == "active")
+        #)
+        # goals_sq = goals_stmt.group_by(HealthGoal.participant_id).subquery()
+
+
+        age_expr = func.date_part("year", func.age(ParticipantProfile.dob))
+
+        survey_progress_expr = case(
+            (or_(submissions_sq.c.submitted_count == None, submissions_sq.c.submitted_count == 0), "not_started"),
+            (submissions_sq.c.submitted_count >= deployed_sq.c.deployed_count, "completed"),
+            else_="in_progress",
+        )
+
+        # goal_progress_expr = case(
+        #     (or_(goals_sq.c.total_goals == None, goals_sq.c.total_goals == 0), "not_started"),
+        #     (goals_sq.c.completed_goals == goals_sq.c.total_goals, "completed"),
+        #     else_="in_progress",
+        # )
+
+        status_expr = case(
+            (GroupMember.left_at == None, "active"),
+            else_="inactive",
+        )
+
+        # ── Base query ────────────────────────────────────────────────────────
+        stmt = (
+            select(
+                ParticipantProfile.participant_id,
+                User.first_name,
+                User.last_name,
+                ParticipantProfile.gender,
+                age_expr.label("age"),
+                status_expr.label("status"),
+                GroupMember.group_id,
+                survey_progress_expr.label("survey_progress"),
+                # goal_progress_expr.label("goal_progress"),
+                User.last_login_at,
+                submissions_sq.c.last_submission_at,
+            )
+            .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+            .join(Group, Group.group_id == GroupMember.group_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .join(User, User.user_id == ParticipantProfile.user_id)
+            .outerjoin(deployed_sq, deployed_sq.c.group_id == GroupMember.group_id)
+            .outerjoin(submissions_sq, submissions_sq.c.participant_id == ParticipantProfile.participant_id)
+            # .outerjoin(goals_sq, goals_sq.c.participant_id == ParticipantProfile.participant_id)
+            .where(CaretakerProfile.user_id == user_id)
+        )
+
+        # ── Filters ───────────────────────────────────────────────────────────
+        if group_id:
+            stmt = stmt.where(GroupMember.group_id == group_id)
+        if status == "active":
+            stmt = stmt.where(GroupMember.left_at == None)
+        elif status == "inactive":
+            stmt = stmt.where(GroupMember.left_at != None)
+        if gender:
+            stmt = stmt.where(ParticipantProfile.gender == gender)
+        if age_min is not None:
+            stmt = stmt.where(age_expr >= age_min)
+        if age_max is not None:
+            stmt = stmt.where(age_expr <= age_max)
+        if has_alerts is True:
+            stmt = stmt.where(submissions_sq.c.submitted_count < deployed_sq.c.deployed_count)
+        if survey_progress:
+            stmt = stmt.where(survey_progress_expr == survey_progress)
+        # if goal_progress:
+        #     stmt = stmt.where(goal_progress_expr == goal_progress)
+
+        # ── Sorting ───────────────────────────────────────────────────────────
+        if sort_by == "name":
+            stmt = stmt.order_by(User.first_name, User.last_name)
+        elif sort_by == "age":
+            stmt = stmt.order_by(age_expr)
+        elif sort_by == "status":
+            stmt = stmt.order_by(status_expr)
+        elif sort_by == "gender":
+            stmt = stmt.order_by(ParticipantProfile.gender)
+        elif sort_by == "surveys":
+            stmt = stmt.order_by(survey_progress_expr)
+        # elif sort_by == "goals":
+        #     stmt = stmt.order_by(goal_progress_expr)
+        elif sort_by == "last_active":
+            stmt = stmt.order_by(User.last_login_at.desc())
+        elif sort_by == "enrolled":
+            stmt = stmt.order_by(GroupMember.joined_at.desc())
+        elif sort_by == "submission_date":
+            stmt = stmt.order_by(submissions_sq.c.last_submission_at.desc())
+
+        result = await self.db.execute(stmt)
+        return result.all()
+
+    async def get_participant_submissions(
+        self,
+        participant_id: uuid.UUID,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ):
+        stmt = (
+            select(
+                FormSubmission.submission_id,
+                FormSubmission.participant_id,
+                FormSubmission.form_id,
+                SurveyForm.title.label("form_name"),
+                func.cast(FormSubmission.submitted_at, SADate).label("submitted_at"),
+            )
+            .join(SurveyForm, SurveyForm.form_id == FormSubmission.form_id)
+            .where(FormSubmission.participant_id == participant_id)
+            .order_by(FormSubmission.submitted_at.desc())
+        )
+
+        if date_from:
+            stmt = stmt.where(func.cast(FormSubmission.submitted_at, SADate) >= date_from)
+        if date_to:
+            stmt = stmt.where(func.cast(FormSubmission.submitted_at, SADate) <= date_to)
+
+        result = await self.db.execute(stmt)
+        return result.all()
+
+    async def get_group_elements(self, group_id: uuid.UUID):
+        result = await self.db.execute(
+            select(
+                DataElement.element_id,
+                DataElement.code,
+                DataElement.label,
+                DataElement.unit,
+                DataElement.datatype,
+            )
+            .join(FieldElementMap, FieldElementMap.element_id == DataElement.element_id)
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
+            .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
+            .where(FormDeployment.group_id == group_id)
+            .where(FormDeployment.revoked_at == None)
+            .distinct()
+        )
+        return result.all()
+
+    async def generate_group_report(
+        self,
+        group_id: uuid.UUID,
+        requested_by: uuid.UUID,
+        element_ids: list[uuid.UUID] | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> Report:
+        stmt = (
+            select(
+                DataElement.element_id,
+                DataElement.code,
+                DataElement.label,
+                DataElement.unit,
+                func.avg(HealthDataPoint.value_number).label("avg"),
+                func.min(HealthDataPoint.value_number).label("min"),
+                func.max(HealthDataPoint.value_number).label("max"),
+                func.count(HealthDataPoint.data_id).label("count"),
+            )
+            .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
+            .join(ParticipantProfile, ParticipantProfile.participant_id == HealthDataPoint.participant_id)
+            .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+            .where(GroupMember.group_id == group_id)
+            .where(GroupMember.left_at == None)
+            .group_by(DataElement.element_id, DataElement.code, DataElement.label, DataElement.unit)
+        )
+        if element_ids:
+            stmt = stmt.where(HealthDataPoint.element_id.in_(element_ids))
+        if date_from:
+            stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) >= date_from)
+        if date_to:
+            stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) <= date_to)
+
+        rows = (await self.db.execute(stmt)).all()
+
+        payload = {
+            "elements": [
+                {
+                    "element_id": str(row.element_id),
+                    "code": row.code,
+                    "label": row.label,
+                    "unit": row.unit,
+                    "avg": round(float(row.avg), 2) if row.avg is not None else None,
+                    "min": float(row.min) if row.min is not None else None,
+                    "max": float(row.max) if row.max is not None else None,
+                    "count": row.count,
+                }
+                for row in rows
+            ]
+        }
+
+        report = Report(
+            report_type="group",
+            requested_by=requested_by,
+            group_id=group_id,
+            parameters={
+                "element_ids": [str(e) for e in (element_ids or [])],
+                "date_from": str(date_from) if date_from else None,
+                "date_to": str(date_to) if date_to else None,
+            },
+        )
+        self.db.add(report)
+        await self.db.flush()
+        await self.db.refresh(report)
+
+        report.parameters = {**report.parameters, "payload": payload}
+        await self.db.flush()
+
+        return report
+    
+
+
+
+    async def generate_comparison_report(
+        self,
+        participant_id: uuid.UUID,
+        requested_by: uuid.UUID,
+        compare_with: str,                        # "participant" | "group" | "all"
+        compare_participant_id: uuid.UUID | None = None,
+        group_id: uuid.UUID | None = None,
+        element_ids: list[uuid.UUID] | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> Report:
+
+        def _build_stats_sq(participant_filter):
+            stmt = (
+                select(
+                    HealthDataPoint.element_id,
+                    func.avg(HealthDataPoint.value_number).label("avg"),
+                    func.min(HealthDataPoint.value_number).label("min"),
+                    func.max(HealthDataPoint.value_number).label("max"),
+                    func.count(HealthDataPoint.data_id).label("count"),
+                )
+                .where(participant_filter)
+                .group_by(HealthDataPoint.element_id)
+            )
+            if element_ids:
+                stmt = stmt.where(HealthDataPoint.element_id.in_(element_ids))
+            if date_from:
+                stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) >= date_from)
+            if date_to:
+                stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) <= date_to)
+            return stmt.subquery()
+
+        subject_sq = _build_stats_sq(HealthDataPoint.participant_id == participant_id)
+
+        if compare_with == "participant":
+            comparison_sq = _build_stats_sq(HealthDataPoint.participant_id == compare_participant_id)
+        elif compare_with == "group":
+            members_sq = select(GroupMember.participant_id).where(
+                GroupMember.group_id == group_id,
+                GroupMember.left_at == None,
+            )
+            comparison_sq = _build_stats_sq(HealthDataPoint.participant_id.in_(members_sq))
+        else:  # "all"
+            comparison_sq = _build_stats_sq(True)
+
+        stmt = (
+            select(
+                DataElement.element_id,
+                DataElement.code,
+                DataElement.label,
+                DataElement.unit,
+                subject_sq.c.avg.label("subject_avg"),
+                subject_sq.c.min.label("subject_min"),
+                subject_sq.c.max.label("subject_max"),
+                subject_sq.c.count.label("subject_count"),
+                comparison_sq.c.avg.label("comparison_avg"),
+                comparison_sq.c.min.label("comparison_min"),
+                comparison_sq.c.max.label("comparison_max"),
+                comparison_sq.c.count.label("comparison_count"),
+            )
+            .outerjoin(subject_sq, subject_sq.c.element_id == DataElement.element_id)
+            .outerjoin(comparison_sq, comparison_sq.c.element_id == DataElement.element_id)
+            .where(
+                or_(
+                    subject_sq.c.element_id != None,
+                    comparison_sq.c.element_id != None,
+                )
+            )
+        )
+        if element_ids:
+            stmt = stmt.where(DataElement.element_id.in_(element_ids))
+
+        rows = (await self.db.execute(stmt)).all()
+
+        def fmt(v):
+            return round(float(v), 2) if v is not None else None
+
+        payload = {
+            "compare_with": compare_with,
+            "elements": [
+                {
+                    "element_id": str(row.element_id),
+                    "code": row.code,
+                    "label": row.label,
+                    "unit": row.unit,
+                    "subject": {
+                        "avg": fmt(row.subject_avg),
+                        "min": fmt(row.subject_min),
+                        "max": fmt(row.subject_max),
+                        "count": row.subject_count,
+                    },
+                    "comparison": {
+                        "avg": fmt(row.comparison_avg),
+                        "min": fmt(row.comparison_min),
+                        "max": fmt(row.comparison_max),
+                        "count": row.comparison_count,
+                    },
+                }
+                for row in rows
+            ],
+        }
+
+        report = Report(
+            report_type="comparison",
+            requested_by=requested_by,
+            participant_id=participant_id,
+            group_id=group_id if compare_with == "group" else None,
+            parameters={
+                "compare_with": compare_with,
+                "compare_participant_id": str(compare_participant_id) if compare_participant_id else None,
+                "group_id": str(group_id) if group_id else None,
+                "element_ids": [str(e) for e in (element_ids or [])],
+                "date_from": str(date_from) if date_from else None,
+                "date_to": str(date_to) if date_to else None,
+            },
+        )
+        self.db.add(report)
+        await self.db.flush()
+        await self.db.refresh(report)
+
+        report.parameters = {**report.parameters, "payload": payload}
+        await self.db.flush()
+
+        return report
+
+    async def get_report(self, report_id: uuid.UUID, requested_by: uuid.UUID) -> Report:
+        result = await self.db.execute(
+            select(Report).where(
+                Report.report_id == report_id,
+                Report.requested_by == requested_by,
+            )
+        )
+        report = result.scalar_one_or_none()
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+        return report
+
+    async def create_feedback(
+        self,
+        caretaker_user_id: uuid.UUID,
+        participant_id: uuid.UUID,
+        message: str,
+        submission_id: uuid.UUID | None = None,
+    ) -> CaretakerFeedback:
+        caretaker_result = await self.db.execute(
+            select(CaretakerProfile).where(CaretakerProfile.user_id == caretaker_user_id)
+        )
+        caretaker = caretaker_result.scalar_one_or_none()
+        if not caretaker:
+            raise HTTPException(status_code=403, detail="Caretaker profile not found")
+
+        participant_result = await self.db.execute(
+            select(ParticipantProfile).where(ParticipantProfile.participant_id == participant_id)
+        )
+        participant = participant_result.scalar_one_or_none()
+        if not participant:
+            raise HTTPException(status_code=404, detail="Participant not found")
+
+        feedback = CaretakerFeedback(
+            caretaker_id=caretaker.caretaker_id,
+            participant_id=participant_id,
+            submission_id=submission_id,
+            message=message,
+        )
+        self.db.add(feedback)
+        await self.db.flush()
+
+        notification = Notification(
+            user_id=participant.user_id,
+            type="feedback",
+            title="New feedback from your caretaker",
+            message=message[:200],
+            source_type="caretaker_feedback",
+            source_id=feedback.feedback_id,
+        )
+        self.db.add(notification)
+        await self.db.flush()
+
+        return feedback
+
+    async def list_feedback(self, participant_id: uuid.UUID) -> list[CaretakerFeedback]:
+        result = await self.db.execute(
+            select(CaretakerFeedback)
+            .where(CaretakerFeedback.participant_id == participant_id)
+            .order_by(CaretakerFeedback.created_at.desc())
+        )
+        return result.scalars().all()
 
