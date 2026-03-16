@@ -23,6 +23,19 @@ async def get_my_stats(
     return await StatsQuery(db).get_participant_summary(participant_id)
 
 
+@router.get("/me/available-elements")
+async def get_my_available_elements(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(STATS_VIEW)),
+):
+    participant_id = get_participant_id(current_user)
+    rows = await StatsQuery(db).get_available_elements(participant_id)
+    return [
+        {"element_id": str(row.element_id), "code": row.code, "label": row.label, "unit": row.unit, "datatype": row.datatype}
+        for row in rows
+    ]
+
+
 @router.get("/me/elements")
 async def get_my_elements(
     element_ids: Optional[list[UUID]] = Query(default=None),

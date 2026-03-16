@@ -491,6 +491,27 @@ class StatsQuery:
         }
     
 
+    async def get_available_elements(self, participant_id: uuid.UUID) -> list:
+        result = await self.db.execute(
+            select(
+                DataElement.element_id,
+                DataElement.code,
+                DataElement.label,
+                DataElement.unit,
+                DataElement.datatype,
+            )
+            .distinct()
+            .join(FieldElementMap, FieldElementMap.element_id == DataElement.element_id)
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
+            .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
+            .join(GroupMember, GroupMember.group_id == FormDeployment.group_id)
+            .where(GroupMember.participant_id == participant_id)
+            .where(GroupMember.left_at == None)
+            .where(FormDeployment.revoked_at == None)
+        )
+        return result.all()
+
     async def get_participant_element_stats(
         self,
         participant_id: uuid.UUID,
