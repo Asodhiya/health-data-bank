@@ -489,6 +489,54 @@ class StatsQuery:
             "goals_met": goals_met,
             "goal_remaining": active_goals - goals_met
         }
+    
+
+    async def get_participant_element_stats(
+        self,
+        participant_id: uuid.UUID,
+        element_ids: list[uuid.UUID] | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> list:
+        stmt = (
+            select(
+                DataElement.element_id,
+                DataElement.code,
+                DataElement.label,
+                DataElement.unit,
+                func.avg(HealthDataPoint.value_number).label("avg"),
+                func.min(HealthDataPoint.value_number).label("min"),
+                func.max(HealthDataPoint.value_number).label("max"),
+                func.count(HealthDataPoint.data_id).label("count"),
+            )
+            .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
+            .where(HealthDataPoint.participant_id == participant_id)
+            .group_by(DataElement.element_id, DataElement.code, DataElement.label, DataElement.unit)
+        )
+        if element_ids:
+            stmt = stmt.where(HealthDataPoint.element_id.in_(element_ids))
+        if date_from:
+            stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) >= date_from)
+        if date_to:
+            stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) <= date_to)
+
+        rows = (await self.db.execute(stmt)).all()
+        return [
+            {
+                "element_id": str(row.element_id),
+                "code": row.code,
+                "label": row.label,
+                "unit": row.unit,
+                "avg": round(float(row.avg), 2) if row.avg is not None else None,
+                "min": float(row.min) if row.min is not None else None,
+                "max": float(row.max) if row.max is not None else None,
+                "count": row.count,
+            }
+            for row in rows
+        ]
+
+    
+
 
 class CaretakersQuery:
     def __init__(self, db: AsyncSession):
