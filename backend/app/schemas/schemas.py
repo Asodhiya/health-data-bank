@@ -78,6 +78,7 @@ class Link_role_permission_schema(BaseModel):
 class SignupInviteRequest(BaseModel):
     email: EmailStr
     target_role: str
+    group_id: Optional[UUID] = None
 
 class HealthDataPointPayload(BaseModel):
     element_id: UUID
