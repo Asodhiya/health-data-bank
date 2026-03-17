@@ -175,16 +175,16 @@ export const api = {
     return request(`/caretaker/participants${qs ? `?${qs}` : ""}`);
   },
 
-  caretakerGetParticipant: (participantId) =>
-    request(`/caretaker/participants/${participantId}`),
+  caretakerGetParticipant: (participantId, groupId) =>
+    request(`/caretaker/participants/${participantId}?group_id=${groupId}`),
 
   // Groups
   caretakerGetGroups: () => request("/caretaker/groups"),
 
   // Submissions (read-only for caretaker)
-  caretakerListSubmissions: (params = {}) => {
+  caretakerListSubmissions: (participantId, params = {}) => {
     const qs = new URLSearchParams(params).toString();
-    return request(`/caretaker/submissions${qs ? `?${qs}` : ""}`);
+    return request(`/caretaker/participants/${participantId}/submissions${qs ? `?${qs}` : ""}`);
   },
 
   caretakerGetSubmission: (submissionId) =>
@@ -223,16 +223,18 @@ export const api = {
 
   // Reports
   caretakerGenerateGroupReport: (groupId, payload) =>
-    request(`/caretaker/reports/group?group_id=${groupId}`, {
+    request(`/caretaker/reports/group/generate?group_id=${groupId}`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
-  caretakerGenerateComparisonReport: (participantId, payload) =>
-    request(`/caretaker/reports/comparison?participant_id=${participantId}`, {
+  caretakerGenerateComparisonReport: (participantId, queryParams = {}, payload = {}) => {
+    const params = new URLSearchParams({ participant_id: participantId, ...queryParams });
+    return request(`/caretaker/reports/comparison?${params.toString()}`, {
       method: "POST",
       body: JSON.stringify(payload),
-    }),
+    });
+  },
 
   caretakerGenerateParticipantReport: (participantId, payload) =>
     request(`/caretaker/reports/participant?participant_id=${participantId}`, {

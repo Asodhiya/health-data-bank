@@ -748,19 +748,51 @@ export default function ParticipantDetailPage() {
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // ──────────────────────────────────────────────────────────────────────────────
+  // CHANGED: Fixed data fetching to match actual backend route signatures.
+  //
+  // 1. Fetch the caretaker's groups first so we have the required group_id.
+  // 2. caretakerGetParticipant now receives (participantId, groupId) — the
+  //    backend endpoint requires group_id as a query param.
+  // 3. caretakerListSubmissions now receives participantId as the first arg —
+  //    the backend route is /caretaker/participants/{id}/submissions.
+  // 4. Goals & notes endpoints don't exist yet on the backend — they fall back
+  //    to mock data gracefully.
+  // ──────────────────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [pData, subData, goalData, noteData] = await Promise.all([
-        api.caretakerGetParticipant(participantId),
-        api.caretakerListSubmissions({ participant_id: participantId }),
-        api.caretakerGetParticipantGoals(participantId),
-        api.caretakerListNotes(participantId),
+      // Step 1: Get the caretaker's groups to resolve the required group_id
+      const groupData = await api.caretakerGetGroups().catch(() => []);
+      const firstGroupId = Array.isArray(groupData) && groupData.length > 0
+        ? groupData[0].group_id
+        : null;
+
+      // Step 2: Fetch participant detail + submissions in parallel
+      // caretakerGetParticipant requires group_id as a query param
+      // caretakerListSubmissions takes participantId as path param
+      const [pData, subData] = await Promise.all([
+        firstGroupId
+          ? api.caretakerGetParticipant(participantId, firstGroupId)
+          : Promise.reject(new Error("No group assigned")),
+        api.caretakerListSubmissions(participantId),
       ]);
+
       setParticipant(pData);
-      setSubmissions(subData);
-      setGoals(goalData);
-      setNotes(noteData);
+      setSubmissions(Array.isArray(subData) ? subData : []);
+
+      // Step 3: Goals endpoint doesn't exist yet — graceful mock fallback
+      let goalData = MOCK_GOALS;
+      try {
+        goalData = await api.caretakerGetParticipantGoals(participantId);
+      } catch {
+        // Expected: endpoint not implemented yet
+      }
+      setGoals(Array.isArray(goalData) ? goalData : MOCK_GOALS);
+
+      // Step 4: Notes are local-only for now — always use mock data
+      setNotes(MOCK_NOTES);
+
     } catch (err) {
       console.warn("Backend not ready, using mock data:", err.message);
       setParticipant(MOCK_PARTICIPANT);
