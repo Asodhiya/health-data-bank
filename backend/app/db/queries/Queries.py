@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct, case, and_, or_
 from sqlalchemy import Date as SADate
-from app.db.models import Role, User, UserRole, Permission, ParticipantProfile, CaretakerProfile, ResearcherProfile, SignupInvite, HealthGoal, GoalTemplate, DataElement, FieldElementMap, HealthDataPoint, FormDeployment, GroupMember, FormSubmission, Group, SurveyForm, CaretakerFeedback, Notification, Report
+from app.db.models import Role, User, UserRole, Permission, ParticipantProfile, CaretakerProfile, ResearcherProfile, SignupInvite, HealthGoal, GoalTemplate, DataElement, FieldElementMap, HealthDataPoint, FormDeployment, GroupMember, FormSubmission, Group, SurveyForm, CaretakerFeedback, Notification, Report, SubmissionAnswer
 from fastapi import HTTPException, status
 import uuid
 from sqlalchemy.exc import IntegrityError
@@ -76,6 +76,12 @@ class RoleQuery:
             raise HTTPException(status_code=409, detail="User-profile role already exists")
 
     async def assign_role_to_user(self, user_record, role_record):
+        existing = await self.db.execute(
+            select(UserRole).where(UserRole.user_id == user_record.user_id).limit(1)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="User already has a role. A user can only have one role.")
+
         user_role = UserRole(
             user_id=user_record.user_id,
             role_id=role_record.role_id
@@ -139,7 +145,7 @@ class ParticipantQuery:
             return None
         goal, element = row
         return {**goal.__dict__, "name": element.label, "element": element}
-
+    
     def _goal_data_point(self, participant_id: uuid.UUID, goal: HealthGoal) -> HealthDataPoint:
         """Create a HealthDataPoint snapshot representing the goal's target value."""
         return HealthDataPoint(
@@ -217,6 +223,38 @@ class ParticipantQuery:
 
         await self.db.delete(goal)
         await self.db.flush()
+
+    async def get_goal_progress(self, goal_id: uuid.UUID, participant_id: uuid.UUID):
+        result = await self.db.execute(
+            select(HealthGoal).where(
+                HealthGoal.goal_id == goal_id,
+                HealthGoal.participant_id == participant_id
+            )
+        )
+        goal = result.scalar_one_or_none()
+        if not goal:
+            raise HTTPException(status_code=404, detail="Goal not found")
+
+        today = datetime.now(timezone.utc).date()
+        entry_result = await self.db.execute(
+            select(HealthDataPoint).where(
+                HealthDataPoint.participant_id == participant_id,
+                HealthDataPoint.element_id == goal.element_id,
+                HealthDataPoint.source_type == "goal",
+                func.date(HealthDataPoint.observed_at) == today,
+            ).limit(1)
+        )
+        entry = entry_result.scalar_one_or_none()
+
+        current_value = float(entry.value_number) if entry and entry.value_number is not None else 0.0
+        target = float(goal.target_value) if goal.target_value is not None else None
+        return {
+            "goal_id": goal_id,
+            "date": today,
+            "current_value": current_value,
+            "target_value": target,
+            "completed": (current_value >= target) if target is not None else False,
+        }
 
     async def log_progress(self, goal_id: uuid.UUID, participant_id: uuid.UUID, payload: GoalProgressLog):
         result = await self.db.execute(
@@ -1114,4 +1152,114 @@ class CaretakersQuery:
             .order_by(CaretakerFeedback.created_at.desc())
         )
         return result.scalars().all()
+
+    async def get_submission_detail(
+        self, participant_id: uuid.UUID, submission_id: uuid.UUID
+    ):
+        row = (await self.db.execute(
+            select(
+                FormSubmission.submission_id,
+                FormSubmission.participant_id,
+                FormSubmission.form_id,
+                SurveyForm.title.label("form_name"),
+                func.cast(FormSubmission.submitted_at, SADate).label("submitted_at"),
+            )
+            .join(SurveyForm, SurveyForm.form_id == FormSubmission.form_id)
+            .where(
+                FormSubmission.submission_id == submission_id,
+                FormSubmission.participant_id == participant_id,
+            )
+        )).one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Submission not found")
+
+        answers = (await self.db.execute(
+            select(
+                SubmissionAnswer.answer_id,
+                SubmissionAnswer.field_id,
+                FormField.label.label("field_label"),
+                SubmissionAnswer.value_text,
+                SubmissionAnswer.value_number,
+                SubmissionAnswer.value_date,
+                SubmissionAnswer.value_json,
+            )
+            .join(FormField, FormField.field_id == SubmissionAnswer.field_id)
+            .where(SubmissionAnswer.submission_id == submission_id)
+        )).all()
+
+        return row, answers
+
+    async def get_participant_goals(self, participant_id: uuid.UUID):
+        return await ParticipantQuery(self.db).get_goals(participant_id)
+
+    async def get_health_trends(
+        self,
+        participant_id: uuid.UUID,
+        element_ids: list[uuid.UUID] | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> list:
+        stmt = (
+            select(
+                DataElement.element_id,
+                DataElement.label,
+                DataElement.unit,
+                HealthDataPoint.observed_at,
+                HealthDataPoint.value_number,
+            )
+            .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
+            .where(HealthDataPoint.participant_id == participant_id)
+            .order_by(DataElement.element_id, HealthDataPoint.observed_at)
+        )
+        if element_ids:
+            stmt = stmt.where(HealthDataPoint.element_id.in_(element_ids))
+        if date_from:
+            stmt = stmt.where(HealthDataPoint.observed_at >= date_from)
+        if date_to:
+            stmt = stmt.where(HealthDataPoint.observed_at < date_to + timedelta(days=1))
+
+        rows = (await self.db.execute(stmt)).all()
+        trends: dict[str, dict] = {}
+        for row in rows:
+            key = str(row.element_id)
+            if key not in trends:
+                trends[key] = {"element_id": key, "label": row.label, "unit": row.unit, "points": []}
+            trends[key]["points"].append({
+                "date": row.observed_at.isoformat() if row.observed_at else None,
+                "value": float(row.value_number) if row.value_number is not None else None,
+            })
+        return list(trends.values())
+
+    async def list_reports(self, user_id: uuid.UUID) -> list[Report]:
+        result = await self.db.execute(
+            select(Report)
+            .where(Report.requested_by == user_id)
+            .order_by(Report.created_at.desc())
+        )
+        return result.scalars().all()
+
+    async def list_notifications(self, user_id: uuid.UUID) -> list[Notification]:
+        result = await self.db.execute(
+            select(Notification)
+            .where(Notification.user_id == user_id)
+            .order_by(Notification.created_at.desc())
+        )
+        return result.scalars().all()
+
+    async def mark_notification_read(
+        self, notification_id: uuid.UUID, user_id: uuid.UUID
+    ) -> Notification:
+        result = await self.db.execute(
+            select(Notification).where(
+                Notification.notification_id == notification_id,
+                Notification.user_id == user_id,
+            )
+        )
+        notification = result.scalar_one_or_none()
+        if not notification:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        notification.status = "read"
+        notification.read_at = datetime.now(timezone.utc)
+        await self.db.flush()
+        return notification
 

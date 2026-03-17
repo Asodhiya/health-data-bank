@@ -878,26 +878,73 @@ const TABS = [
   { key: "history", label: "History", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
 ];
 
+// ─── Group Selector (shared pattern) ────────────────────────────────────────
+
+function ReportsGroupSelector({ groups, selectedGroupId, onChange, totalParticipants }) {
+  const [open, setOpen] = useState(false);
+  const selected = selectedGroupId === "all" ? null : groups.find(g => g.id === selectedGroupId);
+  const label = selected ? selected.name : "All Groups";
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(!open)}
+        className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm w-full sm:w-auto">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+        <span className="truncate">{label}</span>
+        <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 text-slate-400 transition-transform ml-auto sm:ml-0 ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (<>
+        <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+        <div className="absolute left-0 top-full mt-1.5 z-20 w-full sm:w-80 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+          <button onClick={() => { onChange("all"); setOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${selectedGroupId === "all" ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${selectedGroupId === "all" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+            </div>
+            <div className="flex-1"><p className={`text-sm font-semibold ${selectedGroupId === "all" ? "text-blue-700" : "text-slate-700"}`}>All Groups</p><p className="text-xs text-slate-400">{totalParticipants} participants</p></div>
+            {selectedGroupId === "all" && <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+          </button>
+          <div className="border-t border-slate-100" />
+          {groups.map(g => {
+            const isSelected = selectedGroupId === g.id;
+            return (
+              <button key={g.id} onClick={() => { onChange(g.id); setOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${isSelected ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isSelected ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                </div>
+                <div className="flex-1"><p className={`text-sm font-semibold ${isSelected ? "text-blue-700" : "text-slate-700"}`}>{g.name}</p></div>
+                {isSelected && <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+              </button>
+            );
+          })}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 export default function ReportsPage() {
   const { user } = useOutletContext();
   const [activeTab, setActiveTab] = useState("group");
   const [participants, setParticipants] = useState([]);
-  const [group, setGroup] = useState(null);
+  const [groups, setGroups] = useState([]);
+  const [selectedGroupId, setSelectedGroupId] = useState("all");
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const [pData, gData] = await Promise.all([
-        api.caretakerListParticipants(),
-        api.caretakerGetGroups(),
+        api.caretakerListParticipants().catch(() => []),
+        api.caretakerGetGroups().catch(() => []),
       ]);
-      setParticipants(pData);
-      setGroup(gData?.[0] ?? null);
+      setParticipants(Array.isArray(pData) ? pData : []);
+      const transformedGroups = Array.isArray(gData)
+        ? gData.map(g => ({ id: g.group_id, name: g.name }))
+        : [];
+      setGroups(transformedGroups);
     } catch (err) {
-      console.warn("Backend not ready, using mock data:", err.message);
-      setParticipants(MOCK_PARTICIPANTS);
-      setGroup(CARETAKER_GROUP);
+      console.warn("Failed to load reports data:", err.message);
     } finally {
       setLoading(false);
     }
@@ -917,9 +964,17 @@ export default function ReportsPage() {
     );
   }
 
-  const groupName = group?.name || CARETAKER_GROUP.name;
+  // Filter participants by selected group
+  const filteredParticipants = selectedGroupId === "all"
+    ? participants
+    : participants.filter(p => p.group_id === selectedGroupId);
+
+  const selectedGroupName = selectedGroupId === "all"
+    ? (groups.length > 0 ? "All Groups" : "No Group")
+    : (groups.find(g => g.id === selectedGroupId)?.name || "Group");
+
   // Normalize participant shape for child components
-  const normalizedParticipants = participants.length > 0 ? participants.map(p => ({
+  const normalizedParticipants = filteredParticipants.length > 0 ? filteredParticipants.map(p => ({
     id: p.id || p.participant_id,
     name: p.name || `${p.firstName || ""} ${p.lastName || ""}`.trim(),
     status: p.status || "active",
@@ -929,14 +984,18 @@ export default function ReportsPage() {
     <div className="max-w-6xl mx-auto space-y-6 p-4">
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Reports</h1>
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-            {groupName}
-          </span>
-          <span className="text-sm text-slate-400">Generate and review health reports.</span>
-        </div>
+        <p className="text-sm text-slate-400 mt-1">Generate and review health reports.</p>
       </div>
+
+      {/* Group Selector */}
+      {groups.length > 0 && (
+        <ReportsGroupSelector
+          groups={groups}
+          selectedGroupId={selectedGroupId}
+          onChange={setSelectedGroupId}
+          totalParticipants={participants.length}
+        />
+      )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-1.5 flex gap-1 overflow-x-auto">
         {TABS.map(tab => (
@@ -950,8 +1009,8 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {activeTab === "group" && <GroupReport participants={normalizedParticipants} groupName={groupName} />}
-      {activeTab === "comparison" && <ComparisonReport participants={normalizedParticipants} groupName={groupName} />}
+      {activeTab === "group" && <GroupReport participants={normalizedParticipants} groupName={selectedGroupName} />}
+      {activeTab === "comparison" && <ComparisonReport participants={normalizedParticipants} groupName={selectedGroupName} />}
       {activeTab === "trends" && <HealthTrendsReport participants={normalizedParticipants} />}
       {activeTab === "history" && <ReportHistory />}
     </div>
