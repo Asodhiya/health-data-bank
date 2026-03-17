@@ -869,8 +869,11 @@ export default function ProfilePage({ role = 'participant' }) {
   const [profile, setProfile] = useState({ ...EMPTY_PROFILE });
 
   useEffect(() => {
-    api.me()
-      .then((user) => {
+    let cancelled = false;
+    async function loadProfile() {
+      try {
+        const user = await api.me();
+        if (cancelled) return;
         setProfile((prev) => ({
           ...prev,
           first_name: user.first_name || '',
@@ -878,13 +881,38 @@ export default function ProfilePage({ role = 'participant' }) {
           email: user.email || '',
           username: user.username || '',
           phone: user.phone || '',
-          // TODO: populate role-specific fields from GET /profile/:role API
         }));
-      })
-      .catch(() => {
+
+        // Load caretaker-specific data from real endpoints
+        if (role === 'caretaker') {
+          try {
+            const [groupData, participantData] = await Promise.all([
+              api.caretakerGetGroups().catch(() => []),
+              api.caretakerListParticipants().catch(() => []),
+            ]);
+            if (cancelled) return;
+            const groups = Array.isArray(groupData) ? groupData : [];
+            const participants = Array.isArray(participantData) ? participantData : [];
+            const activeCount = participants.filter(p => p.status !== 'inactive').length;
+            setProfile((prev) => ({
+              ...prev,
+              groupName: groups.length === 1 ? groups[0].name : `${groups.length} groups`,
+              participantCount: participants.length,
+              activeParticipants: activeCount,
+            }));
+          } catch {
+            // Non-critical — header will show defaults
+          }
+        }
+      } catch {
+        if (cancelled) return;
         setProfile(DEV_PROFILES[role] || DEV_PROFILES.participant);
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    loadProfile();
+    return () => { cancelled = true; };
   }, [role]);
 
   if (loading) {
