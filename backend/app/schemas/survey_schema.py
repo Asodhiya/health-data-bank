@@ -23,6 +23,7 @@ class FormFieldCreate(BaseModel):
     is_required: bool
     display_order: int
     options: List[FieldOptionCreate] = []
+    element_id: Optional[UUID] = None  # maps this field to a DataElement on save
 
 class FormFieldOut(BaseModel):
     field_id: UUID
@@ -30,6 +31,7 @@ class FormFieldOut(BaseModel):
     field_type: str
     is_required: bool
     display_order: int
+    element_id: Optional[UUID] = None  # populated from FieldElementMap
     options: List[FieldOptionOut] = []
 
     class Config:

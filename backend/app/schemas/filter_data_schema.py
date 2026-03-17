@@ -13,8 +13,44 @@ class AvailableSurvey(BaseModel):
     class Config:
         from_attributes = True
 
+class ParticipantProfileOut(BaseModel):
+    dob: Optional[str] = None
+    gender: Optional[str] = None
+    pronouns: Optional[str] = None
+    primary_language: Optional[str] = None
+    occupation_status: Optional[str] = None
+    living_arrangement: Optional[str] = None
+    highest_education_level: Optional[str] = None
+    dependents: Optional[bool] = None
+    marital_status: Optional[str] = None
+    address: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ParticipantProfileUpdate(BaseModel):
+    dob: Optional[str] = None
+    gender: Optional[str] = None
+    pronouns: Optional[str] = None
+    primary_language: Optional[str] = None
+    occupation_status: Optional[str] = None
+    living_arrangement: Optional[str] = None
+    highest_education_level: Optional[str] = None
+    dependents: Optional[bool] = None
+    marital_status: Optional[str] = None
+    address: Optional[str] = None
+
+
 class ParticipantFilter(BaseModel):
     gender: Optional[str] = None
+    pronouns: Optional[str] = None
+    primary_language: Optional[str] = None
+    occupation_status: Optional[str] = None
+    living_arrangement: Optional[str] = None
+    highest_education_level: Optional[str] = None
+    dependents: Optional[bool] = None
+    marital_status: Optional[str] = None
     age_min: Optional[int] = None
     age_max: Optional[int] = None
     status: Optional[str] = None
