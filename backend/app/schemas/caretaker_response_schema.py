@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import List, Optional, Any, Dict,Literal
 from datetime import datetime,date
 from uuid import UUID
@@ -58,15 +58,27 @@ class CaretakerDashboardResponse(BaseModel):
 
 
 class ParticipantListItem(BaseModel):
-    participant_id: int
+    participant_id: UUID
     name: str
-    status: Literal["active", "inactive"]
-    group_id: Optional[int] = None
+    gender: Optional[str] = None
+    age: Optional[int] = None
+    status: Literal["highly_active", "moderately_active", "low_active", "inactive"]
+    group_id: Optional[UUID] = None
+    survey_progress: Literal["not_started", "in_progress", "completed"]
+    goal_progress: Literal["not_started", "in_progress", "completed"]
+    last_login_at: Optional[datetime] = None
     last_submission_at: Optional[date] = None
 
 
+class ParticipantActivityCounts(BaseModel):
+    highly_active: int = 0
+    moderately_active: int = 0
+    low_active: int = 0
+    inactive: int = 0
+
+
 class ParticipantDetail(BaseModel):
-    participant_id: int
+    participant_id: UUID
     name: str
     status: Literal["active", "inactive"]
     groups: list[dict[str, Any]] = Field(default_factory=list)
@@ -102,9 +114,9 @@ class GoalItem(BaseModel):
 
 
 class SubmissionListItem(BaseModel):
-    submission_id: int
-    participant_id: int
-    form_id: int
+    submission_id: UUID
+    participant_id: UUID
+    form_id: UUID
     form_name: str
     submitted_at: date
 
@@ -141,15 +153,40 @@ class NoteUpdateRequest(BaseModel):
 class ReportGenerateRequest(BaseModel):
     date_from: Optional[date] = None
     date_to: Optional[date] = None
-    metrics: list[str] = Field(default_factory=list)
+    element_ids: list[UUID] = Field(default_factory=list)  # filter by data elements
     report_type: Literal["numeric", "graph"] = "numeric"
 
 
+class ComparisonReportRequest(BaseModel):
+    compare_with: Literal["participant", "group", "all"]
+    compare_participant_id: Optional[UUID] = None
+    group_id: Optional[UUID] = None
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+    element_ids: list[UUID] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def check_required_fields(self) -> "ComparisonReportRequest":
+        if self.compare_with == "participant" and not self.compare_participant_id:
+            raise ValueError("compare_participant_id is required when compare_with is 'participant'")
+        if self.compare_with == "group" and not self.group_id:
+            raise ValueError("group_id is required when compare_with is 'group'")
+        return self
+
+
 class ReportResponse(BaseModel):
-    report_id: int
+    report_id: UUID
     scope: Literal["participant", "group", "comparison"]
-    created_at: date
+    created_at: datetime
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class GroupDataElementItem(BaseModel):
+    element_id: UUID
+    code: Optional[str] = None
+    label: Optional[str] = None
+    unit: Optional[str] = None
+    datatype: Optional[str] = None
 
 
 class GroupCreateRequest(BaseModel):
@@ -189,3 +226,22 @@ class NotificationItem(BaseModel):
 
 class NotificationReadRequest(BaseModel):
     is_read: bool = True
+
+
+class GroupMemberItem(BaseModel):
+    participant_id: UUID
+    name: str
+    joined_at: Optional[datetime] = None
+
+
+class FeedbackCreate(BaseModel):
+    message: str = Field(min_length=1)
+
+
+class FeedbackItem(BaseModel):
+    feedback_id: UUID
+    caretaker_id: UUID
+    participant_id: UUID
+    submission_id: Optional[UUID] = None
+    message: str
+    created_at: datetime

@@ -3,7 +3,8 @@ Authentication Routes
 """
 from fastapi import APIRouter, HTTPException, status, Response, Depends, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import User
+from app.db.models import User, GroupMember, ParticipantProfile
+from sqlalchemy import select
 from datetime import datetime, timezone
 from app.db.session import get_db
 from app.core.security import PasswordHash, create_access_token, generate_reset_token, hash_reset_token, reset_token_expiry
@@ -101,6 +102,18 @@ async def register(
     new_user = await create_user_with_role(payload, role.role_name, db)
 
     invite.used = True
+
+    if invite.group_id and role.role_name == "participant":
+        participant_result = await db.execute(
+            select(ParticipantProfile).where(ParticipantProfile.user_id == new_user.user_id)
+        )
+        participant = participant_result.scalar_one_or_none()
+        if participant:
+            db.add(GroupMember(
+                group_id=invite.group_id,
+                participant_id=participant.participant_id,
+            ))
+
     await db.commit()
 
     await write_audit_log(
@@ -256,6 +269,7 @@ async def signup_invite(
         current_user_role=user_roles[0],
         target_role=target_role,
         target_email=Payload.email,
+        group_id=Payload.group_id,
     )
     result = await generator.save(db)
     send_invite_email(Payload.email, result["invite_url"])
