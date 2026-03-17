@@ -104,26 +104,26 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // ── Survey Fill (participant) ──
-  getDeployedForms: () => request("/participant/surveys/assigned"),
+  // // ── Survey Fill (participant) ──
+  // getDeployedForms: () => request("/participant/surveys/assigned"),
 
-  getParticipantFormDetail: (formId) =>
-    request(`/participant/surveys/${formId}`),
+  // getParticipantFormDetail: (formId) =>
+  //   request(`/participant/surveys/${formId}`),
 
-  getSurveyResponse: (formId) =>
-    request(`/participant/surveys/${formId}/response`),
+  // getSurveyResponse: (formId) =>
+  //   request(`/participant/surveys/${formId}/response`),
 
-  saveDraftAnswers: (formId, answers) =>
-    request(`/participant/surveys/${formId}/save`, {
-      method: "POST",
-      body: JSON.stringify(answers),
-    }),
+  // saveDraftAnswers: (formId, answers) =>
+  //   request(`/participant/surveys/${formId}/save`, {
+  //     method: "POST",
+  //     body: JSON.stringify(answers),
+  //   }),
 
-  submitSurvey: (formId, answers) =>
-    request(`/participant/surveys/${formId}/submit`, {
-      method: "POST",
-      body: JSON.stringify(answers),
-    }),
+  // submitSurvey: (formId, answers) =>
+  //   request(`/participant/surveys/${formId}/submit`, {
+  //     method: "POST",
+  //     body: JSON.stringify(answers),
+  //   }),
 
   // ── Data Elements (researcher) added by Nima──
   // ── Data Elements (Standardization Hub) ──
@@ -307,24 +307,25 @@ export const api = {
     }),
 
   // ── Participant: Surveys ──
-  getAssignedSurveys: () => request("/participant/assigned"),
+  getAssignedSurveys: () => request("/participant/surveys/assigned"), // 🟢 Added /surveys/
 
-  getParticipantFormDetail: (formId) => request(`/participant/${formId}`),
+  getParticipantFormDetail: (formId) =>
+    request(`/participant/surveys/${formId}`), // 🟢 Added /surveys/
 
-  getSurveyResponse: (formId) => request(`/participant/${formId}/response`),
+  getSurveyResponse: (formId) =>
+    request(`/participant/surveys/${formId}/response`), // 🟢 Added /surveys/
 
   saveDraftAnswers: (formId, answers) =>
-    request(`/participant/${formId}/save`, {
+    request(`/participant/surveys/${formId}/save`, {
       method: "POST",
       body: JSON.stringify(answers),
     }),
 
   submitSurvey: (formId, answers) =>
-    request(`/participant/${formId}/submit`, {
+    request(`/participant/surveys/${formId}/submit`, {
       method: "POST",
       body: JSON.stringify(answers),
     }),
-
   // ── Participant: Health Goals ──
 
   // Browse templates created by researchers
@@ -360,4 +361,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload), // payload should be { value: number, observed_at: string }
     }),
+
+  // ── Participant Stats (for Charts) ──
+
+  // Gets the overall health score/stats for the logged-in participant
+  getMyStats: () => request("/stats/stats_me"),
+
+  // Gets the available elements (metrics) the participant is tracking
+  getAvailableElements: () => request("/stats/me/available-elements"),
+
+  // Gets specific data points for the participant's elements
+  getMyElementsData: () => request("/stats/me/elements"),
+
+  // Gets comparison data (Participant vs. Group average)
+  getMyVsGroupStats: () => request("/stats/me/vs-group"),
 };
