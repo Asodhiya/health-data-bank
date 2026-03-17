@@ -76,6 +76,22 @@ async def get_goal(
     return goal
 
 
+@router.get("/goals/{goal_id}/progress")
+async def get_goal_progress(
+    goal_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
+):
+    """
+    Return all logged progress entries for a health goal.
+
+    Entries are HealthDataPoints with source_type='goal', ordered oldest-first.
+    Returns 404 if the goal does not exist or does not belong to the participant.
+    """
+    participant_id = get_participant_id(current_user)
+    return await ParticipantQuery(db).get_goal_progress(goal_id, participant_id)
+
+
 @router.patch("/goals/{goal_id}")
 async def update_goal(
     goal_id: uuid.UUID,

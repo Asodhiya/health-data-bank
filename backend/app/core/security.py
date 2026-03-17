@@ -66,7 +66,7 @@ class InviteTokenGenerator:
     target_email: str
     group_id: object = None  # uuid.UUID | None
     expires_in_hours: int = 48
-    base_url: str = "https://yourapp.com"
+    base_url: str = field(default_factory=lambda: os.getenv("FRONTEND_URL", "http://localhost:5173"))
 
     token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     expires_at: datetime = field(init=False)
