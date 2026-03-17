@@ -13,6 +13,7 @@ export function AuthProvider({ children }) {
       const data = await api.me();
       setUser(data);
       setRole(data.Role?.[0] ?? null);
+      return data;
     } catch {
       setUser(null);
       setRole(null);
