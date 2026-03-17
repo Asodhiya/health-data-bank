@@ -104,26 +104,35 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // // ── Survey Fill (participant) ──
-  // getDeployedForms: () => request("/participant/surveys/assigned"),
+  // ── Intake (onboarding) ──
+  getIntakeForm: () => request('/participant/intake/form'),
 
-  // getParticipantFormDetail: (formId) =>
-  //   request(`/participant/surveys/${formId}`),
+  submitIntake: (payload) =>
+    request('/participant/intake', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
-  // getSurveyResponse: (formId) =>
-  //   request(`/participant/surveys/${formId}/response`),
+  // ── Survey Fill (participant) ──
+  getDeployedForms: () => request("/participant/surveys/assigned"),
 
-  // saveDraftAnswers: (formId, answers) =>
-  //   request(`/participant/surveys/${formId}/save`, {
-  //     method: "POST",
-  //     body: JSON.stringify(answers),
-  //   }),
+  getParticipantFormDetail: (formId) =>
+    request(`/participant/surveys/${formId}`),
 
-  // submitSurvey: (formId, answers) =>
-  //   request(`/participant/surveys/${formId}/submit`, {
-  //     method: "POST",
-  //     body: JSON.stringify(answers),
-  //   }),
+  getSurveyResponse: (formId) =>
+    request(`/participant/surveys/${formId}/response`),
+
+  saveDraftAnswers: (formId, answers) =>
+    request(`/participant/surveys/${formId}/save`, {
+      method: "POST",
+      body: JSON.stringify(answers),
+    }),
+
+  submitSurvey: (formId, answers) =>
+    request(`/participant/surveys/${formId}/submit`, {
+      method: "POST",
+      body: JSON.stringify(answers),
+    }),
 
   // ── Data Elements (researcher) added by Nima──
   // ── Data Elements (Standardization Hub) ──
@@ -332,26 +341,9 @@ export const api = {
       method: "DELETE",
     }),
 
-  // ── Participant: Surveys ──
-  getAssignedSurveys: () => request("/participant/surveys/assigned"), // 🟢 Added /surveys/
+  // ── Participant: Surveys (alias used by participant pages) ──
+  getAssignedSurveys: () => request("/participant/surveys/assigned"),
 
-  getParticipantFormDetail: (formId) =>
-    request(`/participant/surveys/${formId}`), // 🟢 Added /surveys/
-
-  getSurveyResponse: (formId) =>
-    request(`/participant/surveys/${formId}/response`), // 🟢 Added /surveys/
-
-  saveDraftAnswers: (formId, answers) =>
-    request(`/participant/surveys/${formId}/save`, {
-      method: "POST",
-      body: JSON.stringify(answers),
-    }),
-
-  submitSurvey: (formId, answers) =>
-    request(`/participant/surveys/${formId}/submit`, {
-      method: "POST",
-      body: JSON.stringify(answers),
-    }),
   // ── Participant: Health Goals ──
 
   // Browse templates created by researchers
@@ -364,7 +356,7 @@ export const api = {
   getParticipantGoal: (goalId) => request(`/participant/goals/${goalId}`),
 
   // Add a goal from a template.
-  // Note: target_value is passed as a query param per your backend
+  // Note: target_value is passed as a query param per the backend
   addGoalFromTemplate: (templateId, targetValue = null) => {
     const url = `/participant/goals/add/${templateId}${targetValue ? `?target_value=${targetValue}` : ""}`;
     return request(url, { method: "POST" });
@@ -385,7 +377,7 @@ export const api = {
   logGoalProgress: (goalId, payload) =>
     request(`/participant/goals/${goalId}/log`, {
       method: "POST",
-      body: JSON.stringify(payload), // payload should be { value: number, observed_at: string }
+      body: JSON.stringify(payload), // { value: number, observed_at: string }
     }),
 
   // ── Participant Stats (for Charts) ──
