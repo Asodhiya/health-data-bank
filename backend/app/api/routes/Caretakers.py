@@ -17,8 +17,9 @@ from app.schemas.caretaker_response_schema import (
     GroupDataElementItem,
     ParticipantListItem, ParticipantDetail, ParticipantActivityCounts,
     FeedbackCreate, FeedbackItem,
-    ReportGenerateRequest, ReportResponse,
-    SubmissionListItem,
+    ReportGenerateRequest, ReportResponse, ReportListItem,
+    SubmissionListItem, SubmissionDetailItem, SubmissionAnswerItem,
+    NotificationItem,
 )
 from app.db.queries.Queries import CaretakersQuery
 
@@ -323,6 +324,22 @@ async def generate_comparison_report(
     )
 
 
+@router.get("/reports", response_model=list[ReportListItem])
+async def list_reports(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    reports = await CaretakersQuery(db).list_reports(current_user.user_id)
+    return [
+        ReportListItem(
+            report_id=r.report_id,
+            scope=r.report_type or "unknown",
+            created_at=r.created_at,
+        )
+        for r in reports
+    ]
+
+
 @router.get("/reports/{report_id}", response_model=ReportResponse)
 async def get_report(
     report_id: UUID,
@@ -335,4 +352,98 @@ async def get_report(
         scope=report.report_type,
         created_at=report.created_at,
         payload=report.parameters.get("payload", {}) if report.parameters else {},
+    )
+
+
+# ── Submission Detail ──────────────────────────────────────────────────────────
+
+@router.get("/participants/{participant_id}/submissions/{submission_id}", response_model=SubmissionDetailItem)
+async def get_submission_detail(
+    participant_id: UUID,
+    submission_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    row, answers = await CaretakersQuery(db).get_submission_detail(participant_id, submission_id)
+    return SubmissionDetailItem(
+        submission_id=row.submission_id,
+        participant_id=row.participant_id,
+        form_id=row.form_id,
+        form_name=row.form_name,
+        submitted_at=row.submitted_at,
+        answers=[
+            SubmissionAnswerItem(
+                answer_id=a.answer_id,
+                field_id=a.field_id,
+                field_label=a.field_label,
+                value_text=a.value_text,
+                value_number=float(a.value_number) if a.value_number is not None else None,
+                value_date=str(a.value_date) if a.value_date else None,
+                value_json=a.value_json,
+            )
+            for a in answers
+        ],
+    )
+
+
+# ── Participant Goals (read-only) ──────────────────────────────────────────────
+
+@router.get("/participants/{participant_id}/goals")
+async def get_participant_goals(
+    participant_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    return await CaretakersQuery(db).get_participant_goals(participant_id)
+
+
+# ── Health Trends ──────────────────────────────────────────────────────────────
+
+@router.get("/participants/{participant_id}/health-trends")
+async def get_health_trends(
+    participant_id: UUID,
+    element_ids: Optional[list[UUID]] = Query(default=None),
+    date_from: Optional[date] = Query(default=None),
+    date_to: Optional[date] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    return await CaretakersQuery(db).get_health_trends(
+        participant_id, element_ids, date_from, date_to
+    )
+
+
+# ── Notifications ──────────────────────────────────────────────────────────────
+
+@router.get("/notifications", response_model=list[NotificationItem])
+async def list_notifications(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    rows = await CaretakersQuery(db).list_notifications(current_user.user_id)
+    return [
+        NotificationItem(
+            notification_id=n.notification_id,
+            title=n.title,
+            message=n.message,
+            created_at=n.created_at,
+            is_read=(n.status == "read"),
+        )
+        for n in rows
+    ]
+
+
+@router.patch("/notifications/{notification_id}", response_model=NotificationItem)
+async def mark_notification_read(
+    notification_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    n = await CaretakersQuery(db).mark_notification_read(notification_id, current_user.user_id)
+    return NotificationItem(
+        notification_id=n.notification_id,
+        title=n.title,
+        message=n.message,
+        created_at=n.created_at,
+        is_read=(n.status == "read"),
     )

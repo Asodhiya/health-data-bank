@@ -103,7 +103,7 @@ class HealthTrendsResponse(BaseModel):
 
 
 class GoalItem(BaseModel):
-    goal_id: int
+    goal_id: UUID
     title: str
     metric_name: str
     baseline_value: Optional[float] = None
@@ -121,13 +121,29 @@ class SubmissionListItem(BaseModel):
     submitted_at: date
 
 
-class SubmissionDetail(BaseModel):
-    submission_id: int
-    participant_id: int
-    form_id: int
+class SubmissionAnswerItem(BaseModel):
+    answer_id: UUID
+    field_id: Optional[UUID] = None
+    field_label: Optional[str] = None
+    value_text: Optional[str] = None
+    value_number: Optional[float] = None
+    value_date: Optional[str] = None
+    value_json: Optional[Any] = None
+
+
+class SubmissionDetailItem(BaseModel):
+    submission_id: UUID
+    participant_id: UUID
+    form_id: UUID
     form_name: str
     submitted_at: date
-    answers: dict[str, Any] = Field(default_factory=dict)
+    answers: list[SubmissionAnswerItem] = Field(default_factory=list)
+
+
+class ReportListItem(BaseModel):
+    report_id: UUID
+    scope: str
+    created_at: datetime
 
 
 class NoteCreateRequest(BaseModel):
@@ -217,10 +233,10 @@ class GoalSuggestionRequest(BaseModel):
 
 
 class NotificationItem(BaseModel):
-    notification_id: int
-    title: str
-    message: str
-    created_at: date
+    notification_id: UUID
+    title: Optional[str] = None
+    message: Optional[str] = None
+    created_at: Optional[datetime] = None
     is_read: bool
 
 
