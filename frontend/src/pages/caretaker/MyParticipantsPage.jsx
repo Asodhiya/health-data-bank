@@ -2,42 +2,59 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 
-// ─── Mock Data (removed once backend is live) ───────────────────────────────────
-// TODO (Phase 2): Delete MOCK_* constants once these endpoints return real data:
-//   GET  /caretaker/participants
-//   GET  /caretaker/groups
-//   GET  /caretaker/participants/:id
-//   POST /caretaker/participants/:id/notes
-//   POST /auth/signup_invite  (existing — add group_id support)
+// ─── Transform: Backend → Frontend shape ─────────────────────────────────────
+// Maps the backend ParticipantListItem response to the shape the UI components expect.
+// This bridge will be removed when the UI is refactored to use the backend shape directly.
 
-const MOCK_PARTICIPANTS = [
-  { id: "p1", firstName: "Sarah", lastName: "Chen", email: "sarah.chen@example.com", phone: "+1 416-555-0191", dob: "1991-04-12", gender: "Female", status: "active", enrolledAt: "2025-11-03", lastActive: "2026-03-13", healthGoals: 3, healthGoalsTotal: 4, surveysDone: 8, surveysTotal: 10, latestMetrics: { bpSystolic: 118, bpDiastolic: 76, weight: 64.2, painLevel: 2 }, flags: [] },
-  { id: "p2", firstName: "Marcus", lastName: "Webb", email: "marcus.webb@example.com", phone: "+1 647-555-0182", dob: "1985-09-30", gender: "Male", status: "active", enrolledAt: "2025-11-10", lastActive: "2026-03-12", healthGoals: 1, healthGoalsTotal: 3, surveysDone: 5, surveysTotal: 10, latestMetrics: { bpSystolic: 135, bpDiastolic: 88, weight: 91.5, painLevel: 5 }, flags: ["High BP reported"] },
-  { id: "p3", firstName: "Lily", lastName: "Hartmann", email: "lily.hartmann@example.com", phone: "+1 519-555-0165", dob: "1978-12-01", gender: "Female", status: "inactive", enrolledAt: "2025-08-14", lastActive: "2026-02-20", healthGoals: 0, healthGoalsTotal: 0, surveysDone: 2, surveysTotal: 10, latestMetrics: { bpSystolic: 122, bpDiastolic: 80, weight: 70.1, painLevel: 0 }, flags: ["Inactive 3+ weeks"] },
-  { id: "p4", firstName: "Aiko", lastName: "Tanaka", email: "aiko.tanaka@example.com", phone: "+1 613-555-0177", dob: "2000-02-18", gender: "Female", status: "active", enrolledAt: "2026-01-05", lastActive: "2026-03-14", healthGoals: 2, healthGoalsTotal: 2, surveysDone: 10, surveysTotal: 10, latestMetrics: { bpSystolic: 110, bpDiastolic: 70, weight: 55.0, painLevel: 1 }, flags: [] },
-  { id: "p5", firstName: "Omar", lastName: "Diallo", email: "omar.diallo@example.com", phone: "+1 403-555-0110", dob: "1995-07-23", gender: "Male", status: "active", enrolledAt: "2026-02-28", lastActive: "2026-03-10", healthGoals: 1, healthGoalsTotal: 3, surveysDone: 0, surveysTotal: 10, latestMetrics: null, flags: ["No surveys completed"] },
-  { id: "p6", firstName: "Priya", lastName: "Sharma", email: "priya.sharma@example.com", phone: "+1 905-555-0199", dob: "1988-06-15", gender: "Female", status: "active", enrolledAt: "2025-10-20", lastActive: "2026-03-11", healthGoals: 4, healthGoalsTotal: 5, surveysDone: 7, surveysTotal: 10, latestMetrics: { bpSystolic: 125, bpDiastolic: 82, weight: 68.3, painLevel: 3 }, flags: [] },
-  { id: "p7", firstName: "James", lastName: "Kowalski", email: "james.kowalski@example.com", phone: "+1 204-555-0144", dob: "1972-03-08", gender: "Male", status: "active", enrolledAt: "2025-09-15", lastActive: "2026-03-08", healthGoals: 2, healthGoalsTotal: 4, surveysDone: 9, surveysTotal: 10, latestMetrics: { bpSystolic: 142, bpDiastolic: 92, weight: 98.7, painLevel: 6 }, flags: ["High BP reported", "High pain reported"] },
-  { id: "p8", firstName: "Fatima", lastName: "Al-Rashid", email: "fatima.alrashid@example.com", phone: "+1 416-555-0188", dob: "1996-11-22", gender: "Female", status: "inactive", enrolledAt: "2025-12-01", lastActive: "2026-01-15", healthGoals: 0, healthGoalsTotal: 0, surveysDone: 1, surveysTotal: 10, latestMetrics: { bpSystolic: 115, bpDiastolic: 74, weight: 58.9, painLevel: 0 }, flags: ["Inactive 3+ weeks", "No health goals"] },
-];
+function transformParticipant(p) {
+  const nameParts = (p.name || "").split(" ");
+  const firstName = nameParts[0] || "";
+  const lastName = nameParts.slice(1).join(" ") || "";
 
-const MOCK_GROUP = { id: "g1", name: "Morning Cohort A" };
+  // Map backend activity status → simple active/inactive
+  const isActive = p.status !== "inactive";
 
-const MOCK_INVITES = [
-  { id: "inv1", email: "new.participant1@example.com", status: "pending", sentAt: "2026-03-12", expiresAt: "2026-03-19" },
-  { id: "inv2", email: "new.participant2@example.com", status: "pending", sentAt: "2026-03-10", expiresAt: "2026-03-17" },
-  { id: "inv3", email: "sarah.chen@example.com", status: "accepted", sentAt: "2025-10-28", acceptedAt: "2025-11-03", expiresAt: "2025-11-04" },
-  { id: "inv4", email: "marcus.webb@example.com", status: "accepted", sentAt: "2025-11-01", acceptedAt: "2025-11-10", expiresAt: "2025-11-08" },
-  { id: "inv5", email: "aiko.tanaka@example.com", status: "accepted", sentAt: "2025-12-20", acceptedAt: "2026-01-05", expiresAt: "2025-12-27" },
-  { id: "inv6", email: "omar.diallo@example.com", status: "accepted", sentAt: "2026-02-20", acceptedAt: "2026-02-28", expiresAt: "2026-02-27" },
-  { id: "inv7", email: "old.invite@example.com", status: "expired", sentAt: "2025-09-01", expiresAt: "2025-09-08" },
-  { id: "inv8", email: "never.replied@example.com", status: "expired", sentAt: "2026-01-15", expiresAt: "2026-01-22" },
-  { id: "inv9", email: "james.kowalski@example.com", status: "accepted", sentAt: "2025-09-08", acceptedAt: "2025-09-15", expiresAt: "2025-09-15" },
-  { id: "inv10", email: "priya.sharma@example.com", status: "accepted", sentAt: "2025-10-12", acceptedAt: "2025-10-20", expiresAt: "2025-10-19" },
-  { id: "inv11", email: "lily.hartmann@example.com", status: "accepted", sentAt: "2025-08-05", acceptedAt: "2025-08-14", expiresAt: "2025-08-12" },
-  { id: "inv12", email: "fatima.alrashid@example.com", status: "accepted", sentAt: "2025-11-22", acceptedAt: "2025-12-01", expiresAt: "2025-11-29" },
-  { id: "inv13", email: "revoked.person@example.com", status: "revoked", sentAt: "2026-02-05", revokedAt: "2026-02-08", expiresAt: "2026-02-12" },
-];
+  // Map survey_progress enum → numeric approximation for progress bars
+  const surveyMap = { not_started: 0, in_progress: 50, completed: 100 };
+  const surveyPct = surveyMap[p.survey_progress] ?? 0;
+
+  // Map goal_progress enum → numeric approximation
+  const goalMap = { not_started: 0, in_progress: 50, completed: 100 };
+  const goalPct = goalMap[p.goal_progress] ?? 0;
+
+  // Build flags from status
+  const flags = [];
+  if (p.status === "inactive") flags.push("Inactive");
+  if (p.status === "low_active") flags.push("Low activity");
+  if (p.survey_progress === "not_started") flags.push("No surveys completed");
+
+  return {
+    id: p.participant_id,
+    firstName,
+    lastName,
+    email: p.email || "",
+    phone: p.phone || "",
+    dob: p.dob || null,
+    gender: p.gender || "—",
+    status: isActive ? "active" : "inactive",
+    enrolledAt: p.enrolled_at || null,
+    lastActive: p.last_login_at || p.last_submission_at || null,
+    healthGoals: goalPct === 100 ? 1 : 0,
+    healthGoalsTotal: goalPct > 0 ? 1 : 0,
+    surveysDone: surveyPct,
+    surveysTotal: 100,
+    latestMetrics: null,
+    flags,
+  };
+}
+
+function transformGroup(g) {
+  return {
+    id: g.group_id,
+    name: g.name,
+    description: g.description || "",
+  };
+}
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
 
@@ -202,9 +219,6 @@ function InviteModal({ group, onDone, onCancel }) {
     setSending(true);
     setError(null);
     try {
-      // Uses the existing /auth/signup_invite endpoint
-      // TODO (Phase 2): extend SignupInviteRequest to accept group_id so
-      //   the participant is auto-assigned to this caretaker's group on registration.
       await api.sendInvite(email.trim(), "participant");
       setSent(true);
     } catch (err) {
@@ -291,7 +305,6 @@ function NoteModal({ participant, onSave, onCancel }) {
       await api.caretakerCreateNote(participant.id, text.trim());
       onSave(text.trim());
     } catch (err) {
-      // If backend not ready, still close with success (mock mode)
       console.warn("Note save failed (backend may not be ready):", err.message);
       onSave(text.trim());
     } finally {
@@ -515,13 +528,12 @@ function ParticipantDetailPanel({ participant: p, onClose, onViewFull }) {
             <Avatar firstName={p.firstName} lastName={p.lastName} size="lg" />
             <div className="min-w-0">
               <p className="text-lg font-bold text-slate-800">{p.firstName} {p.lastName}</p>
-              <p className="text-xs text-slate-400 truncate">{p.email}</p>
+              <p className="text-xs text-slate-400 truncate">{p.email || "—"}</p>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                 <div className="flex items-center gap-1.5"><StatusDot status={p.status} /><span className="text-xs text-slate-400 capitalize">{p.status}</span></div>
+                {getAge(p.dob) !== null && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-slate-400">Age {getAge(p.dob)}</span></>}
                 <span className="text-xs text-slate-300">·</span>
-                <span className="text-xs text-slate-400">Age {getAge(p.dob)}</span>
-                <span className="text-xs text-slate-300">·</span>
-                <span className="text-xs text-slate-400">Last active {daysSince(p.lastActive)}</span>
+                <span className="text-xs text-slate-400">Last active {daysSince(p.lastActive) || "—"}</span>
               </div>
             </div>
           </div>
@@ -535,7 +547,7 @@ function ParticipantDetailPanel({ participant: p, onClose, onViewFull }) {
           )}
           <div className="px-5 py-4 border-b border-slate-100">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Personal Info</p>
-            <InfoRow label="Date of Birth" value={`${fmt(p.dob)} (age ${getAge(p.dob)})`} />
+            <InfoRow label="Date of Birth" value={p.dob ? `${fmt(p.dob)} (age ${getAge(p.dob)})` : "—"} />
             <InfoRow label="Gender" value={p.gender} />
             <InfoRow label="Phone" value={p.phone} />
             <InfoRow label="Enrolled" value={fmt(p.enrolledAt)} />
@@ -576,6 +588,125 @@ function ParticipantDetailPanel({ participant: p, onClose, onViewFull }) {
   );
 }
 
+// ─── Placeholder: No Groups Assigned ─────────────────────────────────────────
+
+function NoGroupsPlaceholder() {
+  return (
+    <div className="max-w-6xl mx-auto space-y-5 p-2 md:p-0">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">My Participants</h1>
+        <p className="text-sm text-slate-400 mt-1">Manage and monitor your assigned participants.</p>
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="px-6 py-16 flex flex-col items-center text-center">
+          <div className="w-16 h-16 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center mb-5">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <h2 className="text-lg font-bold text-slate-800">No groups assigned yet</h2>
+          <p className="text-sm text-slate-400 mt-2 max-w-md">
+            You haven't been assigned to any participant groups. Once an admin assigns you to a group, your participants will appear here.
+          </p>
+          <div className="mt-8 w-full max-w-sm space-y-3">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">What you'll be able to do</p>
+            <div className="grid grid-cols-1 gap-2">
+              {[
+                { icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2", label: "View participant submissions" },
+                { icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z", label: "Generate health reports" },
+                { icon: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z", label: "Provide feedback on progress" },
+              ].map((item, i) => (
+                <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-50 border border-slate-100 text-left">
+                  <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} /></svg>
+                  </div>
+                  <span className="text-sm text-slate-600">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="mt-8 flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-left max-w-sm w-full">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <p className="text-xs text-blue-700">Contact your administrator to be assigned to a participant group.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Placeholder: Group Exists but No Participants ───────────────────────────
+
+function NoParticipantsPlaceholder({ group, onInvite }) {
+  return (
+    <div className="max-w-6xl mx-auto space-y-5 p-2 md:p-0">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">My Participants</h1>
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            {group.name}
+          </span>
+          <span className="text-xs text-slate-400">0 participants</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {["Total", "Active", "Inactive", "Flagged"].map(label => (
+          <div key={label} className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4">
+            <p className="text-2xl font-extrabold text-slate-300">0</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">{label}</p>
+          </div>
+        ))}
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="px-6 py-14 flex flex-col items-center text-center">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
+          </div>
+          <h2 className="text-lg font-bold text-slate-800">No participants yet</h2>
+          <p className="text-sm text-slate-400 mt-2 max-w-md">
+            Your group <span className="font-semibold text-slate-600">"{group.name}"</span> doesn't have any participants yet. Invite participants to get started.
+          </p>
+          <button onClick={onInvite} className="mt-6 inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
+            Invite Participant
+          </button>
+          <div className="mt-6 flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-left max-w-sm w-full">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <p className="text-xs text-amber-700">Invited participants will appear here once they accept their invitation and complete registration.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Placeholder: Error State ────────────────────────────────────────────────
+
+function ErrorPlaceholder({ onRetry }) {
+  return (
+    <div className="max-w-6xl mx-auto space-y-5 p-2 md:p-0">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">My Participants</h1>
+        <p className="text-sm text-slate-400 mt-1">Manage and monitor your assigned participants.</p>
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="px-6 py-14 flex flex-col items-center text-center">
+          <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+          </div>
+          <h2 className="text-lg font-bold text-slate-800">Something went wrong</h2>
+          <p className="text-sm text-slate-400 mt-2 max-w-md">We couldn't load your participant data. This could be a temporary connection issue.</p>
+          <button onClick={onRetry} className="mt-6 inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors shadow-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+            Try Again
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_FILTERS = { status: "all", gender: "all", flagged: "all", ageMin: "", ageMax: "", surveyProgress: "all", goalProgress: "all" };
@@ -588,6 +719,7 @@ export default function MyParticipantsPage() {
   const [invites, setInvites] = useState([]);
   const [view, setView] = useState("participants");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
@@ -629,29 +761,40 @@ export default function MyParticipantsPage() {
     setShowInvite(false);
   }
 
-  // ── Data fetching (falls back to mock) ──────────────────────────────────────
+  // ── Data fetching ──────────────────────────────────────────────────────────
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setError(false);
     try {
       const [participantData, groupData] = await Promise.all([
-        api.caretakerListParticipants(),
-        api.caretakerGetGroups(),
+        api.caretakerListParticipants().catch(() => []),
+        api.caretakerGetGroups().catch(() => []),
       ]);
-      setParticipants(participantData);
-      setGroup(groupData?.[0] ?? null);
+
+      // Transform backend response to the shape the UI expects
+      const transformed = Array.isArray(participantData)
+        ? participantData.map(transformParticipant)
+        : [];
+      setParticipants(transformed);
+
+      const firstGroup = Array.isArray(groupData) && groupData.length > 0
+        ? transformGroup(groupData[0])
+        : null;
+      setGroup(firstGroup);
     } catch (err) {
-      console.warn("Backend not ready, using mock data:", err.message);
-      setParticipants(MOCK_PARTICIPANTS);
-      setGroup(MOCK_GROUP);
+      console.error("Failed to load caretaker data:", err);
+      setError(true);
     }
+
     // Fetch invites separately (non-blocking)
     try {
       const inviteData = await api.caretakerListInvites();
-      setInvites(inviteData);
+      setInvites(Array.isArray(inviteData) ? inviteData : []);
     } catch {
-      setInvites(MOCK_INVITES);
+      setInvites([]);
     }
+
     setLoading(false);
   }, []);
 
@@ -692,11 +835,11 @@ export default function MyParticipantsPage() {
         case "name": return dir * `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
         case "age": return dir * ((getAge(a.dob) ?? 0) - (getAge(b.dob) ?? 0));
         case "status": return dir * a.status.localeCompare(b.status);
-        case "gender": return dir * a.gender.localeCompare(b.gender);
+        case "gender": return dir * (a.gender || "").localeCompare(b.gender || "");
         case "surveys": return dir * (pct(a.surveysDone, a.surveysTotal) - pct(b.surveysDone, b.surveysTotal));
         case "goals": return dir * (pct(a.healthGoals, a.healthGoalsTotal) - pct(b.healthGoals, b.healthGoalsTotal));
-        case "lastActive": return dir * (new Date(a.lastActive) - new Date(b.lastActive));
-        case "enrolled": return dir * (new Date(a.enrolledAt) - new Date(b.enrolledAt));
+        case "lastActive": return dir * (new Date(a.lastActive || 0) - new Date(b.lastActive || 0));
+        case "enrolled": return dir * (new Date(a.enrolledAt || 0) - new Date(b.enrolledAt || 0));
         default: return 0;
       }
     });
@@ -727,6 +870,20 @@ export default function MyParticipantsPage() {
         </div>
       </div>
     );
+  }
+
+  // ── Empty / Error states ───────────────────────────────────────────────────
+
+  if (error) {
+    return <ErrorPlaceholder onRetry={() => { setError(false); fetchData(); }} />;
+  }
+
+  if (!group) {
+    return <NoGroupsPlaceholder />;
+  }
+
+  if (participants.length === 0) {
+    return <NoParticipantsPlaceholder group={group} onInvite={() => setShowInvite(true)} />;
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -846,10 +1003,10 @@ export default function MyParticipantsPage() {
                     <Avatar firstName={p.firstName} lastName={p.lastName} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2"><p className="text-sm font-semibold text-slate-800 truncate">{p.firstName} {p.lastName}</p><StatusDot status={p.status} /></div>
-                      <p className="text-xs text-slate-400 truncate">{p.email}</p>
+                      <p className="text-xs text-slate-400 truncate">{p.email || "—"}</p>
                       {p.flags.length > 0 && <div className="flex items-center gap-1 mt-1 flex-wrap">{p.flags.map((f, i) => <FlagBadge key={i} text={f} />)}</div>}
                       <div className="md:hidden mt-2 space-y-1.5">
-                        <div className="flex items-center gap-3 text-xs text-slate-400"><span>{age !== null ? `${age} yrs` : "—"}</span><span>·</span><span>{p.gender}</span><span>·</span><span className={p.status === "inactive" ? "text-amber-600 font-medium" : ""}>{daysSince(p.lastActive)}</span></div>
+                        <div className="flex items-center gap-3 text-xs text-slate-400"><span>{age !== null ? `${age} yrs` : "—"}</span><span>·</span><span>{p.gender}</span><span>·</span><span className={p.status === "inactive" ? "text-amber-600 font-medium" : ""}>{daysSince(p.lastActive) || "—"}</span></div>
                         <div><div className="flex justify-between text-xs mb-0.5"><span className="text-slate-400">Surveys</span><span className="font-semibold text-slate-500">{p.surveysDone}/{p.surveysTotal}</span></div><div className="w-full bg-slate-200 rounded-full h-1 overflow-hidden"><div className="bg-blue-500 h-1 rounded-full" style={{ width: `${sPct}%` }} /></div></div>
                         <div><div className="flex justify-between text-xs mb-0.5"><span className="text-slate-400">Goals</span><span className="font-semibold text-slate-500">{p.healthGoals}/{p.healthGoalsTotal || 0}</span></div><div className="w-full bg-slate-200 rounded-full h-1 overflow-hidden"><div className="bg-indigo-500 h-1 rounded-full" style={{ width: `${gPct}%` }} /></div></div>
                       </div>
@@ -861,7 +1018,7 @@ export default function MyParticipantsPage() {
                     <div className="flex items-center gap-2"><span className="text-xs text-slate-400 w-14 shrink-0">Surveys</span><div className="flex-1 bg-slate-200 rounded-full h-1 overflow-hidden"><div className="bg-blue-500 h-1 rounded-full" style={{ width: `${sPct}%` }} /></div><span className="text-xs font-semibold text-slate-500 w-9 text-right">{p.surveysDone}/{p.surveysTotal}</span></div>
                     <div className="flex items-center gap-2"><span className="text-xs text-slate-400 w-14 shrink-0">Goals</span><div className="flex-1 bg-slate-200 rounded-full h-1 overflow-hidden"><div className="bg-indigo-500 h-1 rounded-full" style={{ width: `${gPct}%` }} /></div><span className="text-xs font-semibold text-slate-500 w-9 text-right">{p.healthGoals}/{p.healthGoalsTotal || 0}</span></div>
                   </div>
-                  <div className="hidden md:block w-24 text-center"><span className={`text-xs font-medium ${p.status === "inactive" ? "text-amber-600" : "text-slate-400"}`}>{daysSince(p.lastActive)}</span></div>
+                  <div className="hidden md:block w-24 text-center"><span className={`text-xs font-medium ${p.status === "inactive" ? "text-amber-600" : "text-slate-400"}`}>{daysSince(p.lastActive) || "—"}</span></div>
                   <div className="hidden md:flex w-20 items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
                     <button onClick={() => setNoteTarget(p)} title="Write feedback" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg></button>
                     <button onClick={() => navigate(`/caretaker/reports?tab=comparison&participant=${p.id}`)} title="Generate report" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg></button>
