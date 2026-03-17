@@ -180,15 +180,23 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(check_current_user),
 ):
+    """Get current authenticated user"""
+    from app.services.onboarding_service import check_intake_completed
+
     user_queries = UserQuery(db)
     user_roles = await user_queries.get_user_roles(user.user_id)
-    """Get current authenticated user"""
+
+    intake_completed = None
+    if any(r == "participant" for r in user_roles):
+        intake_completed = await check_intake_completed(user.user_id, db)
+
     return {
         "user_id": str(user.user_id),
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
         "Role": user_roles,
+        "intake_completed": intake_completed,
     }
 
 

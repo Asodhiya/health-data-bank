@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { sanitizeText, sanitizeNumber, trimPayload } from '../../utils/sanitize';
+import { sanitizeText, sanitizeNumber } from '../../utils/sanitize';
+import { api } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 /* ── Reusable chip selector (single or multi select) ── */
 function ChipSelect({ options, value, onChange, multi = false }) {
@@ -52,6 +54,17 @@ function Q({ num, label, required = true, children }) {
 
 export default function IntakePage() {
   const navigate = useNavigate();
+  const { refetch } = useAuth();
+  const fieldMapRef = useRef({});  // display_order → field_id
+
+  // Fetch intake form field IDs on mount
+  useEffect(() => {
+    api.getIntakeForm().then((form) => {
+      const map = {};
+      form.fields.forEach((f) => { map[f.display_order] = f.field_id; });
+      fieldMapRef.current = map;
+    }).catch(() => {});
+  }, []);
 
   // ── Demographics ──
   const [dob, setDob] = useState('');
@@ -65,6 +78,9 @@ export default function IntakePage() {
   const [country, setCountry] = useState('');
 
   // ── Lifestyle questions ──
+  const [maritalStatus, setMaritalStatus] = useState('');
+  const [highestEducation, setHighestEducation] = useState('');
+
   const [q1, setQ1] = useState('');
   const [q1Other, setQ1Other] = useState('');
   const [q2, setQ2] = useState('');
@@ -119,6 +135,7 @@ export default function IntakePage() {
   */
   const isValid = () => {
     if (!dob || !sex || !pronounsValid || !program || !yearOfStudy || !language || !international) return false;
+    if (!maritalStatus || !highestEducation) return false;
     if (!q1) return false;
     if (q1 === 'Other' && !q1Other.trim()) return false;
     if (!q2) return false;
@@ -134,43 +151,51 @@ export default function IntakePage() {
     return true;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!isValid()) {
       setError('Please complete all required fields before submitting.');
       return;
     }
     setError('');
 
-    // TODO: Send intake data to backend API
-    // trimPayload trims every string right before sending
-    // const payload = trimPayload({
-    //   demographics: {
-    //     dob, sex,
-    //     pronouns: pronouns === 'Other' ? pronounsOther : pronouns,
-    //     program, yearOfStudy, language,
-    //     international,
-    //     country: international === 'Yes' ? country || null : null,
-    //   },
-    //   questions: {
-    //     living: q1 === 'Other' ? q1Other : q1,
-    //     dependents: q2 === 'Yes' ? q2Specify : 'No',
-    //     transportation: q3.includes('Other') ? [...q3.filter(v => v !== 'Other'), q3Other] : q3,
-    //     work: q4,
-    //     stress_sources: q5,
-    //     substances: q6.includes('Other drugs') ? [...q6.filter(v => v !== 'Other drugs'), q6Other] : q6,
-    //     food_barriers: q7.includes('Other') ? [...q7.filter(v => v !== 'Other'), q7Other] : q7,
-    //     meal_locations: q8.includes('Other') ? [...q8.filter(v => v !== 'Other'), q8Other] : q8,
-    //     eat_alone_or_others: q9,
-    //     aerobic_days_per_week: Number(q10),
-    //     aerobic_minutes: Number(q11),
-    //     exercise_focus: q12,
-    //     sitting_hours: q13,
-    //   },
-    //   submitted_at: new Date().toISOString(),
-    // });
-    // await api.submitIntake(payload);
+    const fm = fieldMapRef.current;
 
-    navigate('/participant');
+    const profile = {
+      dob,
+      gender: sex,
+      pronouns: pronouns === 'Other' ? pronounsOther : pronouns,
+      primary_language: language,
+      living_arrangement: q1 === 'Other' ? q1Other : q1,
+      dependents: q2 === 'Yes',
+      occupation_status: q4,
+      marital_status: maritalStatus,
+      highest_education_level: highestEducation,
+    };
+
+    const answers = [
+      { field_id: fm[1],  value: program },
+      { field_id: fm[2],  value: yearOfStudy },
+      { field_id: fm[3],  value: international },
+      { field_id: fm[4],  value: international === 'Yes' ? country || null : null },
+      { field_id: fm[5],  value: q3.includes('Other') ? [...q3.filter(v => v !== 'Other'), q3Other] : q3 },
+      { field_id: fm[6],  value: q5 },
+      { field_id: fm[7],  value: q6.includes('Other drugs') ? [...q6.filter(v => v !== 'Other drugs'), q6Other] : q6 },
+      { field_id: fm[8],  value: q7.includes('Other') ? [...q7.filter(v => v !== 'Other'), q7Other] : q7 },
+      { field_id: fm[9],  value: q8.includes('Other') ? [...q8.filter(v => v !== 'Other'), q8Other] : q8 },
+      { field_id: fm[10], value: q9 },
+      { field_id: fm[11], value: Number(q10) },
+      { field_id: fm[12], value: Number(q11) },
+      { field_id: fm[13], value: q12 },
+      { field_id: fm[14], value: q13 },
+    ].filter(a => a.field_id && a.value !== null && a.value !== undefined && a.value !== '');
+
+    try {
+      await api.submitIntake({ profile, answers });
+      await refetch(); // refresh auth context so intake_completed becomes true
+      navigate('/participant');
+    } catch (err) {
+      setError(err.message || 'Failed to submit. Please try again.');
+    }
   };
 
   /* Shared Tailwind input classes */
@@ -259,29 +284,56 @@ export default function IntakePage() {
         )}
       </div>
 
-      {/* International Student — "Yes" reveals optional country field */}
+      {/* Language */}
       <div className="mb-3.5">
         <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-          International Student <span className="text-rose-500">*</span>
+          Language Spoken at Home <span className="text-rose-500">*</span>
         </label>
-        <ChipSelect options={['Yes', 'No']} value={international} onChange={setInternational} />
-        {international === 'Yes' && (
-          <div className="mt-2.5">
-            <input
-              type="text"
-              className={inputClass}
-              placeholder="Which country are you from? (optional)"
-              maxLength={100}
-              value={country}
-              onChange={onText(setCountry, 100)}
-            />
-            <p className="text-xs text-slate-400 mt-1">This is optional — you don't have to share this</p>
-          </div>
-        )}
+        <input
+          type="text"
+          className={inputClass}
+          placeholder="e.g. English"
+          maxLength={100}
+          value={language}
+          onChange={onText(setLanguage, 100)}
+        />
       </div>
 
+      {/* Marital Status */}
+      <div className="mb-3.5">
+        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+          Marital Status <span className="text-rose-500">*</span>
+        </label>
+        <ChipSelect
+          options={['Single', 'Married', 'Common-law', 'Separated', 'Divorced', 'Widowed']}
+          value={maritalStatus}
+          onChange={setMaritalStatus}
+        />
+      </div>
+
+      {/* Highest Education Level */}
+      <div>
+        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+          Highest Education Level <span className="text-rose-500">*</span>
+        </label>
+        <ChipSelect
+          options={['High school', 'Some college/university', "Bachelor's degree", "Master's degree", 'Doctoral degree', 'Trade/vocational']}
+          value={highestEducation}
+          onChange={setHighestEducation}
+        />
+      </div>
+
+      <hr className="border-slate-100 my-5" />
+
+      {/* ═══════════════════════════════════════════════
+          SECTION 2: LIFESTYLE QUESTIONS (1–13)
+      ═══════════════════════════════════════════════ */}
+      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+        Lifestyle &amp; Wellness Questions
+      </p>
+
       {/* Row: Program + Year of Study */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
         <div>
           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
             Undergraduate Program <span className="text-rose-500">*</span>
@@ -303,29 +355,26 @@ export default function IntakePage() {
         </div>
       </div>
 
-      {/* Language */}
-      <div>
+      {/* International Student */}
+      <div className="mb-4">
         <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-          Language Spoken at Home <span className="text-rose-500">*</span>
+          International Student <span className="text-rose-500">*</span>
         </label>
-        <input
-          type="text"
-          className={inputClass}
-          placeholder="e.g. English"
-          maxLength={100}
-          value={language}
-          onChange={onText(setLanguage, 100)}
-        />
+        <ChipSelect options={['Yes', 'No']} value={international} onChange={setInternational} />
+        {international === 'Yes' && (
+          <div className="mt-2.5">
+            <input
+              type="text"
+              className={inputClass}
+              placeholder="Which country are you from? (optional)"
+              maxLength={100}
+              value={country}
+              onChange={onText(setCountry, 100)}
+            />
+            <p className="text-xs text-slate-400 mt-1">This is optional — you don't have to share this</p>
+          </div>
+        )}
       </div>
-
-      <hr className="border-slate-100 my-5" />
-
-      {/* ═══════════════════════════════════════════════
-          SECTION 2: LIFESTYLE QUESTIONS (1–13)
-      ═══════════════════════════════════════════════ */}
-      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-        Lifestyle &amp; Wellness Questions
-      </p>
 
       {/* Q1 */}
       <Q num={1} label="Where do you live?">
