@@ -218,6 +218,38 @@ class ParticipantQuery:
         await self.db.delete(goal)
         await self.db.flush()
 
+    async def get_goal_progress(self, goal_id: uuid.UUID, participant_id: uuid.UUID):
+        result = await self.db.execute(
+            select(HealthGoal).where(
+                HealthGoal.goal_id == goal_id,
+                HealthGoal.participant_id == participant_id
+            )
+        )
+        goal = result.scalar_one_or_none()
+        if not goal:
+            raise HTTPException(status_code=404, detail="Goal not found")
+
+        today = datetime.now(timezone.utc).date()
+        entry_result = await self.db.execute(
+            select(HealthDataPoint).where(
+                HealthDataPoint.participant_id == participant_id,
+                HealthDataPoint.element_id == goal.element_id,
+                HealthDataPoint.source_type == "goal",
+                func.date(HealthDataPoint.observed_at) == today,
+            ).limit(1)
+        )
+        entry = entry_result.scalar_one_or_none()
+
+        current_value = float(entry.value_number) if entry and entry.value_number is not None else 0.0
+        target = float(goal.target_value) if goal.target_value is not None else None
+        return {
+            "goal_id": goal_id,
+            "date": today,
+            "current_value": current_value,
+            "target_value": target,
+            "completed": (current_value >= target) if target is not None else False,
+        }
+
     async def log_progress(self, goal_id: uuid.UUID, participant_id: uuid.UUID, payload: GoalProgressLog):
         result = await self.db.execute(
             select(HealthGoal).where(
