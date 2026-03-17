@@ -104,6 +104,15 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  // ── Intake (onboarding) ──
+  getIntakeForm: () => request('/participant/intake/form'),
+
+  submitIntake: (payload) =>
+    request('/participant/intake', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   // ── Survey Fill (participant) ──
   getDeployedForms: () => request("/participant/surveys/assigned"),
 
