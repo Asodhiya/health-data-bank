@@ -3,12 +3,12 @@ researcher form service
 """
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, delete as sa_delete
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import List, Optional
 
-from app.db.models import SurveyForm, FormField, FieldOption, FormDeployment, Group
+from app.db.models import SurveyForm, FormField, FieldOption, FormDeployment, Group, FieldElementMap
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
 
 async def create_survey_form(form_data: SurveyCreate, user_id: UUID, db: AsyncSession) -> SurveyForm:
@@ -39,6 +39,9 @@ async def create_survey_form(form_data: SurveyCreate, user_id: UUID, db: AsyncSe
         db.add(new_field)
         await db.flush()
 
+        if field_in.element_id:
+            db.add(FieldElementMap(field_id=new_field.field_id, element_id=field_in.element_id))
+
         for option_in in field_in.options:
             new_option = FieldOption(
                 field_id=new_field.field_id,
@@ -64,10 +67,28 @@ async def list_researcher_forms(db: AsyncSession):
     return result.scalars().all()
 
 async def get_form_by_id(form_id: UUID, db: AsyncSession) -> Optional[SurveyForm]:
-    """Get forms by ID"""
-    query = select(SurveyForm).where(SurveyForm.form_id == form_id).options(selectinload(SurveyForm.fields).selectinload(FormField.options))
+    """Get forms by ID, with element_id attached to each field."""
+    query = (
+        select(SurveyForm)
+        .where(SurveyForm.form_id == form_id)
+        .options(selectinload(SurveyForm.fields).selectinload(FormField.options))
+    )
     result = await db.execute(query)
-    return result.scalar_one_or_none()
+    form = result.scalar_one_or_none()
+    if not form:
+        return None
+
+    # Attach element_id to each field from FieldElementMap
+    field_ids = [f.field_id for f in form.fields]
+    if field_ids:
+        map_result = await db.execute(
+            select(FieldElementMap).where(FieldElementMap.field_id.in_(field_ids))
+        )
+        element_map = {row.field_id: row.element_id for row in map_result.scalars().all()}
+        for field in form.fields:
+            field.element_id = element_map.get(field.field_id)
+
+    return form
 
 async def update_survey_form(form_id: UUID,form_data: SurveyCreate,user_id: UUID,db: AsyncSession):
     """Update an existing form"""
@@ -81,12 +102,19 @@ async def update_survey_form(form_id: UUID,form_data: SurveyCreate,user_id: UUID
     if form.status == "PUBLISHED":
         raise HTTPException(status_code=400, detail="Published forms cannot be edited. Unpublish the form first.")
 
+    # Delete FieldElementMap rows before clearing fields to avoid FK violations
+    old_field_ids = [f.field_id for f in form.fields]
+    if old_field_ids:
+        await db.execute(
+            sa_delete(FieldElementMap).where(FieldElementMap.field_id.in_(old_field_ids))
+        )
+
     form.fields = []
     await db.flush()
 
     for field_in in form_data.fields:
         new_field = FormField(
-            form_id=form.form_id,  # Link to existing form
+            form_id=form.form_id,
             label=field_in.label,
             field_type=field_in.field_type,
             is_required=field_in.is_required,
@@ -94,6 +122,9 @@ async def update_survey_form(form_id: UUID,form_data: SurveyCreate,user_id: UUID
         )
         db.add(new_field)
         await db.flush()
+
+        if field_in.element_id:
+            db.add(FieldElementMap(field_id=new_field.field_id, element_id=field_in.element_id))
 
         for option_in in field_in.options:
             new_option = FieldOption(
