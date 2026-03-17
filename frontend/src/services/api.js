@@ -165,9 +165,20 @@ export const api = {
       method: "DELETE",
     }),
 
-  // ── Caretaker ──
-  // Backend stubs: backend/app/api/routes/Caretakers.py
-  // All calls fall back to mock data on the frontend when backend returns 404.
+  // ── Caretaker ──────────────────────────────────────────────────────────────
+  // Backend routes: backend/app/api/routes/Caretakers.py
+
+  // Groups
+  caretakerGetGroups: () => request("/caretaker/groups"),
+
+  caretakerGetGroup: (groupId) => request(`/caretaker/groups/${groupId}`),
+
+  // FIX: added groupId — backend requires group_id as query param
+  caretakerGetGroupMembers: (groupId) =>
+    request(`/caretaker/groups/${groupId}/members`),
+
+  caretakerGetGroupElements: (groupId) =>
+    request(`/caretaker/groups/${groupId}/elements`),
 
   // Participants
   caretakerListParticipants: (params = {}) => {
@@ -175,26 +186,36 @@ export const api = {
     return request(`/caretaker/participants${qs ? `?${qs}` : ""}`);
   },
 
+  // FIX: added groupId — backend requires group_id as query param
   caretakerGetParticipant: (participantId, groupId) =>
     request(`/caretaker/participants/${participantId}?group_id=${groupId}`),
 
-  // Groups
-  caretakerGetGroups: () => request("/caretaker/groups"),
+  caretakerGetActivityCounts: (groupId) => {
+    const qs = groupId ? `?group_id=${groupId}` : "";
+    return request(`/caretaker/participants/activity-counts${qs}`);
+  },
 
-  // Submissions (read-only for caretaker)
+  // FIX: participantId is now a path param (was incorrectly a query param)
   caretakerListSubmissions: (participantId, params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/caretaker/participants/${participantId}/submissions${qs ? `?${qs}` : ""}`);
   },
 
-  caretakerGetSubmission: (submissionId) =>
-    request(`/caretaker/submissions/${submissionId}`),
+  // NEW: Feedback (read + create) — backed by real endpoints
+  caretakerListFeedback: (participantId) =>
+    request(`/caretaker/participants/${participantId}/feedback`),
 
-  // Health Goals (read-only for caretaker)
+  caretakerCreateFeedback: (participantId, submissionId, message) =>
+    request(`/caretaker/participants/${participantId}/submissions/${submissionId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
+  // Health Goals (read-only for caretaker — no endpoint yet)
   caretakerGetParticipantGoals: (participantId) =>
     request(`/caretaker/participants/${participantId}/goals`),
 
-  // Health Trends
+  // Health Trends (no endpoint yet)
   caretakerGetHealthTrends: (participantId, params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(
@@ -202,7 +223,7 @@ export const api = {
     );
   },
 
-  // Notes & Feedback
+  // Notes (no backend endpoint — kept for future use)
   caretakerListNotes: (participantId) =>
     request(`/caretaker/participants/${participantId}/notes`),
 
@@ -222,12 +243,14 @@ export const api = {
     request(`/caretaker/notes/${noteId}`, { method: "DELETE" }),
 
   // Reports
+  // FIX: URL was /reports/group, backend is /reports/group/generate
   caretakerGenerateGroupReport: (groupId, payload) =>
     request(`/caretaker/reports/group/generate?group_id=${groupId}`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
+  // FIX: now accepts queryParams for compare_with, compare_participant_id, group_id
   caretakerGenerateComparisonReport: (participantId, queryParams = {}, payload = {}) => {
     const params = new URLSearchParams({ participant_id: participantId, ...queryParams });
     return request(`/caretaker/reports/comparison?${params.toString()}`, {
@@ -244,6 +267,7 @@ export const api = {
 
   caretakerGetReport: (reportId) => request(`/caretaker/reports/${reportId}`),
 
+  // Invites (no backend endpoint yet)
   caretakerListInvites: () => request("/caretaker/invites"),
 
   caretakerRevokeInvite: (inviteId) =>

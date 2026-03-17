@@ -3,39 +3,29 @@ import { useOutletContext, useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 
 // ─── Transform: Backend → Frontend shape ─────────────────────────────────────
-// Maps the backend ParticipantListItem response to the shape the UI components expect.
-// This bridge will be removed when the UI is refactored to use the backend shape directly.
 
-function transformParticipant(p) {
+function transformParticipant(p, groupsMap) {
   const nameParts = (p.name || "").split(" ");
   const firstName = nameParts[0] || "";
   const lastName = nameParts.slice(1).join(" ") || "";
-
-  // Map backend activity status → simple active/inactive
   const isActive = p.status !== "inactive";
-
-  // Map survey_progress enum → numeric approximation for progress bars
   const surveyMap = { not_started: 0, in_progress: 50, completed: 100 };
-  const surveyPct = surveyMap[p.survey_progress] ?? 0;
-
-  // Map goal_progress enum → numeric approximation
   const goalMap = { not_started: 0, in_progress: 50, completed: 100 };
+  const surveyPct = surveyMap[p.survey_progress] ?? 0;
   const goalPct = goalMap[p.goal_progress] ?? 0;
-
-  // Build flags from status
   const flags = [];
   if (p.status === "inactive") flags.push("Inactive");
   if (p.status === "low_active") flags.push("Low activity");
   if (p.survey_progress === "not_started") flags.push("No surveys completed");
-
+  const gInfo = groupsMap ? groupsMap[p.group_id] : null;
   return {
     id: p.participant_id,
-    firstName,
-    lastName,
+    firstName, lastName,
     email: p.email || "",
     phone: p.phone || "",
     dob: p.dob || null,
     gender: p.gender || "—",
+    age: p.age != null ? Math.round(p.age) : null,
     status: isActive ? "active" : "inactive",
     enrolledAt: p.enrolled_at || null,
     lastActive: p.last_login_at || p.last_submission_at || null,
@@ -45,15 +35,13 @@ function transformParticipant(p) {
     surveysTotal: 100,
     latestMetrics: null,
     flags,
+    groupId: p.group_id || null,
+    groupName: gInfo ? gInfo.name : null,
   };
 }
 
 function transformGroup(g) {
-  return {
-    id: g.group_id,
-    name: g.name,
-    description: g.description || "",
-  };
+  return { id: g.group_id, name: g.name, description: g.description || "" };
 }
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
@@ -127,6 +115,114 @@ function SortButton({ label, field, currentSort, onSort, className = "" }) {
       {label}
       {isActive && <ChevronIcon direction={currentSort.dir === "asc" ? "up" : "down"} className="text-blue-600" />}
     </button>
+  );
+}
+
+function Tip({ text, children }) {
+  return (
+    <div className="relative group/tip inline-flex">
+      {children}
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg opacity-0 group-hover/tip:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-lg">
+        {text}
+        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-800 rotate-45" />
+      </div>
+    </div>
+  );
+}
+
+function InviteStatusBadge({ status }) {
+  const styles = { pending: "bg-amber-50 text-amber-700 border-amber-200", accepted: "bg-emerald-50 text-emerald-700 border-emerald-200", expired: "bg-slate-100 text-slate-500 border-slate-200", revoked: "bg-rose-50 text-rose-700 border-rose-200" };
+  const icons = {
+    pending: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+    accepted: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+    expired: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+    revoked: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>,
+  };
+  return <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${styles[status] || styles.pending}`}>{icons[status]} {status}</span>;
+}
+
+// ─── NEW: Group Badge ───────────────────────────────────────────────────────────
+
+const GROUP_COLORS = [
+  { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
+  { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
+  { bg: "bg-violet-50", text: "text-violet-700", border: "border-violet-200" },
+  { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" },
+  { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200" },
+  { bg: "bg-cyan-50", text: "text-cyan-700", border: "border-cyan-200" },
+];
+
+function getGroupColor(groupId, groups) {
+  const idx = groups.findIndex(g => g.id === groupId);
+  return GROUP_COLORS[idx >= 0 ? idx % GROUP_COLORS.length : 0];
+}
+
+function GroupBadge({ groupId, groupName, groups, size = "sm" }) {
+  const c = getGroupColor(groupId, groups);
+  const sz = size === "lg" ? "text-sm px-3 py-1" : "text-xs px-2 py-0.5";
+  return (
+    <span className={`inline-flex items-center gap-1.5 font-semibold ${c.bg} ${c.text} border ${c.border} ${sz} rounded-full`}>
+      <svg xmlns="http://www.w3.org/2000/svg" className={size === "lg" ? "h-3.5 w-3.5" : "h-3 w-3"} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+      {groupName}
+    </span>
+  );
+}
+
+// ─── NEW: Group Selector ────────────────────────────────────────────────────────
+
+function GroupSelector({ groups, allParticipants, selectedGroupId, onChange }) {
+  const [open, setOpen] = useState(false);
+  const selectedGroup = selectedGroupId === "all" ? null : groups.find(g => g.id === selectedGroupId);
+  const label = selectedGroup ? selectedGroup.name : "All Groups";
+  const totalCount = allParticipants.length;
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(!open)}
+        className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm w-full sm:w-auto">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+        <span className="truncate">{label}</span>
+        <span className="text-xs text-slate-400 font-normal ml-1">
+          ({selectedGroupId === "all" ? `${totalCount} total` : `${allParticipants.filter(p => p.groupId === selectedGroupId).length} members`})
+        </span>
+        <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 text-slate-400 transition-transform ml-auto sm:ml-0 ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (<>
+        <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+        <div className="absolute left-0 top-full mt-1.5 z-20 w-full sm:w-80 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+          <button onClick={() => { onChange("all"); setOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${selectedGroupId === "all" ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${selectedGroupId === "all" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className={`text-sm font-semibold ${selectedGroupId === "all" ? "text-blue-700" : "text-slate-700"}`}>All Groups</p>
+              <p className="text-xs text-slate-400">{totalCount} participants across {groups.length} groups</p>
+            </div>
+            {selectedGroupId === "all" && <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+          </button>
+          <div className="border-t border-slate-100" />
+          {groups.map(g => {
+            const memberCount = allParticipants.filter(p => p.groupId === g.id).length;
+            const isSelected = selectedGroupId === g.id;
+            const gc = getGroupColor(g.id, groups);
+            return (
+              <button key={g.id} onClick={() => { onChange(g.id); setOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${isSelected ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isSelected ? "bg-blue-600 text-white" : `${gc.bg} ${gc.text}`}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-semibold ${isSelected ? "text-blue-700" : "text-slate-700"}`}>{g.name}</p>
+                  <p className="text-xs text-slate-400">{memberCount} participants</p>
+                </div>
+                {isSelected && <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+              </button>
+            );
+          })}
+        </div>
+      </>)}
+    </div>
   );
 }
 
@@ -335,33 +431,6 @@ function NoteModal({ participant, onSave, onCancel }) {
   );
 }
 
-// ─── Tooltip ────────────────────────────────────────────────────────────────────
-
-function Tip({ text, children }) {
-  return (
-    <div className="relative group/tip inline-flex">
-      {children}
-      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg opacity-0 group-hover/tip:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-lg">
-        {text}
-        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-800 rotate-45" />
-      </div>
-    </div>
-  );
-}
-
-// ─── Invite Status Badge ────────────────────────────────────────────────────────
-
-function InviteStatusBadge({ status }) {
-  const styles = { pending: "bg-amber-50 text-amber-700 border-amber-200", accepted: "bg-emerald-50 text-emerald-700 border-emerald-200", expired: "bg-slate-100 text-slate-500 border-slate-200", revoked: "bg-rose-50 text-rose-700 border-rose-200" };
-  const icons = {
-    pending: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
-    accepted: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
-    expired: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
-    revoked: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>,
-  };
-  return <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${styles[status] || styles.pending}`}>{icons[status]} {status}</span>;
-}
-
 // ─── Invites Panel ──────────────────────────────────────────────────────────────
 
 function InvitesPanel({ invites, onRevoke, onResend, onOpenInviteModal }) {
@@ -508,9 +577,9 @@ function InvitesPanel({ invites, onRevoke, onResend, onOpenInviteModal }) {
   );
 }
 
-// ─── Detail Panel ───────────────────────────────────────────────────────────────
+// ─── Detail Panel (UPDATED: now shows GroupBadge) ───────────────────────────────
 
-function ParticipantDetailPanel({ participant: p, onClose, onViewFull }) {
+function ParticipantDetailPanel({ participant: p, groups, onClose, onViewFull }) {
   const sPct = Math.round(pct(p.surveysDone, p.surveysTotal));
   const gPct = Math.round(pct(p.healthGoals, p.healthGoalsTotal));
   return (
@@ -531,10 +600,13 @@ function ParticipantDetailPanel({ participant: p, onClose, onViewFull }) {
               <p className="text-xs text-slate-400 truncate">{p.email || "—"}</p>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                 <div className="flex items-center gap-1.5"><StatusDot status={p.status} /><span className="text-xs text-slate-400 capitalize">{p.status}</span></div>
-                {getAge(p.dob) !== null && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-slate-400">Age {getAge(p.dob)}</span></>}
+                {p.age != null && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-slate-400">Age {p.age}</span></>}
+                {getAge(p.dob) !== null && !p.age && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-slate-400">Age {getAge(p.dob)}</span></>}
                 <span className="text-xs text-slate-300">·</span>
                 <span className="text-xs text-slate-400">Last active {daysSince(p.lastActive) || "—"}</span>
               </div>
+              {/* NEW: Group badge */}
+              {p.groupName && <div className="mt-2"><GroupBadge groupId={p.groupId} groupName={p.groupName} groups={groups} size="lg" /></div>}
             </div>
           </div>
           {p.flags.length > 0 && (
@@ -715,7 +787,8 @@ export default function MyParticipantsPage() {
   const { user } = useOutletContext();
   const navigate = useNavigate();
   const [participants, setParticipants] = useState([]);
-  const [group, setGroup] = useState(null);
+  const [groups, setGroups] = useState([]);
+  const [selectedGroupId, setSelectedGroupId] = useState("all");
   const [invites, setInvites] = useState([]);
   const [view, setView] = useState("participants");
   const [loading, setLoading] = useState(true);
@@ -772,16 +845,18 @@ export default function MyParticipantsPage() {
         api.caretakerGetGroups().catch(() => []),
       ]);
 
-      // Transform backend response to the shape the UI expects
+      // Build groups list and lookup map
+      const transformedGroups = Array.isArray(groupData) ? groupData.map(transformGroup) : [];
+      setGroups(transformedGroups);
+
+      const gMap = {};
+      (Array.isArray(groupData) ? groupData : []).forEach(g => { gMap[g.group_id] = g; });
+
+      // Transform participants with group info
       const transformed = Array.isArray(participantData)
-        ? participantData.map(transformParticipant)
+        ? participantData.map(p => transformParticipant(p, gMap))
         : [];
       setParticipants(transformed);
-
-      const firstGroup = Array.isArray(groupData) && groupData.length > 0
-        ? transformGroup(groupData[0])
-        : null;
-      setGroup(firstGroup);
     } catch (err) {
       console.error("Failed to load caretaker data:", err);
       setError(true);
@@ -806,18 +881,25 @@ export default function MyParticipantsPage() {
     setSort(prev => prev.field === field ? { field, dir: prev.dir === "asc" ? "desc" : "asc" } : { field, dir: "asc" });
   }
 
+  // ── Group pre-filter ───────────────────────────────────────────────────────
+
+  const groupFiltered = useMemo(() => {
+    if (selectedGroupId === "all") return participants;
+    return participants.filter(p => p.groupId === selectedGroupId);
+  }, [participants, selectedGroupId]);
+
   // ── Filter + Sort logic ─────────────────────────────────────────────────────
 
   const processed = useMemo(() => {
-    let list = participants.filter(p => {
+    let list = groupFiltered.filter(p => {
       const q = search.toLowerCase();
       if (q && !`${p.firstName} ${p.lastName} ${p.email}`.toLowerCase().includes(q)) return false;
       if (filters.status !== "all" && p.status !== filters.status) return false;
       if (filters.gender !== "all" && p.gender !== filters.gender) return false;
       if (filters.flagged === "flagged" && p.flags.length === 0) return false;
       if (filters.flagged === "clear" && p.flags.length > 0) return false;
-      if (filters.ageMin) { const age = getAge(p.dob); if (age === null || age < Number(filters.ageMin)) return false; }
-      if (filters.ageMax) { const age = getAge(p.dob); if (age === null || age > Number(filters.ageMax)) return false; }
+      if (filters.ageMin) { const age = p.age ?? getAge(p.dob); if (age === null || age < Number(filters.ageMin)) return false; }
+      if (filters.ageMax) { const age = p.age ?? getAge(p.dob); if (age === null || age > Number(filters.ageMax)) return false; }
       const sp = pct(p.surveysDone, p.surveysTotal);
       if (filters.surveyProgress === "complete" && sp < 100) return false;
       if (filters.surveyProgress === "in_progress" && (sp <= 0 || sp >= 100)) return false;
@@ -833,7 +915,7 @@ export default function MyParticipantsPage() {
     list.sort((a, b) => {
       switch (sort.field) {
         case "name": return dir * `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
-        case "age": return dir * ((getAge(a.dob) ?? 0) - (getAge(b.dob) ?? 0));
+        case "age": return dir * ((a.age ?? getAge(a.dob) ?? 0) - (b.age ?? getAge(b.dob) ?? 0));
         case "status": return dir * a.status.localeCompare(b.status);
         case "gender": return dir * (a.gender || "").localeCompare(b.gender || "");
         case "surveys": return dir * (pct(a.surveysDone, a.surveysTotal) - pct(b.surveysDone, b.surveysTotal));
@@ -844,16 +926,18 @@ export default function MyParticipantsPage() {
       }
     });
     return list;
-  }, [participants, search, filters, sort]);
+  }, [groupFiltered, search, filters, sort]);
 
   const counts = useMemo(() => ({
-    total: participants.length,
-    active: participants.filter(p => p.status === "active").length,
-    inactive: participants.filter(p => p.status === "inactive").length,
-    flagged: participants.filter(p => p.flags.length > 0).length,
-  }), [participants]);
+    total: groupFiltered.length,
+    active: groupFiltered.filter(p => p.status === "active").length,
+    inactive: groupFiltered.filter(p => p.status === "inactive").length,
+    flagged: groupFiltered.filter(p => p.flags.length > 0).length,
+  }), [groupFiltered]);
 
   const activeFilterCount = [filters.status !== "all", filters.gender !== "all", filters.flagged !== "all", filters.ageMin || filters.ageMax, filters.surveyProgress !== "all", filters.goalProgress !== "all"].filter(Boolean).length;
+  const showGroupColumn = selectedGroupId === "all";
+  const selectedGroupName = selectedGroupId === "all" ? null : groups.find(g => g.id === selectedGroupId)?.name;
 
   // ── Loading state ───────────────────────────────────────────────────────────
 
@@ -878,12 +962,13 @@ export default function MyParticipantsPage() {
     return <ErrorPlaceholder onRetry={() => { setError(false); fetchData(); }} />;
   }
 
-  if (!group) {
+  if (groups.length === 0) {
     return <NoGroupsPlaceholder />;
   }
 
   if (participants.length === 0) {
-    return <NoParticipantsPlaceholder group={group} onInvite={() => setShowInvite(true)} />;
+    const selectedGroup = selectedGroupId !== "all" ? groups.find(g => g.id === selectedGroupId) : groups[0];
+    return <NoParticipantsPlaceholder group={selectedGroup || groups[0]} onInvite={() => setShowInvite(true)} />;
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -896,25 +981,25 @@ export default function MyParticipantsPage() {
           <span className="truncate">{toast}</span>
         </div>
       )}
-      {showInvite && group && <InviteModal group={group} onDone={handleInviteSent} onCancel={() => setShowInvite(false)} />}
+      {showInvite && groups.length > 0 && <InviteModal group={selectedGroupId !== "all" ? groups.find(g => g.id === selectedGroupId) || groups[0] : groups[0]} onDone={handleInviteSent} onCancel={() => setShowInvite(false)} />}
       {noteTarget && <NoteModal participant={noteTarget} onSave={text => { showToastMsg(`Feedback saved for ${noteTarget.firstName} ${noteTarget.lastName}.`); setNoteTarget(null); }} onCancel={() => setNoteTarget(null)} />}
-      {detailParticipant && <ParticipantDetailPanel participant={detailParticipant} onClose={() => setDetailParticipant(null)} onViewFull={() => { setDetailParticipant(null); navigate(`/caretaker/participants/${detailParticipant.id}`); }} />}
+      {detailParticipant && <ParticipantDetailPanel participant={detailParticipant} groups={groups} onClose={() => setDetailParticipant(null)} onViewFull={() => { setDetailParticipant(null); navigate(`/caretaker/participants/${detailParticipant.id}`); }} />}
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">My Participants</h1>
-          <div className="flex items-center gap-2 mt-1.5">
-            {group && (
-              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                {group.name}
-              </span>
-            )}
-            <span className="text-xs text-slate-400">{counts.total} participants</span>
-          </div>
+          <p className="text-xs text-slate-400 mt-1">{groups.length} group{groups.length !== 1 ? "s" : ""} · {participants.length} total participants</p>
         </div>
       </div>
+
+      {/* Group Selector */}
+      <GroupSelector
+        groups={groups}
+        allParticipants={participants}
+        selectedGroupId={selectedGroupId}
+        onChange={(id) => { setSelectedGroupId(id); setFilters(DEFAULT_FILTERS); setSearch(""); }}
+      />
 
       {/* View toggle */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-1.5 flex gap-1">
@@ -972,7 +1057,7 @@ export default function MyParticipantsPage() {
       {showFilters && <FilterPanel filters={filters} setFilters={setFilters} onReset={() => setFilters(DEFAULT_FILTERS)} />}
 
       <div className="flex items-center justify-between px-1">
-        <p className="text-xs text-slate-400">Showing <span className="font-semibold text-slate-600">{processed.length}</span> of {counts.total} participants</p>
+        <p className="text-xs text-slate-400">Showing <span className="font-semibold text-slate-600">{processed.length}</span> of {counts.total} participants{selectedGroupName && <span> in <span className="font-semibold text-slate-600">{selectedGroupName}</span></span>}</p>
       </div>
 
       {/* List */}
@@ -987,6 +1072,7 @@ export default function MyParticipantsPage() {
           <div className="divide-y divide-slate-100">
             <div className="hidden md:flex items-center gap-3 px-4 py-3 bg-slate-50">
               <SortButton label="Participant" field="name" currentSort={sort} onSort={handleSort} className="flex-1" />
+              {showGroupColumn && <span className="text-xs font-bold text-slate-400 uppercase tracking-wider w-40">Group</span>}
               <SortButton label="Age" field="age" currentSort={sort} onSort={handleSort} className="w-12 justify-center" />
               <SortButton label="Gender" field="gender" currentSort={sort} onSort={handleSort} className="w-16 justify-center" />
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider w-40 text-center">Progress</span>
@@ -996,7 +1082,7 @@ export default function MyParticipantsPage() {
             {processed.map(p => {
               const sPct = Math.round(pct(p.surveysDone, p.surveysTotal));
               const gPct = Math.round(pct(p.healthGoals, p.healthGoalsTotal));
-              const age = getAge(p.dob);
+              const age = p.age ?? getAge(p.dob);
               return (
                 <div key={p.id} onClick={() => setDetailParticipant(p)} className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -1006,12 +1092,18 @@ export default function MyParticipantsPage() {
                       <p className="text-xs text-slate-400 truncate">{p.email || "—"}</p>
                       {p.flags.length > 0 && <div className="flex items-center gap-1 mt-1 flex-wrap">{p.flags.map((f, i) => <FlagBadge key={i} text={f} />)}</div>}
                       <div className="md:hidden mt-2 space-y-1.5">
+                        {showGroupColumn && p.groupName && <GroupBadge groupId={p.groupId} groupName={p.groupName} groups={groups} />}
                         <div className="flex items-center gap-3 text-xs text-slate-400"><span>{age !== null ? `${age} yrs` : "—"}</span><span>·</span><span>{p.gender}</span><span>·</span><span className={p.status === "inactive" ? "text-amber-600 font-medium" : ""}>{daysSince(p.lastActive) || "—"}</span></div>
                         <div><div className="flex justify-between text-xs mb-0.5"><span className="text-slate-400">Surveys</span><span className="font-semibold text-slate-500">{p.surveysDone}/{p.surveysTotal}</span></div><div className="w-full bg-slate-200 rounded-full h-1 overflow-hidden"><div className="bg-blue-500 h-1 rounded-full" style={{ width: `${sPct}%` }} /></div></div>
                         <div><div className="flex justify-between text-xs mb-0.5"><span className="text-slate-400">Goals</span><span className="font-semibold text-slate-500">{p.healthGoals}/{p.healthGoalsTotal || 0}</span></div><div className="w-full bg-slate-200 rounded-full h-1 overflow-hidden"><div className="bg-indigo-500 h-1 rounded-full" style={{ width: `${gPct}%` }} /></div></div>
                       </div>
                     </div>
                   </div>
+                  {showGroupColumn && (
+                    <div className="hidden md:block w-40">
+                      {p.groupName && <GroupBadge groupId={p.groupId} groupName={p.groupName} groups={groups} />}
+                    </div>
+                  )}
                   <div className="hidden md:block w-12 text-center"><span className="text-xs font-semibold text-slate-600">{age !== null ? age : "—"}</span></div>
                   <div className="hidden md:block w-16 text-center"><span className="text-xs font-medium text-slate-500">{p.gender}</span></div>
                   <div className="hidden md:flex flex-col gap-1.5 w-40">
