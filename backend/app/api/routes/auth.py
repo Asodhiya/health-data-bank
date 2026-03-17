@@ -3,16 +3,18 @@ Authentication Routes
 """
 from fastapi import APIRouter, HTTPException, status, Response, Depends, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import User
+from app.db.models import User, GroupMember, ParticipantProfile
+from sqlalchemy import select
 from datetime import datetime, timezone
 from app.db.session import get_db
 from app.core.security import PasswordHash, create_access_token, generate_reset_token, hash_reset_token, reset_token_expiry
 from app.schemas.schemas import UserSignup
 from app.services.cookies import _set_cookie
-from app.services.auth_service import authenticate_user, reset_forgot_password, create_user_with_role
-from app.schemas.schemas import LoginRequest, UserResponse, ForgotPasswordIn
+from app.services.auth_service import authenticate_user, reset_forgot_password, create_user_with_role, reset_password
+from app.schemas.schemas import LoginRequest, UserResponse, ForgotPasswordIn, ResetPasswordIn
 from app.core.dependency import check_current_user, require_permissions
-from app.services.email_sender import send_reset_email
+from app.core.permissions import SEND_INVITE
+from app.services.email_sender import send_reset_email, send_invite_email
 from app.core.security import InviteTokenGenerator
 from app.schemas.schemas import SignupInviteRequest
 from app.db.queries.Queries import RoleQuery, UserQuery, InviteQuery
@@ -100,6 +102,18 @@ async def register(
     new_user = await create_user_with_role(payload, role.role_name, db)
 
     invite.used = True
+
+    if invite.group_id and role.role_name == "participant":
+        participant_result = await db.execute(
+            select(ParticipantProfile).where(ParticipantProfile.user_id == new_user.user_id)
+        )
+        participant = participant_result.scalar_one_or_none()
+        if participant:
+            db.add(GroupMember(
+                group_id=invite.group_id,
+                participant_id=participant.participant_id,
+            ))
+
     await db.commit()
 
     await write_audit_log(
@@ -201,12 +215,35 @@ async def forgot_password(
     return {"message": "If the email exists, a reset link has been sent."}
 
 
+@router.post("/reset-password")
+async def reset_password_endpoint(
+    payload: ResetPasswordIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Validates the reset token and updates the user's password."""
+    ip = _get_client_ip(request)
+
+    await reset_password(payload, db)
+
+    await write_audit_log(
+        db,
+        action="PASSWORD_RESET_SUCCESS",
+        ip_address=ip,
+        actor_user_id=None,
+        entity_type="user",
+        details={},
+    )
+
+    return {"message": "Password has been reset successfully."}
+
+
 @router.post("/signup_invite")
 async def signup_invite(
     Payload: SignupInviteRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(require_permissions("send:invite")),
+    current_user=Depends(require_permissions(SEND_INVITE)),
 ):
     ip = _get_client_ip(request)
     user_queries = UserQuery(db)
@@ -232,8 +269,10 @@ async def signup_invite(
         current_user_role=user_roles[0],
         target_role=target_role,
         target_email=Payload.email,
+        group_id=Payload.group_id,
     )
     result = await generator.save(db)
+    send_invite_email(Payload.email, result["invite_url"])
 
     # Log the invite being sent
     await write_audit_log(

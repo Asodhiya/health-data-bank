@@ -1,8 +1,6 @@
-import { useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useAuth } from "./contexts/AuthContext";
 import DashboardLayout from "./layouts/DashboardLayout";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "/vite.svg";
 import NoSideDashboardLayout from "./layouts/NoSideDashboardLayout";
 import ParticipantRoute from "./components/ParticipantRoute";
 import AdminRoute from "./components/AdminRoute";
@@ -35,8 +33,21 @@ import SurveyFillPage from "./pages/participant/SurveyFillPage";
 import HealthGoals from "./pages/participant/HealthGoals";
 import Messages from "./pages/participant/Message";
 
+// ── Admin pages ──
+import UserManagementPage from "./pages/admin/UserManagementPage";
+import AuditLogPage from "./pages/admin/AuditLogPage";
+
+// --- Researcher pages ---
+import DataElementManager from "./pages/researcher/DataElementMangaer";
+import Groups from "./pages/researcher/Group_Chorts";
+// ── Caretaker pages ──
+import MyParticipantsPage from "./pages/caretaker/MyParticipantsPage";
+import ParticipantDetailPage from "./pages/caretaker/ParticipantDetailPage";
+import ReportsPage from "./pages/caretaker/ReportsPage";
+import GoalTemplates from "./pages/researcher/GoalTemplates";
+
 function App() {
-  const [userRole, setUserRole] = useState("admin"); // 'admin' | 'participant' | 'caretaker' | 'researcher' | null
+  const { role } = useAuth();
 
   return (
     <BrowserRouter>
@@ -50,7 +61,7 @@ function App() {
         </Route>
 
         {/* ── Onboarding routes (participant only) ── */}
-        <Route element={<ParticipantRoute userRole={userRole} />}>
+        <Route element={<ParticipantRoute />}>
           <Route element={<OnboardingLayout />}>
             <Route
               path="/onboarding/background"
@@ -61,26 +72,27 @@ function App() {
           </Route>
         </Route>
 
-        <Route path="/" element={<DefaultRoute userRole={userRole} />} />
-        <Route
-          path="/dashboard"
-          element={<DefaultRoute userRole={userRole} />}
-        />
+        <Route path="/" element={<DefaultRoute />} />
+        <Route path="/dashboard" element={<DefaultRoute />} />
         <Route path="/logout" element={<Navigate to="/login" replace />} />
 
-        <Route element={<AdminRoute userRole={userRole} />}>
-          <Route element={<DashboardLayout role={userRole} />}>
+        {/* ── Admin ── */}
+        <Route element={<AdminRoute />}>
+          <Route element={<DashboardLayout role={role} />}>
             <Route path="/admin" element={<AdminDashboard />} />
             <Route
               path="/admin/profile"
               element={<ProfilePage role="admin" />}
             />
             <Route path="/surveys" element={<SurveyBuilderPage />} />
+            <Route path="/users" element={<UserManagementPage />} />
+            <Route path="/audit-logs" element={<AuditLogPage />} /> 
           </Route>
         </Route>
 
-        <Route element={<ParticipantRoute userRole={userRole} />}>
-          <Route element={<NoSideDashboardLayout role={userRole} />}>
+        {/* ── Participant ── */}
+        <Route element={<ParticipantRoute />}>
+          <Route element={<NoSideDashboardLayout role={role} />}>
             <Route path="/participant" element={<ParticipantDashboard />} />
             <Route
               path="/participant/profile"
@@ -96,24 +108,41 @@ function App() {
           </Route>
         </Route>
 
-        <Route element={<CaretakerRoute userRole={userRole} />}>
-          <Route element={<DashboardLayout role={userRole} />}>
+        {/* ── Caretaker ── */}
+        <Route element={<CaretakerRoute />}>
+          <Route element={<DashboardLayout role={role} />}>
             <Route path="/caretaker" element={<CaretakerDashboard />} />
             <Route
               path="/caretaker/profile"
               element={<ProfilePage role="caretaker" />}
             />
+            <Route
+              path="/caretaker/participants"
+              element={<MyParticipantsPage />}
+            />
+            <Route
+              path="/caretaker/participants/:id"
+              element={<ParticipantDetailPage />}
+            />
+            <Route path="/caretaker/reports" element={<ReportsPage />} />
           </Route>
         </Route>
 
-        <Route element={<ResearcherRoute userRole={userRole} />}>
-          <Route element={<DashboardLayout role={userRole} />}>
+        {/* ── Researcher ── */}
+        <Route element={<ResearcherRoute />}>
+          <Route element={<DashboardLayout role={role} />}>
             <Route path="/researcher" element={<ResearcherDashboard />} />
             <Route
               path="/researcher/profile"
               element={<ProfilePage role="researcher" />}
             />
             <Route path="/survey-builder" element={<SurveyBuilderPage />} />
+            <Route
+              path="/researcher/data-elements"
+              element={<DataElementManager />}
+            />
+            <Route path="/groups" element={<Groups />} />
+            <Route path="/researcher/goals" element={<GoalTemplates />} />
           </Route>
         </Route>
       </Routes>

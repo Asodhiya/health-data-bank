@@ -1,4 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useOutletContext } from "react-router-dom"; // 👈 Add this!
+import api from "../../utils/axiosInstance";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
+import NotificationsPanel from "../../components/NotificationsPanel";
 
 // Mock Data: This represents what Nayan's backend will eventually send
 const mockGroupMembers = [
@@ -62,12 +66,30 @@ const mockAlerts = [
 ];
 
 export default function CaretakerDashboard() {
+  const { user } = useOutletContext();
   const [members, setMembers] = useState(mockGroupMembers);
-
-  // Track if alerts are expanded
+  const [loading, setLoading] = useState(true);
   const [showAllAlerts, setShowAllAlerts] = useState(false);
 
-  // Decide what to show ( all fo them or just the recent 3 alerts)
+  // 1. THE HYDRATION SKELETON (Ready for Nayan's backend)
+  useEffect(() => {
+    // We will use a placeholder URL until team creates the Caretaker routes
+    api
+      .get("/caretaker/overview")
+      .then((response) => {
+        // setMembers(response.data.members);
+      })
+      .catch((err) => console.log("Waiting for backend endpoints...", err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // 2. THE CHART DATA
+  const pieData = [
+    { name: "Active", value: 6, color: "#10b981" }, // Emerald
+    { name: "Warning", value: 2, color: "#f59e0b" }, // Amber
+    { name: "Critical", value: 1, color: "#f43f5e" }, // Rose
+  ];
+
   const visibleAlerts = showAllAlerts ? mockAlerts : mockAlerts.slice(0, 3);
 
   // Helper to get the right dot color based on state
@@ -244,69 +266,47 @@ export default function CaretakerDashboard() {
 
           <div className="flex-1 flex flex-col justify-center items-center">
             {/* Custom SVG Donut Chart */}
-            <div className="relative w-48 h-48 mb-8">
-              <svg
-                viewBox="0 0 100 100"
-                className="w-full h-full -rotate-90 transform"
-              >
-                {/* Background Track */}
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  fill="none"
-                  stroke="#f1f5f9"
-                  strokeWidth="16"
-                />
+            {/* DYNAMIC RECHARTS DONUT CHART */}
+            <div className="relative w-full h-64 min-h-[250px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Tooltip
+                    contentStyle={{
+                      borderRadius: "8px",
+                      border: "none",
+                      boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                    }}
+                    itemStyle={{ color: "#1e293b", fontWeight: "bold" }}
+                  />
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60} // This makes it a donut instead of a full pie!
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                    animationDuration={1500}
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={entry.color}
+                        stroke="transparent"
+                      />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
 
-                {/* Indigo Segment (Stable - 30%) */}
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  fill="none"
-                  stroke="#8b5cf6"
-                  strokeWidth="16"
-                  strokeDasharray="251.2"
-                  strokeDashoffset="175.8"
-                />
-
-                {/* Blue Segment (Forms - 25%) */}
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  fill="none"
-                  stroke="#3b82f6"
-                  strokeWidth="16"
-                  strokeDasharray="251.2"
-                  strokeDashoffset="188.4"
-                  className="rotate-[108deg] origin-center"
-                />
-
-                {/* Emerald Segment (Active - 45%) */}
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  fill="none"
-                  stroke="#10b981"
-                  strokeWidth="16"
-                  strokeDasharray="251.2"
-                  strokeDashoffset="138.1"
-                  className="rotate-[198deg] origin-center"
-                />
-              </svg>
-
-              {/* Center Text */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                  Group
+              {/* Center Text overlay */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-2">
+                  Total
                 </span>
                 <span className="text-4xl font-extrabold text-slate-800">
-                  8
+                  9
                 </span>
-                <span className="text-xs text-slate-500 mt-1">members</span>
               </div>
             </div>
 
@@ -359,6 +359,9 @@ export default function CaretakerDashboard() {
           </div>
         </div>
       </div>
+
+      {/* NOTIFICATIONS PANEL */}
+      <NotificationsPanel role="caretaker" />
     </div>
   );
 }

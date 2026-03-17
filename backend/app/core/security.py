@@ -1,6 +1,8 @@
+import asyncio
 import hashlib
 import os
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -47,14 +49,24 @@ class PasswordHash:
         return cls(value.encode("utf-8"))
 
 
+_password_executor = ThreadPoolExecutor(max_workers=4)
+
+async def verify_password_async(password: str, hashed: bytes) -> bool:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _password_executor, bcrypt.checkpw, password.encode("utf-8"), hashed
+    )
+
+
 @dataclass
 class InviteTokenGenerator:
     current_user_id: int
     current_user_role: str
     target_role: str
     target_email: str
+    group_id: object = None  # uuid.UUID | None
     expires_in_hours: int = 48
-    base_url: str = "https://yourapp.com"
+    base_url: str = field(default_factory=lambda: os.getenv("FRONTEND_URL", "http://localhost:5173"))
 
     token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     expires_at: datetime = field(init=False)
@@ -62,7 +74,6 @@ class InviteTokenGenerator:
     def __post_init__(self):
         self.target_role = self.target_role.lower()
         self.expires_at = datetime.utcnow() + timedelta(hours=self.expires_in_hours)
-
 
     def build_model(self, role_id) -> SignupInvite:
         return SignupInvite(
@@ -72,6 +83,7 @@ class InviteTokenGenerator:
             expires_at=self.expires_at,
             used=False,
             invited_by=self.current_user_id,
+            group_id=self.group_id,
         )
 
     async def save(self, db: AsyncSession) -> dict:

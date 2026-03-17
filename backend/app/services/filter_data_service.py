@@ -1,67 +1,103 @@
-from sqlalchemy import select, and_, or_, func, String
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import User, FormSubmission, SubmissionAnswer, FormField, ParticipantProfile, SurveyForm
+from app.db.models import (
+    User, FormSubmission, ParticipantProfile, SurveyForm,
+    HealthDataPoint, DataElement,
+)
 from app.schemas.filter_data_schema import ParticipantFilter
 from datetime import date, timedelta
-import json
+
 
 def calculate_age(born):
-    """"calculate age from DOB"""""
     if not born:
         return None
     today = date.today()
     return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
 
+
 async def get_available_surveys(db: AsyncSession):
-    """Fetches all published survey forms for dropdown"""
-    stmt = select(SurveyForm).where(SurveyForm.status == 'published')
+    """Fetches all published survey forms for dropdown."""
+    stmt = select(SurveyForm).where(SurveyForm.status == 'PUBLISHED')
     result = await db.execute(stmt)
     return result.scalars().all()
 
+
 async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, filters: ParticipantFilter = None):
-    """Fetches and pivots survey results"""
-    
+    """
+    Returns participant demographics + health data points, pivoted by DataElement.
+
+    Each column beyond the demographics represents one DataElement (e.g. "Blood Pressure (mmHg)").
+    When survey_id is provided, only health data points that originated from
+    submissions of that survey are included.
+    """
+
+    demographic_columns = [
+        User.user_id.label("participant_id"),
+        ParticipantProfile.gender,
+        ParticipantProfile.pronouns,
+        ParticipantProfile.primary_language,
+        ParticipantProfile.occupation_status,
+        ParticipantProfile.living_arrangement,
+        ParticipantProfile.highest_education_level,
+        ParticipantProfile.dependents,
+        ParticipantProfile.marital_status,
+        ParticipantProfile.dob,
+    ]
+
     if survey_id:
         stmt = (
             select(
-                User.user_id.label("participant_id"),
-                ParticipantProfile.gender,
-                ParticipantProfile.dob,
-                FormField.field_id.label("question_id"),
-                FormField.label.label("question_text"),
-                SubmissionAnswer.value_text,
-                SubmissionAnswer.value_number,
-                SubmissionAnswer.value_date,
-                SubmissionAnswer.value_json
+                *demographic_columns,
+                DataElement.element_id.label("element_id"),
+                DataElement.label.label("element_label"),
+                DataElement.unit,
+                HealthDataPoint.value_text,
+                HealthDataPoint.value_number,
+                HealthDataPoint.value_date,
+                HealthDataPoint.value_json,
             )
             .select_from(User)
             .join(ParticipantProfile, User.user_id == ParticipantProfile.user_id)
-            .join(FormSubmission, ParticipantProfile.participant_id == FormSubmission.participant_id)
-            .join(SubmissionAnswer, FormSubmission.submission_id == SubmissionAnswer.submission_id)
-            .join(FormField, SubmissionAnswer.field_id == FormField.field_id)
+            .join(HealthDataPoint, ParticipantProfile.participant_id == HealthDataPoint.participant_id)
+            .join(DataElement, HealthDataPoint.element_id == DataElement.element_id)
         )
     else:
         stmt = (
-            select(
-                User.user_id.label("participant_id"),
-                ParticipantProfile.gender,
-                ParticipantProfile.dob
-            )
+            select(*demographic_columns)
             .select_from(User)
             .join(ParticipantProfile, User.user_id == ParticipantProfile.user_id)
         )
 
     conditions = []
+
     if survey_id:
-        conditions.append(FormSubmission.form_id == survey_id)
-        
+        # Only include health data points that came from this survey's submissions
+        submission_ids = select(FormSubmission.submission_id).where(
+            FormSubmission.form_id == survey_id
+        )
+        conditions.append(HealthDataPoint.source_submission_id.in_(submission_ids))
+
     if filters:
         if filters.gender:
             conditions.append(ParticipantProfile.gender == filters.gender)
+        if filters.pronouns:
+            conditions.append(ParticipantProfile.pronouns == filters.pronouns)
+        if filters.primary_language:
+            conditions.append(ParticipantProfile.primary_language == filters.primary_language)
+        if filters.occupation_status:
+            conditions.append(ParticipantProfile.occupation_status == filters.occupation_status)
+        if filters.living_arrangement:
+            conditions.append(ParticipantProfile.living_arrangement == filters.living_arrangement)
+        if filters.highest_education_level:
+            conditions.append(ParticipantProfile.highest_education_level == filters.highest_education_level)
+        if filters.dependents is not None:
+            conditions.append(ParticipantProfile.dependents == filters.dependents)
+        if filters.marital_status:
+            conditions.append(ParticipantProfile.marital_status == filters.marital_status)
         if filters.status:
             conditions.append(User.status == (filters.status.lower() == 'active'))
         if filters.group_id:
-            pass 
+            pass  # TODO: join GroupMembership when group support is added
         if filters.age_min:
             max_dob = date.today() - timedelta(days=filters.age_min * 365.25)
             conditions.append(ParticipantProfile.dob <= max_dob)
@@ -69,12 +105,12 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
             min_dob = date.today() - timedelta(days=(filters.age_max + 1) * 365.25)
             conditions.append(ParticipantProfile.dob >= min_dob)
         if filters.search:
-            search_term = f"%{filters.search}%"
+            term = f"%{filters.search}%"
             conditions.append(
                 or_(
-                    User.first_name.ilike(search_term),
-                    User.last_name.ilike(search_term),
-                    User.email.ilike(search_term)
+                    User.first_name.ilike(term),
+                    User.last_name.ilike(term),
+                    User.email.ilike(term),
                 )
             )
 
@@ -83,45 +119,63 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
 
     result = await db.execute(stmt)
     data = result.all()
-    
+
     if not data:
         return {"columns": [], "data": []}
 
     pivoted_data = {}
-    questions_meta = {}
+    elements_meta = {}  # element_id → display label
 
     for row in data:
         participant_id = str(row.participant_id)
-        
+
         if participant_id not in pivoted_data:
             pivoted_data[participant_id] = {
                 "participant_id": participant_id,
                 "gender": row.gender,
-                "age": calculate_age(row.dob)
+                "pronouns": row.pronouns,
+                "primary_language": row.primary_language,
+                "occupation_status": row.occupation_status,
+                "living_arrangement": row.living_arrangement,
+                "highest_education_level": row.highest_education_level,
+                "dependents": row.dependents,
+                "marital_status": row.marital_status,
+                "age": calculate_age(row.dob),
             }
-        
-        if survey_id:
-            question_id = str(row.question_id)
-            
-            answer_value = row.value_text or row.value_number or row.value_date or row.value_json
-            if isinstance(answer_value, list):
-                answer_value = ", ".join(map(str, answer_value))
-            elif answer_value is not None:
-                answer_value = str(answer_value)
-            
-            pivoted_data[participant_id][question_id] = answer_value
 
-            if question_id not in questions_meta:
-                questions_meta[question_id] = row.question_text
+        if survey_id:
+            element_id = str(row.element_id)
+
+            # Pick the first non-null value
+            value = row.value_text or row.value_number or row.value_date or row.value_json
+            if isinstance(value, list):
+                value = ", ".join(map(str, value))
+            elif value is not None:
+                value = str(value)
+
+            pivoted_data[participant_id][element_id] = value
+
+            if element_id not in elements_meta:
+                unit_suffix = f" ({row.unit})" if row.unit else ""
+                elements_meta[element_id] = f"{row.element_label}{unit_suffix}"
 
     columns_list = [
-        {"id": "participant_id", "text": "Participant ID"},
-        {"id": "gender", "text": "Gender"},
-        {"id": "age", "text": "Age"}
+        {"id": "participant_id",          "text": "Participant ID"},
+        {"id": "gender",                  "text": "Gender"},
+        {"id": "pronouns",                "text": "Pronouns"},
+        {"id": "primary_language",        "text": "Primary Language"},
+        {"id": "occupation_status",       "text": "Occupation / Status"},
+        {"id": "living_arrangement",      "text": "Living Arrangement"},
+        {"id": "highest_education_level", "text": "Highest Education Level"},
+        {"id": "dependents",              "text": "Dependents"},
+        {"id": "marital_status",          "text": "Marital Status"},
+        {"id": "age",                     "text": "Age"},
     ]
-    columns_list.extend([{"id": q_id, "text": text} for q_id, text in questions_meta.items()])
+    columns_list.extend(
+        [{"id": el_id, "text": label} for el_id, label in elements_meta.items()]
+    )
 
     return {
         "columns": columns_list,
-        "data": list(pivoted_data.values())
+        "data": list(pivoted_data.values()),
     }

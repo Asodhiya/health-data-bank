@@ -13,7 +13,7 @@ export const DASHBOARD_NAV = [
   {
     label: "Groups / Cohorts",
     to: "/groups",
-    roles: ["admin", "researcher", "caretaker"],
+    roles: ["admin", "researcher"], //removed caretaker for now since they won't be managing groups
   },
 
   /* =====================
@@ -53,56 +53,46 @@ export const DASHBOARD_NAV = [
   },
 
   {
-    label: "Analytics",
-    to: "/analytics",
-    roles: ["admin", "researcher"],
-  },
-
-  {
-    label: "Reports",
-    to: "/reports",
-    roles: ["admin", "researcher"],
-  },
-
-  {
-    label: "Exports",
-    to: "/exports",
+    label: "Data Elements",
+    to: "/researcher/data-elements",
     roles: ["researcher"],
   },
+
+  { label: "Create Golas", to: "researcher/goals", roles: ["researcher"] },
 
   /* =====================
      CARETAKER
   ====================== */
   {
     label: "My Participants",
-    to: "/participants",
-    roles: ["admin", "caretaker"],
-  },
-
-  {
-    label: "Check-ins / Review",
-    to: "/checkins",
+    to: "/caretaker/participants",
     roles: ["caretaker"],
   },
 
   {
-    label: "Reminders",
-    to: "/reminders",
+    label: "Reports",
+    to: "/caretaker/reports",
     roles: ["caretaker"],
   },
+
+  //{
+  //  label: "Notes & Feedback",
+  //  to: "/notes-feedback",
+  //  roles: ["caretaker"],
+  //},
 
   /* =====================
      PROFILE (per-role path)
   ====================== */
-  { label: "Profile", to: "/admin/profile", roles: ["admin"] },
-  { label: "Profile", to: "/researcher/profile", roles: ["researcher"] },
-  { label: "Profile", to: "/caretaker/profile", roles: ["caretaker"] },
+  //{ label: "Profile", to: "/admin/profile", roles: ["admin"] },
+  //{ label: "Profile", to: "/researcher/profile", roles: ["researcher"] },
+  //{ label: "Profile", to: "/caretaker/profile", roles: ["caretaker"] },
 
-  {
-    label: "Logout",
-    to: "/logout",
-    roles: ["admin", "researcher", "caretaker"],
-  },
+  //{
+  //  label: "Logout",
+  //  to: "/logout",
+  //  roles: ["admin", "researcher", "caretaker"],
+  //},
 ];
 
 export const PARTICIPANT_NAV = [
