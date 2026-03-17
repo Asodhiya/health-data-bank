@@ -145,6 +145,18 @@ class ParticipantQuery:
             return None
         goal, element = row
         return {**goal.__dict__, "name": element.label, "element": element}
+    
+    def _goal_data_point(self, participant_id: uuid.UUID, goal: HealthGoal) -> HealthDataPoint:
+        """Create a HealthDataPoint snapshot representing the goal's target value."""
+        return HealthDataPoint(
+            participant_id=participant_id,
+            element_id=goal.element_id,
+            observed_at=datetime.now(timezone.utc),
+            source_type="goal",
+            source_submission_id=None,
+            source_field_id=None,
+            value_number=float(goal.target_value) if goal.target_value is not None else None,
+        )
 
     async def add_goal_from_template(self, participant_id: uuid.UUID, template_id: uuid.UUID, target_value: float | None = None):
         participants_goal = await self.get_goals(participant_id)
