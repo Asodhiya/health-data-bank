@@ -19,12 +19,9 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      await api.login(email, password);
-      // Cookie is now set — hydrate the auth context to get the real role
-      await refetch();
-      // Re-call api.me() directly so we have the role in scope for the navigate
-      const me = await api.me();
-      const role = me.Role?.[0] ?? null;
+      await api.login(email, password); // Cookie is now set — hydrate the auth context to get the real role
+      const me = await refetch(); 
+      const role = me?.Role?.[0] ?? null;
       if (role) {
         navigate(`/${role}`, { replace: true });
       } else {
