@@ -84,10 +84,9 @@ function App() {
               path="/admin/profile"
               element={<ProfilePage role="admin" />}
             />
-            <Route path="/users" element={<UserManagementPage />} />
-            <Route path="/audit-logs" element={<AuditLogPage />} />
             <Route path="/surveys" element={<SurveyBuilderPage />} />
             <Route path="/users" element={<UserManagementPage />} />
+            <Route path="/audit-logs" element={<AuditLogPage />} /> 
           </Route>
         </Route>
 
