@@ -1,372 +1,551 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
+
+/* ── SVG Helpers (Clean & Beautiful) ── */
+const Svg = ({
+  d,
+  size = 20,
+  sw = 1.8,
+  stroke = "currentColor",
+  fill = "none",
+  ...rest
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill={fill}
+    stroke={stroke}
+    strokeWidth={sw}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...rest}
+  >
+    {typeof d === "string" ? <path d={d} /> : d}
+  </svg>
+);
+
+const PlusIco = () => <Svg d="M12 5v14M5 12h14" size={18} />;
+const TrashIco = () => (
+  <Svg
+    d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"
+    size={16}
+  />
+);
+const TargetIco = () => (
+  <Svg
+    d={
+      <>
+        <circle cx="12" cy="12" r="10" />
+        <circle cx="12" cy="12" r="6" />
+        <circle cx="12" cy="12" r="2" />
+      </>
+    }
+  />
+);
+const CloseIco = () => <Svg d="M18 6L6 18M6 6l12 12" size={20} />;
+const CheckIco = () => (
+  <Svg stroke="#10b981" sw={2.5} d="M20 6L9 17l-5-5" size={18} />
+);
+const FireIco = () => (
+  <Svg d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+);
+const AlertIco = () => (
+  <Svg
+    size={16}
+    d={
+      <>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </>
+    }
+  />
+);
 
 export default function HealthGoals() {
-  // We will use this state later to open/close our "Create Goal" popup
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [activeGoals, setActiveGoals] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [actionLoading, setActionLoading] = useState(null);
+
+  // 🟢 NEW: State to hold the dynamic input values for each card
+  const [logInputs, setLogInputs] = useState({});
+
+  const MAX_GOALS = 10;
+  const isAtLimit = activeGoals.length >= MAX_GOALS;
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const [goalsData, templatesData] = await Promise.all([
+        api.listParticipantGoals().catch(() => []),
+        api.browseGoalTemplates().catch(() => []),
+      ]);
+      setActiveGoals(Array.isArray(goalsData) ? goalsData : []);
+      setTemplates(Array.isArray(templatesData) ? templatesData : []);
+    } catch (err) {
+      console.error("🚨 Error fetching goals:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const handleAddGoal = async (templateId) => {
+    if (isAtLimit) return;
+    try {
+      setActionLoading(templateId);
+      await api.addGoalFromTemplate(templateId);
+      await fetchData();
+    } catch (err) {
+      console.error("Failed to add goal:", err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // 🟢 UPDATED: Dynamically handle numbers, text, or booleans
+  const handleLogProgress = async (goalId, customValue = 1) => {
+    if (customValue === "" || customValue === null) return;
+
+    try {
+      setActionLoading(`log_${goalId}`);
+
+      // Parse numbers if needed, otherwise send text directly
+      let finalValue = customValue;
+      if (
+        typeof customValue === "string" &&
+        customValue.trim() !== "" &&
+        !isNaN(customValue)
+      ) {
+        finalValue = Number(customValue);
+      }
+
+      await api.logGoalProgress(goalId, {
+        value: finalValue,
+        observed_at: new Date().toISOString(),
+      });
+
+      // Clear the input field for this specific goal
+      setLogInputs((prev) => ({ ...prev, [goalId]: "" }));
+      await fetchData();
+    } catch (err) {
+      console.error("Failed to log progress:", err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteGoal = async (goalId) => {
+    if (!window.confirm("Remove this goal from your dashboard?")) return;
+    try {
+      setActionLoading(`del_${goalId}`);
+      await api.deleteParticipantGoal(goalId);
+      await fetchData();
+    } catch (err) {
+      console.error("Failed to delete goal:", err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  if (loading && activeGoals.length === 0) {
+    return (
+      <div className="flex flex-col justify-center items-center py-40">
+        <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+        <p className="text-sm text-slate-500 font-medium">
+          Loading your health goals...
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8">
-      {/* 1. HEADER SECTION */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="max-w-6xl mx-auto px-4 py-8 relative">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-slate-800">
-            My Health Goals
-          </h1>
-          <p className="text-slate-500 mt-1 text-sm md:text-base">
-            Track your daily targets and build healthy habits.
+          <h1 className="text-2xl font-bold text-slate-800">My Goals</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Track your daily wellness habits.
           </p>
         </div>
 
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-medium transition-colors flex items-center gap-2 shadow-sm"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-5 w-5"
-            viewBox="0 0 20 20"
-            fill="currentColor"
+        <div className="flex items-center gap-4">
+          <div className="px-4 py-2 bg-white rounded-xl border border-slate-200 flex items-center gap-2 shadow-sm">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+              Active Goals
+            </span>
+            <span
+              className={`text-sm font-bold ${isAtLimit ? "text-rose-500" : "text-slate-800"}`}
+            >
+              {activeGoals.length} / {MAX_GOALS}
+            </span>
+          </div>
+          <button
+            onClick={() => setIsDrawerOpen(true)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5"
           >
-            <path
-              fillRule="evenodd"
-              d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
-              clipRule="evenodd"
-            />
-          </svg>
-          Create New Goal
-        </button>
-      </div>
-
-      {/* 2. SUMMARY CARDS ZONE */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* Card 1: Goal Overview */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-center">
-          <h3 className="text-slate-500 font-bold text-sm mb-4 tracking-wide uppercase">
-            Weekly Overview
-          </h3>
-          <div className="space-y-4">
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-slate-700 font-medium">Sleep</span>
-                <span className="font-bold text-slate-800">80%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2">
-                <div className="bg-indigo-500 h-2 rounded-full w-[80%] transition-all duration-500"></div>
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-slate-700 font-medium">Hydration</span>
-                <span className="font-bold text-slate-800">70%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2">
-                <div className="bg-blue-500 h-2 rounded-full w-[70%] transition-all duration-500"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 2: Streaks & Trophies */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-center">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-amber-500 text-lg">🔥</span>
-            <h3 className="text-slate-500 font-bold text-sm tracking-wide uppercase">
-              Streaks & Trophies
-            </h3>
-          </div>
-          <ul className="space-y-3 text-sm text-slate-700">
-            <li className="flex justify-between items-center">
-              <span className="font-medium">Water Intake</span>
-              <span className="font-bold bg-amber-50 text-amber-700 px-2.5 py-1 rounded-full text-xs">
-                12 Days
-              </span>
-            </li>
-            <li className="flex justify-between items-center">
-              <span className="font-medium">Activity</span>
-              <span className="font-bold bg-amber-50 text-amber-700 px-2.5 py-1 rounded-full text-xs">
-                6 Days
-              </span>
-            </li>
-          </ul>
-          <div className="mt-4 bg-green-50 text-green-700 text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-2 border border-green-100">
-            <span>🏆</span> Water goal met yesterday!
-          </div>
-        </div>
-
-        {/* Card 3: Reminders */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-center">
-          <h3 className="text-slate-500 font-bold text-sm mb-4 tracking-wide uppercase">
-            Action Items
-          </h3>
-          <ul className="space-y-4 text-sm">
-            <li className="flex items-start gap-3 bg-rose-50 p-3 rounded-lg border border-rose-100">
-              <div className="w-2 h-2 rounded-full bg-rose-500 mt-1.5 flex-shrink-0"></div>
-              <p className="text-slate-800 font-medium">
-                Log your morning water intake (2 glasses).
-              </p>
-            </li>
-            <li className="flex items-start gap-3 p-3">
-              <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 flex-shrink-0"></div>
-              <p className="text-slate-600">
-                Update your sleep tracker for last night.
-              </p>
-            </li>
-          </ul>
+            <PlusIco /> Browse Goals
+          </button>
         </div>
       </div>
 
-      {/* 3. ACTIVE GOALS GRID ZONE (Empty for now) */}
-      {/* 3. ACTIVE GOALS GRID ZONE */}
-      <div className="space-y-4">
-        <h2 className="text-xl font-bold text-slate-800">Active Goals</h2>
+      {activeGoals.length === 0 ? (
+        <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm flex flex-col items-center">
+          <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-4">
+            <TargetIco size={32} />
+          </div>
+          <h3 className="text-lg font-bold text-slate-800">
+            Ready to build healthy habits?
+          </h3>
+          <p className="text-sm text-slate-500 mt-2 mb-6 max-w-sm mx-auto leading-relaxed">
+            Your dashboard is empty. Browse the goal library to find habits
+            recommended for you.
+          </p>
+          <button
+            onClick={() => setIsDrawerOpen(true)}
+            className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold rounded-xl transition-all shadow-sm"
+          >
+            Explore Library
+          </button>
+        </div>
+      ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* Goal Card 1: Water */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xl">
-                  💧
-                </div>
-                <h3 className="font-bold text-slate-800 text-lg">
-                  Water Intake
-                </h3>
-              </div>
-              <span className="bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold px-2.5 py-1 rounded-full">
-                In Progress
-              </span>
-            </div>
+          {activeGoals.map((goal) => {
+            const activeGoalId = goal.goal_id || goal.id;
+            const name =
+              goal.name ||
+              goal.title ||
+              (goal.element && goal.element.label) ||
+              "Wellness Goal";
+            const desc =
+              goal.description ||
+              (goal.element && goal.element.description) ||
+              "Description not provided.";
 
-            <div className="mt-auto">
-              <div className="flex justify-between text-sm mb-2 font-medium">
-                <span className="text-slate-500">Today's Progress</span>
-                <span className="text-blue-600 font-bold">5 / 8 glasses</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2.5 mb-6">
-                <div className="bg-blue-500 h-2.5 rounded-full w-[62%] transition-all duration-500"></div>
-              </div>
+            // 🟢 Determine Datatype from the Element (defaults to number if missing)
+            const datatype = goal.element?.datatype || "number";
 
-              {/* Quick Log Controls */}
-              <div className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-100">
-                <button className="w-10 h-10 rounded-lg bg-white shadow-sm border border-slate-100 text-slate-600 hover:bg-slate-100 hover:text-blue-600 font-bold text-xl transition-colors flex items-center justify-center">
-                  -
-                </button>
-                <div className="flex flex-col items-center">
-                  <span className="font-bold text-slate-800 text-lg">5</span>
-                  <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">
-                    Glasses
-                  </span>
-                </div>
-                <button className="w-10 h-10 rounded-lg bg-white shadow-sm border border-slate-100 text-slate-600 hover:bg-slate-100 hover:text-blue-600 font-bold text-xl transition-colors flex items-center justify-center">
-                  +
-                </button>
-              </div>
-            </div>
-          </div>
+            const target = goal.target_value ?? goal.default_target ?? 1;
+            const current = goal.current_value ?? 0;
+            const unit = goal.unit || (goal.element && goal.element.unit) || "";
+            const unitText = unit ? ` ${unit}` : "";
 
-          {/* Goal Card 2: Steps */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-xl">
-                  👟
-                </div>
-                <h3 className="font-bold text-slate-800 text-lg">
-                  Daily Steps
-                </h3>
-              </div>
-              <span className="bg-green-50 text-green-700 border border-green-200 text-xs font-bold px-2.5 py-1 rounded-full">
-                Goal Met!
-              </span>
-            </div>
+            // Text goals don't use percentages, they just save entries
+            const isTextGoal = datatype === "text";
+            const progressPct = isTextGoal
+              ? 100
+              : Math.min(Math.round((current / target) * 100), 100);
+            const isCompleted = isTextGoal ? false : current >= target;
 
-            <div className="mt-auto">
-              <div className="flex justify-between text-sm mb-2 font-medium">
-                <span className="text-slate-500">Today's Progress</span>
-                <span className="text-green-600 font-bold">
-                  10,200 / 10k steps
-                </span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2.5 mb-6">
-                <div className="bg-green-500 h-2.5 rounded-full w-[100%] transition-all duration-500"></div>
-              </div>
-
-              {/* Quick Log Controls */}
-              <div className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-100">
-                <button className="w-10 h-10 rounded-lg bg-white shadow-sm border border-slate-100 text-slate-600 hover:bg-slate-100 font-bold text-xl transition-colors flex items-center justify-center">
-                  -
-                </button>
-                <div className="flex flex-col items-center">
-                  <span className="font-bold text-slate-800 text-sm">
-                    Update
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">
-                    Manual Entry
-                  </span>
-                </div>
-                <button className="w-10 h-10 rounded-lg bg-white shadow-sm border border-slate-100 text-slate-600 hover:bg-slate-100 font-bold text-xl transition-colors flex items-center justify-center">
-                  +
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Goal Card 3: Sleep */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-xl">
-                  🌙
-                </div>
-                <h3 className="font-bold text-slate-800 text-lg">Sleep</h3>
-              </div>
-              <span className="bg-slate-100 text-slate-600 border border-slate-200 text-xs font-bold px-2.5 py-1 rounded-full">
-                Pending
-              </span>
-            </div>
-
-            <div className="mt-auto">
-              <div className="flex justify-between text-sm mb-2 font-medium">
-                <span className="text-slate-500">Last Night</span>
-                <span className="text-indigo-600 font-bold">0 / 8 hours</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2.5 mb-6">
-                <div className="bg-indigo-200 h-2.5 rounded-full w-[5%] transition-all duration-500"></div>
-              </div>
-
-              {/* Quick Log Controls */}
-              <div className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-100">
-                <button className="w-10 h-10 rounded-lg bg-white shadow-sm border border-slate-100 text-slate-600 hover:bg-slate-100 hover:text-indigo-600 font-bold text-xl transition-colors flex items-center justify-center">
-                  -
-                </button>
-                <div className="flex flex-col items-center">
-                  <span className="font-bold text-slate-800 text-lg">0</span>
-                  <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">
-                    Hours
-                  </span>
-                </div>
-                <button className="w-10 h-10 rounded-lg bg-white shadow-sm border border-slate-100 text-slate-600 hover:bg-slate-100 hover:text-indigo-600 font-bold text-xl transition-colors flex items-center justify-center">
-                  +
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      {/* 4. MODAL OVERLAY ZONE (Empty for now) */}
-      {/* 4. MODAL OVERLAY ZONE */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-all">
-          {/* Modal Container */}
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col">
-            {/* Modal Header */}
-            <div className="flex justify-between items-center p-6 border-b border-slate-100">
-              <h2 className="text-xl font-bold text-slate-800">
-                Create New Goal
-              </h2>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-rose-500 transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-rose-50"
+            return (
+              <div
+                key={activeGoalId}
+                className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col relative group transition-all hover:shadow-md hover:border-blue-200"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-6 w-6"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+                <button
+                  onClick={() => handleDeleteGoal(activeGoalId)}
+                  disabled={actionLoading === `del_${activeGoalId}`}
+                  className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                  title="Remove Goal"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            </div>
+                  <TrashIco />
+                </button>
 
-            {/* Modal Body (Form) */}
-            <div className="p-6 space-y-5">
-              {/* Goal Type */}
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">
-                  Goal Category
-                </label>
-                <select className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 text-slate-700 font-medium">
-                  <option value="hydration">💧 Hydration</option>
-                  <option value="activity">👟 Activity & Steps</option>
-                  <option value="sleep">🌙 Sleep</option>
-                  <option value="nutrition">🥗 Nutrition</option>
-                </select>
+                <div className="flex items-start gap-4 mb-3">
+                  <div
+                    className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
+                      isCompleted
+                        ? "bg-emerald-50 text-emerald-600"
+                        : "bg-blue-50 text-blue-600"
+                    }`}
+                  >
+                    {isCompleted ? (
+                      <FireIco size={24} />
+                    ) : (
+                      <TargetIco size={24} />
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-800 leading-tight mb-1 pr-6 capitalize">
+                      {name}
+                    </h3>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Daily Goal
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-sm text-slate-500 line-clamp-2 mb-6 min-h-[2.5rem]">
+                  {desc}
+                </p>
+
+                {/* Status Section based on Datatype */}
+                <div className="mt-auto mb-5">
+                  {!isTextGoal && (
+                    <>
+                      <div className="flex justify-between items-end mb-2">
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                          Progress
+                        </span>
+                        <span
+                          className={`text-sm font-bold ${isCompleted ? "text-emerald-500" : "text-slate-800"}`}
+                        >
+                          {current}{" "}
+                          <span className="text-slate-400 font-medium">
+                            / {target}
+                            {unitText}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-700 ease-out ${isCompleted ? "bg-emerald-500" : "bg-blue-500"}`}
+                          style={{ width: `${progressPct}%` }}
+                        />
+                      </div>
+                    </>
+                  )}
+                  {isTextGoal && (
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                      Journal Entry
+                    </div>
+                  )}
+                </div>
+
+                {/* 🟢 DYNAMIC LOGGING UI ── */}
+                {isCompleted && !isTextGoal ? (
+                  <button
+                    disabled
+                    className="w-full py-2.5 rounded-xl text-sm font-bold bg-emerald-50 text-emerald-600 cursor-default border border-emerald-100 flex items-center justify-center gap-2"
+                  >
+                    <CheckIco size={16} /> Completed Today
+                  </button>
+                ) : (
+                  <div className="flex gap-2">
+                    {/* UI for Text input */}
+                    {datatype === "text" && (
+                      <div className="flex flex-col gap-2 w-full">
+                        <input
+                          type="text"
+                          placeholder="Write your entry..."
+                          value={logInputs[activeGoalId] || ""}
+                          onChange={(e) =>
+                            setLogInputs({
+                              ...logInputs,
+                              [activeGoalId]: e.target.value,
+                            })
+                          }
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button
+                          onClick={() =>
+                            handleLogProgress(
+                              activeGoalId,
+                              logInputs[activeGoalId],
+                            )
+                          }
+                          disabled={
+                            actionLoading === `log_${activeGoalId}` ||
+                            !logInputs[activeGoalId]
+                          }
+                          className="w-full py-2.5 rounded-xl text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50"
+                        >
+                          {actionLoading === `log_${activeGoalId}`
+                            ? "Saving..."
+                            : "Save Entry"}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* UI for Large Numbers (e.g. 2000ml) */}
+                    {datatype === "number" && target > 10 && (
+                      <>
+                        <input
+                          type="number"
+                          placeholder={`Amount`}
+                          value={logInputs[activeGoalId] || ""}
+                          onChange={(e) =>
+                            setLogInputs({
+                              ...logInputs,
+                              [activeGoalId]: e.target.value,
+                            })
+                          }
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button
+                          onClick={() =>
+                            handleLogProgress(
+                              activeGoalId,
+                              logInputs[activeGoalId],
+                            )
+                          }
+                          disabled={
+                            actionLoading === `log_${activeGoalId}` ||
+                            !logInputs[activeGoalId]
+                          }
+                          className="px-5 py-2.5 rounded-xl text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50"
+                        >
+                          {actionLoading === `log_${activeGoalId}`
+                            ? "..."
+                            : "Log"}
+                        </button>
+                      </>
+                    )}
+
+                    {/* UI for Small Numbers (e.g. 5 veggies) or Booleans */}
+                    {(datatype === "boolean" ||
+                      (datatype === "number" && target <= 10)) && (
+                      <button
+                        onClick={() => handleLogProgress(activeGoalId, 1)}
+                        disabled={actionLoading === `log_${activeGoalId}`}
+                        className="w-full py-2.5 rounded-xl text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white transition-all shadow-sm"
+                      >
+                        {actionLoading === `log_${activeGoalId}`
+                          ? "Logging..."
+                          : `+1 Log Progress`}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-
-              {/* Target & Unit Row */}
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Daily Target
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="e.g. 8"
-                    className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 text-slate-700 font-medium"
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Unit
-                  </label>
-                  <select className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 text-slate-700 font-medium">
-                    <option value="glasses">Glasses</option>
-                    <option value="steps">Steps</option>
-                    <option value="hours">Hours</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Duration Row */}
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Start Date
-                  </label>
-                  <input
-                    type="date"
-                    className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 text-slate-500"
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    End Date
-                  </label>
-                  <input
-                    type="date"
-                    className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 text-slate-500"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="px-5 py-2.5 rounded-xl font-medium text-slate-600 hover:bg-slate-200 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  alert("Goal Saved! (We will wire this to Supabase later)");
-                  setIsModalOpen(false);
-                }}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-xl font-medium transition-colors shadow-sm"
-              >
-                Save Goal
-              </button>
-            </div>
-          </div>
+            );
+          })}
         </div>
       )}
+
+      {/* ── DRAWER (Library) ────────────────────────────── */}
+
+      {isDrawerOpen && (
+        <div
+          className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 transition-opacity"
+          onClick={() => setIsDrawerOpen(false)}
+        />
+      )}
+
+      <div
+        className={`fixed inset-y-0 right-0 w-full max-w-md bg-slate-50 shadow-2xl z-50 transform transition-transform duration-300 ease-out flex flex-col rounded-l-2xl border-l border-slate-200 ${isDrawerOpen ? "translate-x-0" : "translate-x-full"}`}
+      >
+        <div className="px-6 py-5 flex items-center justify-between bg-white rounded-tl-2xl border-b border-slate-100">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800">Goal Library</h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Select habits to track
+            </p>
+          </div>
+          <button
+            onClick={() => setIsDrawerOpen(false)}
+            className="w-8 h-8 bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-800 rounded-full flex items-center justify-center transition-all"
+          >
+            <CloseIco size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+          {isAtLimit && (
+            <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl text-xs font-medium flex items-start gap-2 mb-4">
+              <span className="mt-0.5">
+                <AlertIco size={14} />
+              </span>
+              <p>
+                Dashboard full (10/10). Remove a goal to make room for a new
+                one.
+              </p>
+            </div>
+          )}
+
+          {templates.length === 0 ? (
+            <div className="text-center py-10">
+              <p className="text-sm text-slate-500">No templates available.</p>
+            </div>
+          ) : (
+            templates.map((template) => {
+              const tId = template.template_id;
+              const name =
+                template.name ||
+                (template.element && template.element.label) ||
+                "Wellness Goal";
+              const desc =
+                template.description ||
+                (template.element && template.element.description) ||
+                "Description not provided.";
+              const datatype = template.element?.datatype || "number";
+              const target = template.default_target ?? 1;
+              const unit = (template.element && template.element.unit) || "";
+              const unitText = unit ? ` ${unit}` : "";
+
+              const isAlreadyAdded = activeGoals.some(
+                (g) => g.template_id === tId,
+              );
+              const isLoading = actionLoading === tId;
+
+              return (
+                <div
+                  key={tId}
+                  className={`bg-white border rounded-xl p-5 transition-all ${
+                    isAlreadyAdded
+                      ? "border-slate-100 opacity-60"
+                      : "border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md"
+                  }`}
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <h4 className="text-base font-bold text-slate-800 leading-tight pr-2 capitalize">
+                      {name}
+                    </h4>
+                    <span className="bg-slate-50 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider whitespace-nowrap border border-slate-100">
+                      Daily
+                    </span>
+                  </div>
+
+                  <p className="text-sm text-slate-500 mb-5 line-clamp-2">
+                    {desc}
+                  </p>
+
+                  <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+                    <div className="text-xs font-medium text-slate-500">
+                      {datatype === "text" ? (
+                        "Text Entry"
+                      ) : (
+                        <>
+                          Target:{" "}
+                          <span className="text-slate-800 font-bold">
+                            {target}
+                            {unitText}
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => handleAddGoal(tId)}
+                      disabled={isAtLimit || isAlreadyAdded || isLoading}
+                      className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                        isAlreadyAdded
+                          ? "bg-slate-50 text-slate-400 cursor-not-allowed border border-slate-100"
+                          : isAtLimit
+                            ? "bg-slate-50 text-slate-300 cursor-not-allowed"
+                            : "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
+                      }`}
+                    >
+                      {isLoading
+                        ? "Adding..."
+                        : isAlreadyAdded
+                          ? "Tracking"
+                          : "+ Add Goal"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -104,35 +104,26 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // ── Intake (onboarding) ──
-  getIntakeForm: () => request('/participant/intake/form'),
+  // // ── Survey Fill (participant) ──
+  // getDeployedForms: () => request("/participant/surveys/assigned"),
 
-  submitIntake: (payload) =>
-    request('/participant/intake', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
+  // getParticipantFormDetail: (formId) =>
+  //   request(`/participant/surveys/${formId}`),
 
-  // ── Survey Fill (participant) ──
-  getDeployedForms: () => request("/participant/surveys/assigned"),
+  // getSurveyResponse: (formId) =>
+  //   request(`/participant/surveys/${formId}/response`),
 
-  getParticipantFormDetail: (formId) =>
-    request(`/participant/surveys/${formId}`),
+  // saveDraftAnswers: (formId, answers) =>
+  //   request(`/participant/surveys/${formId}/save`, {
+  //     method: "POST",
+  //     body: JSON.stringify(answers),
+  //   }),
 
-  getSurveyResponse: (formId) =>
-    request(`/participant/surveys/${formId}/response`),
-
-  saveDraftAnswers: (formId, answers) =>
-    request(`/participant/surveys/${formId}/save`, {
-      method: "POST",
-      body: JSON.stringify(answers),
-    }),
-
-  submitSurvey: (formId, answers) =>
-    request(`/participant/surveys/${formId}/submit`, {
-      method: "POST",
-      body: JSON.stringify(answers),
-    }),
+  // submitSurvey: (formId, answers) =>
+  //   request(`/participant/surveys/${formId}/submit`, {
+  //     method: "POST",
+  //     body: JSON.stringify(answers),
+  //   }),
 
   // ── Data Elements (researcher) added by Nima──
   // ── Data Elements (Standardization Hub) ──
@@ -340,4 +331,74 @@ export const api = {
     request(`/goal-templates/${templateId}`, {
       method: "DELETE",
     }),
+
+  // ── Participant: Surveys ──
+  getAssignedSurveys: () => request("/participant/surveys/assigned"), // 🟢 Added /surveys/
+
+  getParticipantFormDetail: (formId) =>
+    request(`/participant/surveys/${formId}`), // 🟢 Added /surveys/
+
+  getSurveyResponse: (formId) =>
+    request(`/participant/surveys/${formId}/response`), // 🟢 Added /surveys/
+
+  saveDraftAnswers: (formId, answers) =>
+    request(`/participant/surveys/${formId}/save`, {
+      method: "POST",
+      body: JSON.stringify(answers),
+    }),
+
+  submitSurvey: (formId, answers) =>
+    request(`/participant/surveys/${formId}/submit`, {
+      method: "POST",
+      body: JSON.stringify(answers),
+    }),
+  // ── Participant: Health Goals ──
+
+  // Browse templates created by researchers
+  browseGoalTemplates: () => request("/participant/goal-templates"),
+
+  // List goals already active on the participant's dashboard
+  listParticipantGoals: () => request("/participant/goals"),
+
+  // Get a single goal's status
+  getParticipantGoal: (goalId) => request(`/participant/goals/${goalId}`),
+
+  // Add a goal from a template.
+  // Note: target_value is passed as a query param per your backend
+  addGoalFromTemplate: (templateId, targetValue = null) => {
+    const url = `/participant/goals/add/${templateId}${targetValue ? `?target_value=${targetValue}` : ""}`;
+    return request(url, { method: "POST" });
+  },
+
+  // Update a goal (e.g. changing the target)
+  updateParticipantGoal: (goalId, payload) =>
+    request(`/participant/goals/${goalId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  // Delete a goal from the dashboard
+  deleteParticipantGoal: (goalId) =>
+    request(`/participant/goals/${goalId}`, { method: "DELETE" }),
+
+  // Log progress (e.g. "drank 500ml")
+  logGoalProgress: (goalId, payload) =>
+    request(`/participant/goals/${goalId}/log`, {
+      method: "POST",
+      body: JSON.stringify(payload), // payload should be { value: number, observed_at: string }
+    }),
+
+  // ── Participant Stats (for Charts) ──
+
+  // Gets the overall health score/stats for the logged-in participant
+  getMyStats: () => request("/stats/stats_me"),
+
+  // Gets the available elements (metrics) the participant is tracking
+  getAvailableElements: () => request("/stats/me/available-elements"),
+
+  // Gets specific data points for the participant's elements
+  getMyElementsData: () => request("/stats/me/elements"),
+
+  // Gets comparison data (Participant vs. Group average)
+  getMyVsGroupStats: () => request("/stats/me/vs-group"),
 };

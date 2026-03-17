@@ -107,7 +107,7 @@ export const PARTICIPANT_NAV = [
     roles: ["participant"],
   },
   {
-    label: "Health Goals",
+    label: "My Goals",
     to: "/participant/healthgoals",
     roles: ["participant"],
   },
