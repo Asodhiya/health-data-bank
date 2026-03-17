@@ -305,4 +305,59 @@ export const api = {
     request(`/goal-templates/${templateId}`, {
       method: "DELETE",
     }),
+
+  // ── Participant: Surveys ──
+  getAssignedSurveys: () => request("/participant/assigned"),
+
+  getParticipantFormDetail: (formId) => request(`/participant/${formId}`),
+
+  getSurveyResponse: (formId) => request(`/participant/${formId}/response`),
+
+  saveDraftAnswers: (formId, answers) =>
+    request(`/participant/${formId}/save`, {
+      method: "POST",
+      body: JSON.stringify(answers),
+    }),
+
+  submitSurvey: (formId, answers) =>
+    request(`/participant/${formId}/submit`, {
+      method: "POST",
+      body: JSON.stringify(answers),
+    }),
+
+  // ── Participant: Health Goals ──
+
+  // Browse templates created by researchers
+  browseGoalTemplates: () => request("/participant/goal-templates"),
+
+  // List goals already active on the participant's dashboard
+  listParticipantGoals: () => request("/participant/goals"),
+
+  // Get a single goal's status
+  getParticipantGoal: (goalId) => request(`/participant/goals/${goalId}`),
+
+  // Add a goal from a template.
+  // Note: target_value is passed as a query param per your backend
+  addGoalFromTemplate: (templateId, targetValue = null) => {
+    const url = `/participant/goals/add/${templateId}${targetValue ? `?target_value=${targetValue}` : ""}`;
+    return request(url, { method: "POST" });
+  },
+
+  // Update a goal (e.g. changing the target)
+  updateParticipantGoal: (goalId, payload) =>
+    request(`/participant/goals/${goalId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  // Delete a goal from the dashboard
+  deleteParticipantGoal: (goalId) =>
+    request(`/participant/goals/${goalId}`, { method: "DELETE" }),
+
+  // Log progress (e.g. "drank 500ml")
+  logGoalProgress: (goalId, payload) =>
+    request(`/participant/goals/${goalId}/log`, {
+      method: "POST",
+      body: JSON.stringify(payload), // payload should be { value: number, observed_at: string }
+    }),
 };
