@@ -41,6 +41,8 @@ class User(Base):
     Address: Mapped[str | None] = mapped_column(Text)
     reset_token_hash: Mapped[str | None] = mapped_column( String,nullable=True)
     reset_token_expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True),nullable=True)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    locked_until: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
 
     roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan", lazy="selectin")
     participant_profile = relationship("ParticipantProfile", back_populates="user", uselist=False, lazy="selectin")
