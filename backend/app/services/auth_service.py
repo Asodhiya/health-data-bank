@@ -1,6 +1,6 @@
 from fastapi import HTTPException, status, BackgroundTasks
 
-from app.core.security import PasswordHash, generate_reset_token, hash_reset_token, reset_token_expiry
+from app.core.security import PasswordHash, verify_password_async, generate_reset_token, hash_reset_token, reset_token_expiry
 from app.middleware.signup_validation import UserSignup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -24,7 +24,7 @@ async def authenticate_user(email: str, password: str, db: AsyncSession):
     
     stored_hash = user.password_hash
     # verify hashed pass if it matches with the stored hashed db
-    if not PasswordHash.from_str(stored_hash).verify(password):
+    if not await verify_password_async(password, stored_hash.encode("utf-8")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
@@ -149,4 +149,3 @@ async def reset_password(payload, db: AsyncSession):
     user.reset_token_expires_at = None
 
     await db.commit()
-   

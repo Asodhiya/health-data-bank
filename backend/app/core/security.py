@@ -1,6 +1,8 @@
+import asyncio
 import hashlib
 import os
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -45,6 +47,15 @@ class PasswordHash:
     @classmethod
     def from_str(cls, value: str):
         return cls(value.encode("utf-8"))
+
+
+_password_executor = ThreadPoolExecutor(max_workers=4)
+
+async def verify_password_async(password: str, hashed: bytes) -> bool:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _password_executor, bcrypt.checkpw, password.encode("utf-8"), hashed
+    )
 
 
 @dataclass
