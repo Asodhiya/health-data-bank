@@ -43,6 +43,12 @@ export const DASHBOARD_NAV = [
     roles: ["admin"],
   },
 
+  {
+    label: "Backup & Restore",
+    to: "/backup",
+    roles: ["admin"],
+  },
+
   /* =====================
      RESEARCHER
   ====================== */

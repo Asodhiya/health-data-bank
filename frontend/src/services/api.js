@@ -89,6 +89,64 @@ export const api = {
     return request(`/admin_only/audit-logs?${params.toString()}`);
   },
 
+  // ── Admin: Backup & Restore ──
+
+  // Downloads the full backup as a JSON file (blob, not JSON response).
+  // Uses raw fetch because the endpoint returns a binary blob with
+  // Content-Disposition header, not a JSON body.
+  downloadBackup: async () => {
+    const res = await fetch(`${API_BASE}/admin_only/backup`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Failed to create backup");
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?(.+?)"?$/);
+    const filename = match
+      ? match[1]
+      : `backup_${new Date().toISOString().split("T")[0]}.json`;
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  // Uploads a backup JSON file to restore the database.
+  // Uses raw fetch because the endpoint expects multipart/form-data,
+  // not a JSON body. Do NOT set Content-Type — the browser sets it
+  // automatically with the correct boundary for FormData.
+  restoreBackup: async (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/admin_only/restore`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Restore failed");
+    return data;
+  },
+
+  // List all backup records, newest first.
+  // TODO (backend): Add GET /admin_only/backups endpoint to admin_only.py
+  // that queries the backups table and returns backup_id, storage_path,
+  // checksum, created_at, created_by, and table_row_counts.
+  listBackups: () => request("/admin_only/backups"),
+
+  // Delete a backup record by ID.
+  // TODO (backend): Add DELETE /admin_only/backups/{backup_id} endpoint
+  // to admin_only.py that removes the record from the backups table.
+  deleteBackup: (backupId) =>
+    request(`/admin_only/backups/${backupId}`, { method: "DELETE" }),
+
   // ── Auth: Invite ──
   sendInvite: (email, target_role) =>
     request("/auth/signup_invite", {
