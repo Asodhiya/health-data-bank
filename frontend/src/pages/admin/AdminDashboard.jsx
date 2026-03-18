@@ -12,7 +12,7 @@ import {
   Pie,
 } from "recharts";
 import api from "../../utils/axiosInstance";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useNavigate } from "react-router-dom";
 // Mock data array (This mimics what the backend will eventually send)
 const mockSecurityLogs = [
   {
@@ -151,6 +151,19 @@ function timeAgo(isoString) {
 }
 
 /**
+ * Format an ISO date for the backup card.
+ */
+function formatBackupDate(isoString) {
+  if (!isoString) return "";
+  return new Date(isoString).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/**
  * Style map for each log type (matches existing Tailwind classes).
  */
 function getLogStyles(type) {
@@ -179,6 +192,11 @@ function getLogStyles(type) {
 export default function AdminDashboard() {
   const [showAllLogs, setShowAllLogs] = useState(false);
   const [users, setUsers] = useState([]);
+  const navigate = useNavigate();
+
+  // ── Backup history state ────────────────────────────────────────────────
+  const [recentBackups, setRecentBackups] = useState([]);
+  const [backupsLoading, setBackupsLoading] = useState(true);
 
   // Fetch users for the management part
   useEffect(() => {
@@ -186,6 +204,22 @@ export default function AdminDashboard() {
       .get("/admin_only/view_roles")
       .then((res) => setUsers(res.data))
       .catch((err) => console.log("Waiting for Admin Role API...", err));
+  }, []);
+
+  // Fetch recent backups (max 3 for dashboard preview)
+  // Gracefully handles the case where the backend endpoint doesn't exist yet
+  useEffect(() => {
+    authApi
+      .listBackups()
+      .then((data) => {
+        const sorted = Array.isArray(data) ? data : [];
+        setRecentBackups(sorted.slice(0, 3));
+      })
+      .catch(() => {
+        // Backend endpoint not deployed yet — show empty state
+        setRecentBackups([]);
+      })
+      .finally(() => setBackupsLoading(false));
   }, []);
 
   // THE CHART DATA (Keep this mock for your demo)
@@ -276,6 +310,135 @@ export default function AdminDashboard() {
             {logs.filter((l) => l.action === "LOGIN_FAILED").length} Failed
           </p>
           <p className="text-sm text-rose-600 font-bold relative z-10">Recent logins</p>
+        </div>
+      </div>
+
+      {/* BACKUP & RESTORE QUICK CARD */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden group hover:border-blue-200 hover:shadow-md transition-all">
+        {/* Header — clickable, navigates to full page */}
+        <div
+          onClick={() => navigate("/backup")}
+          className="px-6 py-5 flex items-center justify-between cursor-pointer"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-100 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-slate-800">Backup & Restore</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Create snapshots, restore, or schedule automatic backups
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+              {recentBackups.length > 0 ? `${recentBackups.length} on record` : "Protected"}
+            </span>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-slate-300 group-hover:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </div>
+
+        {/* Recent backups list */}
+        <div className="border-t border-slate-100">
+          {backupsLoading ? (
+            <div className="px-6 py-6 text-center">
+              <svg className="animate-spin h-5 w-5 mx-auto text-slate-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <p className="text-xs text-slate-400 mt-2">Loading backups…</p>
+            </div>
+          ) : recentBackups.length === 0 ? (
+            <div className="px-6 py-6 text-center">
+              <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-300 flex items-center justify-center mx-auto mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                </svg>
+              </div>
+              <p className="text-sm text-slate-400">No backups yet</p>
+              <p className="text-xs text-slate-300 mt-0.5">Create your first snapshot from the Backup & Restore page</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-50">
+              {recentBackups.map((b, i) => {
+                const totalRows = b.table_row_counts
+                  ? Object.values(b.table_row_counts).reduce((a, v) => a + v, 0)
+                  : null;
+                const tableCount = b.table_row_counts
+                  ? Object.keys(b.table_row_counts).length
+                  : null;
+                const checksumShort = b.checksum
+                  ? `${b.checksum.slice(0, 6)}…${b.checksum.slice(-4)}`
+                  : null;
+
+                return (
+                  <div
+                    key={b.backup_id || i}
+                    className="px-6 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-slate-50/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      {/* Green check icon */}
+                      <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-700 truncate">
+                          {b.storage_path || b.snapshot_name || `Backup ${i + 1}`}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                          {/* Date */}
+                          <span className="flex items-center gap-1 text-xs text-slate-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            {formatBackupDate(b.created_at)}
+                          </span>
+                          {/* Tables + rows */}
+                          {tableCount && (
+                            <span className="flex items-center gap-1 text-xs text-slate-400">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                              </svg>
+                              {tableCount} tables{totalRows ? ` · ${totalRows.toLocaleString()} rows` : ""}
+                            </span>
+                          )}
+                          {/* Checksum */}
+                          {checksumShort && (
+                            <span className="text-xs text-slate-300 font-mono">{checksumShort}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right side: badges + time ago */}
+                    <div className="flex items-center gap-2 shrink-0 pl-11 sm:pl-0">
+                      <span className="text-[10px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                        Verified
+                      </span>
+                      <span className="text-xs text-slate-400">{timeAgo(b.created_at)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* "View all" footer */}
+              <div
+                onClick={() => navigate("/backup")}
+                className="px-6 py-3 text-center cursor-pointer hover:bg-slate-50 transition-colors"
+              >
+                <span className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+                  View all backups & settings →
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
