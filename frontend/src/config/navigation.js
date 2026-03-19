@@ -13,7 +13,7 @@ export const DASHBOARD_NAV = [
   {
     label: "Groups / Cohorts",
     to: "/groups",
-    roles: ["admin", "researcher"], //removed caretaker for now since they won't be managing groups
+    roles: ["researcher"], //removed caretaker and admin for now since they won't be managing groups
   },
 
   /* =====================

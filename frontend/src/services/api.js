@@ -147,11 +147,89 @@ export const api = {
   deleteBackup: (backupId) =>
     request(`/admin_only/backups/${backupId}`, { method: "DELETE" }),
 
+  // ── Admin: Groups (REAL — backed by /admin_only/groups) ──
+
+  adminGetGroups: () => request("/admin_only/groups"),
+
+  adminCreateGroup: (payload) =>
+    request("/admin_only/groups", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  adminDeleteGroup: (groupId) =>
+    request(`/admin_only/groups/${groupId}`, { method: "DELETE" }),
+
+  // ── Admin: Caretakers (REAL — backed by /admin_only/caretakers) ──
+
+  adminGetCaretakers: () => request("/admin_only/caretakers"),
+
+  // Assign a caretaker to a group.
+  // Backend expects: { user_id: UUID, group_id: UUID }
+  // where user_id is the caretaker's user account ID.
+  adminAssignCaretaker: (userId, groupId) =>
+    request("/admin_only/assign-caretaker", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId, group_id: groupId }),
+    }),
+
+  // Unassign the caretaker from a group.
+  adminUnassignCaretaker: (groupId) =>
+    request(`/admin_only/assign-caretaker/${groupId}`, { method: "DELETE" }),
+
+  // ── Admin: Invites ──
+  // TODO (backend): Add GET /admin_only/invites — list all invites from
+  //   the signup_invites table with joined role name, group name, and
+  //   invited_by user name. Include status (pending/accepted/expired/revoked).
+  // TODO (backend): Add DELETE /admin_only/invites/{invite_id} — revoke
+  //   a pending invite by setting used=true or adding a revoked_at column.
+  adminListInvites: () => request("/admin_only/invites"),
+
+  adminRevokeInvite: (inviteId) =>
+    request(`/admin_only/invites/${inviteId}`, { method: "DELETE" }),
+
+  // ── Admin: User Management ──
+  // TODO (backend): Add GET /admin_only/users — list all users with
+  //   role-specific profile data (participant_profile, caretaker_profile, etc).
+  //   Should include: user_id, first_name, last_name, email, phone, role,
+  //   status (active/inactive), joined_at, and nested profile fields.
+  // TODO (backend): Add PATCH /admin_only/users/{id} — update user fields
+  //   (first_name, last_name, email, phone). If temp_password is provided,
+  //   hash it and set a must_change_password flag.
+  // TODO (backend): Add PATCH /admin_only/users/{id}/status — toggle
+  //   active/inactive. When deactivating, invalidate active sessions.
+  // TODO (backend): Add DELETE /admin_only/users/{id}?mode=anonymize|permanent
+  //   anonymize: replace first_name/last_name/email/phone with placeholder
+  //   values ("Deleted User #id", "deleted_id@removed.local") but keep all
+  //   linked submissions, goals, and health data intact.
+  //   permanent: cascade delete user and all associated data.
+  adminListUsers: () => request("/admin_only/users"),
+
+  adminUpdateUser: (userId, payload) =>
+    request(`/admin_only/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  adminUpdateUserStatus: (userId, status) =>
+    request(`/admin_only/users/${userId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+
+  adminDeleteUser: (userId, mode) =>
+    request(`/admin_only/users/${userId}`, {
+      method: "DELETE",
+      body: JSON.stringify({ mode }),
+    }),
+
   // ── Auth: Invite ──
-  sendInvite: (email, target_role) =>
+  // Updated: now accepts optional group_id for participant invites.
+  // Backend SignupInviteRequest already has group_id: Optional[UUID].
+  sendInvite: (email, target_role, group_id) =>
     request("/auth/signup_invite", {
       method: "POST",
-      body: JSON.stringify({ email, target_role }),
+      body: JSON.stringify({ email, target_role, ...(group_id ? { group_id } : {}) }),
     }),
 
   validateInvite: (token) => request(`/auth/validate-invite?token=${token}`),
