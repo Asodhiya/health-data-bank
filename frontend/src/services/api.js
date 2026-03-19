@@ -75,7 +75,7 @@ export const api = {
     }),
 
   unpublishForm: (formId) =>
-    request(`/form_management/${formId}/unpublish`, {
+    request(`/form_management/${formId}/unpublish-all`, {
       method: "POST",
     }),
 

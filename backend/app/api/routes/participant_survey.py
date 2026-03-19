@@ -45,7 +45,12 @@ async def get_survey_response_route(form_id: UUID,db: AsyncSession = Depends(get
         "answers": [
             {
                 "field_id": ans.field_id,
-                "value": ans.value_text or ans.value_number or ans.value_json or ans.value_date
+                "value": (
+                    ans.value_text if ans.value_text is not None
+                    else ans.value_number if ans.value_number is not None
+                    else ans.value_json if ans.value_json is not None
+                    else ans.value_date
+                )
             }
             for ans in submission.answers
         ]

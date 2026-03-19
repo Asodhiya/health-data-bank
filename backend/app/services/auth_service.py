@@ -1,3 +1,4 @@
+import os
 from fastapi import HTTPException, status, BackgroundTasks
 
 from app.core.security import PasswordHash, verify_password_async, generate_reset_token, hash_reset_token, reset_token_expiry
@@ -141,7 +142,7 @@ async def reset_forgot_password( payload: ForgotPasswordIn, background: Backgrou
     user.reset_token_expires_at = reset_token_expiry(15)
 
     await db.commit()
-    FRONTEND_URL = "http://localhost:5173"
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
     reset_link = f"{FRONTEND_URL}/reset-password?token={raw_token}"
     send_reset_email(user.email, reset_link)
     # background.add_task(send_reset_email, user.email, reset_link)

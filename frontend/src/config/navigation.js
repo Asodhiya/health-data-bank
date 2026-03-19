@@ -64,7 +64,7 @@ export const DASHBOARD_NAV = [
     roles: ["researcher"],
   },
 
-  { label: "Create Golas", to: "researcher/goals", roles: ["researcher"] },
+  { label: "Create Goals", to: "/researcher/goals", roles: ["researcher"] },
 
   /* =====================
      CARETAKER
