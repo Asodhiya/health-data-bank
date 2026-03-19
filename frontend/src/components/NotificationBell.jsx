@@ -56,7 +56,7 @@ export default function NotificationBell({ role }) {
   const fetchNotifications = useCallback(async () => {
     try {
       const data = await api.getNotifications(role);
-      setNotifications(data);
+      setNotifications(data.map(n => ({ ...n, id: n.notification_id || n.id })));
     } catch {
       setNotifications(MOCK_NOTIFICATIONS);
     }

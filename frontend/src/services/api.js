@@ -403,6 +403,8 @@ export const api = {
 
   caretakerGetReport: (reportId) => request(`/caretaker/reports/${reportId}`),
 
+  caretakerListReports: () => request("/caretaker/reports"),
+
   // Invites (no backend endpoint yet)
   caretakerListInvites: () => request("/caretaker/invites"),
 

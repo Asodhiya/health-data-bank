@@ -65,15 +65,7 @@ function generateTrends(months, metrics) {
 const MONTH_OPTIONS = ["Jan 2026", "Feb 2026", "Mar 2026", "Apr 2026", "May 2026", "Jun 2026", "Jul 2026", "Aug 2026", "Sep 2025", "Oct 2025", "Nov 2025", "Dec 2025"];
 const MONTH_SHORT = ["Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
 
-const MOCK_REPORT_HISTORY = [
-  { id: "r1", scope: "group", title: "Group Report — March 2026", createdAt: "2026-03-10", metrics: ["Systolic BP", "Weight", "Pain Level"], type: "graph" },
-  { id: "r2", scope: "comparison", title: "James Kowalski vs Group", createdAt: "2026-03-08", metrics: ["BP", "Surveys", "Goals"], type: "numeric" },
-  { id: "r3", scope: "trends", title: "Health Trends — Priya Sharma", createdAt: "2026-02-28", metrics: ["Systolic BP", "Weight"], type: "graph" },
-  { id: "r4", scope: "group", title: "Group Report — February 2026", createdAt: "2026-02-15", metrics: ["All Vitals", "Engagement"], type: "graph" },
-  { id: "r5", scope: "comparison", title: "Sarah Chen vs Group", createdAt: "2026-02-10", metrics: ["Vitals", "Lifestyle"], type: "numeric" },
-  { id: "r6", scope: "trends", title: "Health Trends — Marcus Webb", createdAt: "2026-01-25", metrics: ["Pain Level", "Exercise"], type: "graph" },
-  { id: "r7", scope: "group", title: "Group Report — January 2026", createdAt: "2026-01-12", metrics: ["All metrics"], type: "graph" },
-];
+
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
 
@@ -812,12 +804,37 @@ function HealthTrendsReport({ participants = MOCK_PARTICIPANTS }) {
 function ReportHistory() {
   const [search, setSearch] = useState("");
   const [scopeFilter, setScopeFilter] = useState("all");
+  const [reports, setReports] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
 
-  const filtered = useMemo(() => MOCK_REPORT_HISTORY.filter(r => {
+  useEffect(() => {
+    api.caretakerListReports()
+      .then(data => {
+        const transformed = (data || []).map(r => ({
+          id: r.report_id,
+          scope: r.scope || "unknown",
+          title: `${(r.scope || "Report").charAt(0).toUpperCase() + (r.scope || "report").slice(1)} Report — ${fmt(r.created_at)}`,
+          createdAt: r.created_at,
+        }));
+        setReports(transformed);
+      })
+      .catch(() => setReports([]))
+      .finally(() => setHistoryLoading(false));
+  }, []);
+
+  const filtered = useMemo(() => reports.filter(r => {
     if (scopeFilter !== "all" && r.scope !== scopeFilter) return false;
     if (search && !r.title.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
-  }), [search, scopeFilter]);
+  }), [search, scopeFilter, reports]);
+
+  if (historyLoading) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
+        <p className="text-sm text-slate-400 animate-pulse">Loading report history…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -834,11 +851,11 @@ function ReportHistory() {
         </div>
       </div>
 
-      <p className="text-xs text-slate-400 px-1">{filtered.length} reports</p>
+      <p className="text-xs text-slate-400 px-1">{filtered.length} report{filtered.length !== 1 ? "s" : ""}</p>
 
       {filtered.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
-          <p className="text-sm text-slate-400">No reports match your search.</p>
+          <p className="text-sm text-slate-400">{reports.length === 0 ? "No reports generated yet. Use the Group or Comparison tabs to create one." : "No reports match your search."}</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -848,12 +865,11 @@ function ReportHistory() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-700 transition-colors">{r.title}</p>
                   <ScopeBadge scope={r.scope} />
-                  <span className="text-xs text-slate-300 bg-slate-50 border border-slate-100 px-1.5 py-0.5 rounded capitalize">{r.type}</span>
                 </div>
                 <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
                   <span>{fmt(r.createdAt)}</span>
                   <span>·</span>
-                  <span>{r.metrics.join(", ")}</span>
+                  <span className="capitalize">{r.scope} report</span>
                 </div>
               </div>
               <Tip text="View report">
