@@ -151,7 +151,6 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
   const [chartMetric, setChartMetric] = useState(null);
   const [error, setError] = useState(null);
 
-  // Auto-select first 4 elements when they load
   useEffect(() => {
     if (elements.length > 0 && metrics.length === 0) {
       setMetrics(elements.slice(0, 4).map(e => e.element_id));
@@ -166,7 +165,6 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
     try {
       const groupId = selectedGroupId !== "all" ? selectedGroupId : groups[0]?.id;
       if (!groupId) { setError("No group selected."); setGenerating(false); return; }
-
       const payload = {
         element_ids: metrics,
         date_from: dateFrom || null,
@@ -185,10 +183,8 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
     }
   }
 
-  // Reset report when group changes
   useEffect(() => { setReport(null); }, [selectedGroupId]);
 
-  // ── Configuration view ──
   if (!report) {
     return (
       <div className="space-y-5">
@@ -211,12 +207,10 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
           ) : (
             <>
               <MetricPicker elements={elements} selected={metrics} onChange={setMetrics} />
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <DateRangeRow from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
                 <ReportTypeRow value={reportType} onChange={setReportType} />
               </div>
-
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Include Participants</label>
                 <div className="flex gap-1.5">
@@ -225,9 +219,7 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
                   ))}
                 </div>
               </div>
-
               {error && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2.5 rounded-xl">{error}</p>}
-
               <button onClick={handleGenerate} disabled={metrics.length === 0 || generating}
                 className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                 {generating ? (
@@ -243,7 +235,6 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
     );
   }
 
-  // ── Results view ──
   const elems = report.elements || [];
 
   return (
@@ -252,7 +243,6 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         Back to Configuration
       </button>
-
       <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="font-bold text-slate-700">Group Report — {groupName}</span>
         <span>·</span><span>{elems.length} metrics</span>
@@ -268,7 +258,6 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
         </div>
       ) : (
         <>
-          {/* Summary cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {elems.map(e => (
               <div key={e.element_id} onClick={() => setChartMetric(e.element_id)}
@@ -280,8 +269,6 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
               </div>
             ))}
           </div>
-
-          {/* Bar chart */}
           {reportType === "graph" && (
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
               <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -308,8 +295,6 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
               </div>
             </div>
           )}
-
-          {/* Numeric table */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Numeric Summary</p>
@@ -343,12 +328,13 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
   );
 }
 
-// ─── Tab: Comparison Report ─────────────────────────────────────────────────────
+// ─── Tab: Comparison Report (with MetricPicker) ─────────────────────────────────
 
-function ComparisonTab({ participants, groups, selectedGroupId }) {
+function ComparisonTab({ participants, groups, selectedGroupId, elements }) {
   const [selectedParticipant, setSelectedParticipant] = useState("");
   const [compareWith, setCompareWith] = useState("group");
   const [compareParticipantId, setCompareParticipantId] = useState("");
+  const [metrics, setMetrics] = useState([]);
   const [dateFrom, setDateFrom] = useState("2025-09-01");
   const [dateTo, setDateTo] = useState(new Date().toISOString().split("T")[0]);
   const [generating, setGenerating] = useState(false);
@@ -356,6 +342,13 @@ function ComparisonTab({ participants, groups, selectedGroupId }) {
   const [error, setError] = useState(null);
 
   const groupName = selectedGroupId === "all" ? "All Groups" : groups.find(g => g.id === selectedGroupId)?.name || "Group";
+
+  // Auto-select first 4 elements
+  useEffect(() => {
+    if (elements.length > 0 && metrics.length === 0) {
+      setMetrics(elements.slice(0, 4).map(e => e.element_id));
+    }
+  }, [elements]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -368,13 +361,11 @@ function ComparisonTab({ participants, groups, selectedGroupId }) {
       if (compareWith === "group") {
         queryParams.group_id = selectedGroupId !== "all" ? selectedGroupId : groups[0]?.id;
       }
-
       const payload = {
         date_from: dateFrom || null,
         date_to: dateTo || null,
-        element_ids: [],
+        element_ids: metrics.length > 0 ? metrics : [],
       };
-
       const data = await api.caretakerGenerateComparisonReport(selectedParticipant, queryParams, payload);
       setReport(data.payload || data);
     } catch (err) {
@@ -432,12 +423,14 @@ function ComparisonTab({ participants, groups, selectedGroupId }) {
           </div>
         )}
 
+        <MetricPicker elements={elements} selected={metrics} onChange={setMetrics} label="Metrics to Compare" />
+
         <DateRangeRow from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
 
         {error && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2.5 rounded-xl">{error}</p>}
 
         <button onClick={handleGenerate}
-          disabled={!selectedParticipant || generating || (compareWith === "participant" && !compareParticipantId)}
+          disabled={!selectedParticipant || metrics.length === 0 || generating || (compareWith === "participant" && !compareParticipantId)}
           className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
           {generating ? (
             <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Generating...</>
@@ -449,7 +442,6 @@ function ComparisonTab({ participants, groups, selectedGroupId }) {
     );
   }
 
-  // ── Results ──
   const elems = report.elements || [];
   const subjectName = participants.find(p => p.participant_id === selectedParticipant)?.name || "Participant";
   const compLabel = compareWith === "group" ? groupName : compareWith === "all" ? "All Participants" : participants.find(p => p.participant_id === compareParticipantId)?.name || "Comparison";
@@ -461,7 +453,6 @@ function ComparisonTab({ participants, groups, selectedGroupId }) {
         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         Back to Configuration
       </button>
-
       <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="font-bold text-slate-700">{subjectName} vs {compLabel}</span>
         <span>·</span><span>{elems.length} elements</span>
@@ -491,7 +482,6 @@ function ComparisonTab({ participants, groups, selectedGroupId }) {
               </ResponsiveContainer>
             </div>
           </div>
-
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Detailed Comparison</p>
@@ -528,7 +518,7 @@ function ComparisonTab({ participants, groups, selectedGroupId }) {
   );
 }
 
-// ─── Tab: Health Trends ─────────────────────────────────────────────────────────
+// ─── Tab: Health Trends (with metric visibility toggles in results) ─────────────
 
 function TrendsTab({ participants, elements }) {
   const [selectedId, setSelectedId] = useState("");
@@ -538,8 +528,12 @@ function TrendsTab({ participants, elements }) {
   const [loading, setLoading] = useState(false);
   const [trends, setTrends] = useState(null);
   const [error, setError] = useState(null);
+  const [visibleMetrics, setVisibleMetrics] = useState([]);
 
-  // Auto-select first 3 elements
+  const toggleVisible = (id) => {
+    setVisibleMetrics(prev => prev.includes(id) ? prev.filter(e => e !== id) : [...prev, id]);
+  };
+
   useEffect(() => {
     if (elements.length > 0 && metrics.length === 0) {
       setMetrics(elements.slice(0, 3).map(e => e.element_id));
@@ -555,10 +549,10 @@ function TrendsTab({ participants, elements }) {
       if (metrics.length > 0) params.element_ids = metrics;
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo) params.date_to = dateTo;
-
       const data = await api.caretakerGetHealthTrends(selectedId, params);
       const filtered = Array.isArray(data) ? data.filter(t => t.points && t.points.length > 0) : [];
       setTrends(filtered);
+      setVisibleMetrics(filtered.map(t => t.element_id));
     } catch (err) {
       console.error("Health trends fetch failed:", err);
       setError(err.message || "Failed to load health trends.");
@@ -613,9 +607,11 @@ function TrendsTab({ participants, elements }) {
   }
 
   // ── Results ──
+  const displayedTrends = trends.filter(t => visibleMetrics.includes(t.element_id));
+
   return (
     <div className="space-y-5">
-      <button onClick={() => setTrends(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+      <button onClick={() => { setTrends(null); setVisibleMetrics([]); }} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         Back to Configuration
       </button>
@@ -626,12 +622,40 @@ function TrendsTab({ participants, elements }) {
         <span>·</span><span>{fmt(dateFrom)} — {fmt(dateTo)}</span>
       </div>
 
+      {/* Metric visibility toggles */}
+      {trends.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Show / Hide Metrics</p>
+          <div className="flex flex-wrap gap-2">
+            {trends.map((t, i) => {
+              const isVisible = visibleMetrics.includes(t.element_id);
+              return (
+                <button key={t.element_id} onClick={() => toggleVisible(t.element_id)}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                    isVisible ? "text-white border-transparent" : "bg-white text-slate-400 border-slate-200 line-through"
+                  }`}
+                  style={isVisible ? { backgroundColor: COLORS[i % COLORS.length] } : undefined}>
+                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isVisible ? "bg-white/40" : "bg-slate-300"}`} />
+                  {t.label}
+                  <span className={isVisible ? "text-white/60" : "text-slate-300"}>({t.unit})</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-slate-400 mt-2">Click a metric to show or hide its chart below</p>
+        </div>
+      )}
+
       {trends.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
           <p className="text-sm text-slate-400">No trend data found for this participant in the selected date range.</p>
-          <button onClick={() => setTrends(null)} className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-800">Adjust configuration</button>
+          <button onClick={() => { setTrends(null); setVisibleMetrics([]); }} className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-800">Adjust configuration</button>
         </div>
-      ) : trends.map((t, idx) => (
+      ) : displayedTrends.length === 0 ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-10 text-center">
+          <p className="text-sm text-slate-400">All metrics are hidden. Click a metric above to show its chart.</p>
+        </div>
+      ) : displayedTrends.map((t, idx) => (
         <div key={t.element_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
           <div className="flex items-center justify-between mb-4">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{t.label} <span className="text-slate-300 font-normal normal-case">({t.unit})</span></p>
@@ -652,7 +676,7 @@ function TrendsTab({ participants, elements }) {
                   tickFormatter={d => new Date(d).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} />
                 <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
                 <ReTooltip contentStyle={CHART_TT} formatter={v => `${v} ${t.unit}`} labelFormatter={d => fmt(d)} />
-                <Line type="monotone" dataKey="value" name={t.label} stroke={COLORS[idx % COLORS.length]} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                <Line type="monotone" dataKey="value" name={t.label} stroke={COLORS[trends.indexOf(t) % COLORS.length]} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -712,7 +736,6 @@ function HistoryTab() {
     );
   }
 
-  // ── Detail view ──
   if (viewing) {
     const elems = viewing.payload?.elements || [];
     const isComparison = viewing.scope === "comparison";
@@ -723,7 +746,6 @@ function HistoryTab() {
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           Back to History
         </button>
-
         <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
           <ScopeBadge scope={viewing.scope} />
           <span>·</span><span>Generated {fmt(viewing.createdAt)}</span>
@@ -742,7 +764,6 @@ function HistoryTab() {
           </div>
         ) : (
           <>
-            {/* Summary cards for group reports */}
             {!isComparison && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {elems.map(e => (
@@ -754,8 +775,6 @@ function HistoryTab() {
                 ))}
               </div>
             )}
-
-            {/* Data table */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Report Data</p>
@@ -806,7 +825,6 @@ function HistoryTab() {
     );
   }
 
-  // ── List view ──
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex flex-col sm:flex-row gap-3">
@@ -821,9 +839,7 @@ function HistoryTab() {
           ))}
         </div>
       </div>
-
       <p className="text-xs text-slate-400 px-1">{filtered.length} report{filtered.length !== 1 ? "s" : ""}</p>
-
       {filtered.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
           <p className="text-sm text-slate-400">{reports.length === 0 ? "No reports generated yet. Use the Group or Comparison tabs to create one." : "No reports match your search."}</p>
@@ -916,29 +932,22 @@ export default function ReportsPage() {
         api.caretakerListParticipants().catch(() => []),
         api.caretakerGetGroups().catch(() => []),
       ]);
-
       setParticipants(Array.isArray(pData) ? pData : []);
-
       const transformedGroups = Array.isArray(gData)
         ? gData.map(g => ({ id: g.group_id, name: g.name }))
         : [];
       setGroups(transformedGroups);
-
-      // Fetch elements from first group (or selected group)
       if (Array.isArray(gData) && gData.length > 0) {
         try {
           const elemData = await api.caretakerGetGroupElements(gData[0].group_id);
           const elems = Array.isArray(elemData) ? elemData.map(e => ({
-            ...e,
-            element_id: e.element_id,
+            ...e, element_id: e.element_id,
             label: e.label || e.code || "Unknown",
             unit: e.unit || "",
             category: e.category || inferCategory(e.label || e.code || ""),
           })) : [];
           setElements(elems);
-        } catch {
-          setElements([]);
-        }
+        } catch { setElements([]); }
       }
     } catch (err) {
       console.warn("Failed to load reports data:", err.message);
@@ -947,7 +956,6 @@ export default function ReportsPage() {
     }
   }, []);
 
-  // Refetch elements when group changes
   useEffect(() => {
     if (selectedGroupId === "all" || groups.length === 0) return;
     api.caretakerGetGroupElements(selectedGroupId)
@@ -964,7 +972,6 @@ export default function ReportsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Filter participants by selected group
   const filteredParticipants = selectedGroupId === "all"
     ? participants
     : participants.filter(p => p.group_id === selectedGroupId);
@@ -1005,7 +1012,7 @@ export default function ReportsPage() {
       </div>
 
       {activeTab === "group" && <GroupReportTab groups={groups} selectedGroupId={selectedGroupId} elements={elements} />}
-      {activeTab === "comparison" && <ComparisonTab participants={filteredParticipants} groups={groups} selectedGroupId={selectedGroupId} />}
+      {activeTab === "comparison" && <ComparisonTab participants={filteredParticipants} groups={groups} selectedGroupId={selectedGroupId} elements={elements} />}
       {activeTab === "trends" && <TrendsTab participants={filteredParticipants} elements={elements} />}
       {activeTab === "history" && <HistoryTab />}
     </div>
@@ -1013,8 +1020,6 @@ export default function ReportsPage() {
 }
 
 // ─── Category inference helper ──────────────────────────────────────────────────
-// Groups elements into categories for the MetricPicker based on label keywords.
-// In the future, this could come from a `category` field on DataElement itself.
 
 function inferCategory(label) {
   const l = label.toLowerCase();
