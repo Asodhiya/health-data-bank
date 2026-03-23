@@ -38,6 +38,7 @@ import UserManagementPage from "./pages/admin/UserManagementPage";
 import AuditLogPage from "./pages/admin/AuditLogPage";
 import BackupRestorePage from "./pages/admin/BackupRestorePage";
 import SystemSettingsPage from "./pages/admin/SystemSettingsPage";
+import AdminOnboardingPage from "./pages/admin/AdminOnboardingPage";
 
 // --- Researcher pages ---
 import DataElementManager from "./pages/researcher/DataElementMangaer";
@@ -82,6 +83,7 @@ function App() {
 
         {/* ── Admin ── */}
         <Route element={<AdminRoute />}>
+          <Route path="/admin/onboarding" element={<AdminOnboardingPage />} />
           <Route element={<DashboardLayout role={role} />}>
             <Route path="/admin" element={<AdminDashboard />} />
             <Route

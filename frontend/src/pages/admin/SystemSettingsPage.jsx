@@ -11,9 +11,6 @@ function loadSettings() { try { const r = localStorage.getItem(STORAGE_KEY); ret
 function saveSettings(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {} }
 
 const DEFAULTS = {
-  // Security — matches backend: auth_service.py, signup_validation.py, cookies.py
-  minPasswordLength: 8, requireUppercase: true, requireLowercase: true, requireDigit: true, requireSpecialChar: true,
-  maxFailedAttempts: 5, lockoutDurationMinutes: 15, sessionTimeoutMinutes: 30, resetTokenExpiryMinutes: 15,
   // Rate Limiting — TODO: no backend middleware yet
   rateLimitEnabled: true, rateLimitRequests: 100, rateLimitWindowMinutes: 1, rateLimitLoginAttempts: 10, rateLimitLoginWindowMinutes: 5,
   // Email — matches backend: email_sender.py (smtp.gmail.com:587)
@@ -23,8 +20,6 @@ const DEFAULTS = {
   emailDigestEnabled: false, emailDigestFrequency: "daily",
   // Registration — matches backend: security.py InviteTokenGenerator (48h expiry)
   inviteOnly: true, inviteExpiryHours: 48, allowedRoles: ["participant", "caretaker", "researcher"], requirePhoneOnSignup: true,
-  // Timezone / Locale — display-only, no backend equivalent yet
-  timezone: "America/Halifax", dateFormat: "MMM D, YYYY", timeFormat: "12h",
   // Data Retention — TODO: no backend purge job yet
   retentionEnabled: false, retentionAuditLogDays: 365, retentionNotificationDays: 90, retentionSessionDays: 30,
   anonymizeOnDelete: true, allowParticipantDataExport: true, allowParticipantDataDeletion: false,
@@ -34,7 +29,6 @@ const DEFAULTS = {
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 const I = ({ d, c = "h-5 w-5" }) => <svg xmlns="http://www.w3.org/2000/svg" className={c} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} /></svg>;
-const IconShield = () => <I d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />;
 const IconMail = () => <I d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />;
 const IconUserAdd = () => <I d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />;
 const IconServer = () => <I d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />;
@@ -42,7 +36,6 @@ const IconCheck = () => <I d="M5 13l4 4L19 7" />;
 const IconX = () => <I d="M6 18L18 6M6 6l12 12" />;
 const IconRefresh = () => <I d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />;
 const IconBell = () => <I d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />;
-const IconGlobe = () => <I d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />;
 const IconTrash = () => <I d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />;
 const IconArchive = () => <I d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />;
 const IconTool = () => <I d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />;
@@ -236,7 +229,7 @@ export default function SystemSettingsPage() {
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div><h1 className="text-2xl font-bold text-slate-800">System Settings</h1><p className="text-sm text-slate-500 mt-1">Configure security, email, notifications, data retention, and system health</p></div>
+        <div><h1 className="text-2xl font-bold text-slate-800">System Settings</h1><p className="text-sm text-slate-500 mt-1">Configure email, notifications, rate limiting, data retention, and system health</p></div>
         <div className="flex items-center gap-3 shrink-0">
           <button onClick={handleReset} className="px-4 py-2 text-sm font-medium text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors">Reset to Defaults</button>
           <button onClick={handleSave} disabled={!hasChanges} className={`px-5 py-2 text-sm font-semibold rounded-xl transition-all flex items-center gap-2 ${hasChanges ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-slate-100 text-slate-400 cursor-not-allowed"}`}><IconCheck /> Save Changes</button>
@@ -280,37 +273,6 @@ export default function SystemSettingsPage() {
         <button onClick={fetchHealth} disabled={healthLoading} className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors disabled:opacity-50">
           {healthLoading ? <Spinner /> : <IconRefresh />} Re-check services
         </button>
-      </Section>
-
-      {/* ── Security ──────────────────────────────────────────────────────── */}
-      <Section icon={<IconShield />} title="Security" description="Password policy, account lockout, and session management" badge="Active" badgeColor="bg-emerald-100 text-emerald-700">
-        <div>
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Password Policy</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            <NumInput label="Minimum Length" value={settings.minPasswordLength} onChange={v => set("minPasswordLength", v)} min={6} max={32} suffix="characters" description="Currently enforced: 8 characters minimum" />
-          </div>
-          <div className="space-y-3 bg-slate-50 rounded-xl p-4">
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Required Character Types</p>
-            <Toggle label="Uppercase letter (A-Z)" checked={settings.requireUppercase} onChange={v => set("requireUppercase", v)} />
-            <Toggle label="Lowercase letter (a-z)" checked={settings.requireLowercase} onChange={v => set("requireLowercase", v)} />
-            <Toggle label="Digit (0-9)" checked={settings.requireDigit} onChange={v => set("requireDigit", v)} />
-            <Toggle label="Special character (!@#$%…)" checked={settings.requireSpecialChar} onChange={v => set("requireSpecialChar", v)} />
-          </div>
-        </div>
-        <div>
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Account Lockout</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <NumInput label="Max Failed Attempts" value={settings.maxFailedAttempts} onChange={v => set("maxFailedAttempts", v)} min={1} max={20} suffix="attempts" description="Account locks after this many consecutive failures" />
-            <NumInput label="Lockout Duration" value={settings.lockoutDurationMinutes} onChange={v => set("lockoutDurationMinutes", v)} min={1} max={1440} suffix="minutes" description="How long the account stays locked" />
-          </div>
-        </div>
-        <div>
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Session Management</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <NumInput label="Session Timeout" value={settings.sessionTimeoutMinutes} onChange={v => set("sessionTimeoutMinutes", v)} min={5} max={480} suffix="minutes" description="Token expires after this period of inactivity" />
-            <NumInput label="Password Reset Expiry" value={settings.resetTokenExpiryMinutes} onChange={v => set("resetTokenExpiryMinutes", v)} min={5} max={60} suffix="minutes" description="Reset link becomes invalid after this time" />
-          </div>
-        </div>
       </Section>
 
       {/* ── API Rate Limiting ─────────────────────────────────────────────── */}
@@ -402,26 +364,6 @@ export default function SystemSettingsPage() {
           </div>
         </div>
         <Toggle label="Require phone number on sign-up" description="If disabled, the phone field becomes optional during registration" checked={settings.requirePhoneOnSignup} onChange={v => set("requirePhoneOnSignup", v)} />
-      </Section>
-
-      {/* ── Timezone / Locale ─────────────────────────────────────────────── */}
-      <Section icon={<IconGlobe />} title="Timezone & Locale" description="Default display settings for dates and times">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <SelectInput label="Timezone" value={settings.timezone} onChange={v => set("timezone", v)}
-            options={[
-              { value: "America/Halifax", label: "Atlantic (Halifax, UTC−4)" },
-              { value: "America/Toronto", label: "Eastern (Toronto, UTC−5)" },
-              { value: "America/Chicago", label: "Central (Chicago, UTC−6)" },
-              { value: "America/Denver", label: "Mountain (Denver, UTC−7)" },
-              { value: "America/Vancouver", label: "Pacific (Vancouver, UTC−8)" },
-              { value: "UTC", label: "UTC" },
-              { value: "Europe/London", label: "London (UTC+0)" },
-            ]} description="Used for displaying dates in reports and dashboards" />
-          <SelectInput label="Date Format" value={settings.dateFormat} onChange={v => set("dateFormat", v)}
-            options={[{ value: "MMM D, YYYY", label: "Mar 18, 2026" }, { value: "DD/MM/YYYY", label: "18/03/2026" }, { value: "YYYY-MM-DD", label: "2026-03-18" }, { value: "MM/DD/YYYY", label: "03/18/2026" }]} />
-          <SelectInput label="Time Format" value={settings.timeFormat} onChange={v => set("timeFormat", v)}
-            options={[{ value: "12h", label: "12-hour (3:00 PM)" }, { value: "24h", label: "24-hour (15:00)" }]} />
-        </div>
       </Section>
 
       {/* ── Data Retention / Privacy ──────────────────────────────────────── */}

@@ -190,6 +190,15 @@ export const api = {
       body: JSON.stringify({ mode }),
     }),
 
+  // Admin Profile (requires backend changes)
+  adminGetProfile: () => request("/admin_only/profile"),
+
+  adminUpdateProfile: (payload) =>
+    request("/admin_only/profile", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
   // ── Auth: Invite ──
   sendInvite: (email, target_role, group_id) =>
     request("/auth/signup_invite", {
