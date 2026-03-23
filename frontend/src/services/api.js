@@ -85,6 +85,11 @@ export const api = {
       method: "POST",
     }),
 
+  unpublishFormFromGroup: (formId, groupId) =>
+    request(`/form_management/${formId}/unpublish/${groupId}`, {
+      method: "POST",
+    }),
+
   getFormDeployments: (formId) =>
     request(`/form_management/${formId}/deployments`),
 
