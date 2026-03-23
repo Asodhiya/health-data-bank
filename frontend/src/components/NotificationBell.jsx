@@ -2,19 +2,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
 
-// ─── Mock Notifications (fallback when backend unavailable) ─────────────────────
-
-const MOCK_NOTIFICATIONS = [
-  { id: 1, title: "New submission", message: "James Kowalski submitted Perceived Stress Scale (PSS)", created_at: "2026-03-14T10:30:00Z", is_read: false, type: "submission", link: "/caretaker/participants/p7?tab=submissions" },
-  { id: 2, title: "High BP alert", message: "James Kowalski's systolic BP is 142 mmHg — above the 140 threshold", created_at: "2026-03-14T09:15:00Z", is_read: false, type: "flag", link: "/caretaker/participants/p7" },
-  { id: 3, title: "Participant inactive", message: "Lily Hartmann hasn't been active for 3 weeks", created_at: "2026-03-13T14:00:00Z", is_read: false, type: "inactivity", link: "/caretaker/participants/p3" },
-  { id: 4, title: "Goal deadline approaching", message: "James Kowalski's 'Daily Steps' goal expires in 17 days", created_at: "2026-03-13T08:00:00Z", is_read: true, type: "goal", link: "/caretaker/participants/p7?tab=goals" },
-  { id: 5, title: "Invite accepted", message: "omar.diallo@example.com accepted your invitation and registered", created_at: "2026-02-28T16:20:00Z", is_read: true, type: "invite", link: "/caretaker/participants?view=invites" },
-  { id: 6, title: "New submission", message: "Priya Sharma submitted Monthly Wellness Check-in", created_at: "2026-02-27T11:45:00Z", is_read: true, type: "submission", link: "/caretaker/participants/p6?tab=submissions" },
-  { id: 7, title: "Weekly group summary", message: "Your weekly report for Morning Cohort A is ready — 6/8 active, 3 new submissions", created_at: "2026-02-24T07:00:00Z", is_read: true, type: "summary", link: "/caretaker/reports" },
-  { id: 8, title: "High pain reported", message: "James Kowalski reported pain level 6/10 — above threshold", created_at: "2026-02-20T13:30:00Z", is_read: true, type: "flag", link: "/caretaker/participants/p7" },
-];
-
 // ─── Utilities ──────────────────────────────────────────────────────────────────
 
 function timeAgo(dateStr) {
@@ -58,7 +45,7 @@ export default function NotificationBell({ role }) {
       const data = await api.getNotifications(role);
       setNotifications(data.map(n => ({ ...n, id: n.notification_id || n.id })));
     } catch {
-      setNotifications(MOCK_NOTIFICATIONS);
+      setNotifications([]);
     }
   }, [role]);
 

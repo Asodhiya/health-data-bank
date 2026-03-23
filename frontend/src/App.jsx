@@ -42,11 +42,13 @@ import SystemSettingsPage from "./pages/admin/SystemSettingsPage";
 // --- Researcher pages ---
 import DataElementManager from "./pages/researcher/DataElementMangaer";
 import Groups from "./pages/researcher/Group_Chorts";
+import GoalTemplates from "./pages/researcher/GoalTemplates";
+
 // ── Caretaker pages ──
+import CaretakerOnboardingPage from "./pages/caretaker/CaretakerOnboardingPage";
 import MyParticipantsPage from "./pages/caretaker/MyParticipantsPage";
 import ParticipantDetailPage from "./pages/caretaker/ParticipantDetailPage";
 import ReportsPage from "./pages/caretaker/ReportsPage";
-import GoalTemplates from "./pages/researcher/GoalTemplates";
 
 function App() {
   const { role } = useAuth();
@@ -114,6 +116,8 @@ function App() {
 
         {/* ── Caretaker ── */}
         <Route element={<CaretakerRoute />}>
+          {/* Onboarding — standalone page, no sidebar/dashboard layout */}
+          <Route path="/caretaker/onboarding" element={<CaretakerOnboardingPage />} />
           <Route element={<DashboardLayout role={role} />}>
             <Route path="/caretaker" element={<CaretakerDashboard />} />
             <Route

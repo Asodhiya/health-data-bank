@@ -91,9 +91,6 @@ export const api = {
 
   // ── Admin: Backup & Restore ──
 
-  // Downloads the full backup as a JSON file (blob, not JSON response).
-  // Uses raw fetch because the endpoint returns a binary blob with
-  // Content-Disposition header, not a JSON body.
   downloadBackup: async () => {
     const res = await fetch(`${API_BASE}/admin_only/backup`, {
       credentials: "include",
@@ -118,10 +115,6 @@ export const api = {
     window.URL.revokeObjectURL(url);
   },
 
-  // Uploads a backup JSON file to restore the database.
-  // Uses raw fetch because the endpoint expects multipart/form-data,
-  // not a JSON body. Do NOT set Content-Type — the browser sets it
-  // automatically with the correct boundary for FormData.
   restoreBackup: async (file) => {
     const form = new FormData();
     form.append("file", file);
@@ -135,15 +128,10 @@ export const api = {
     return data;
   },
 
-  // List all backup records, newest first.
-  // TODO (backend): Add GET /admin_only/backups endpoint to admin_only.py
-  // that queries the backups table and returns backup_id, storage_path,
-  // checksum, created_at, created_by, and table_row_counts.
+  // TODO (backend): Add GET /admin_only/backups endpoint
   listBackups: () => request("/admin_only/backups"),
 
-  // Delete a backup record by ID.
   // TODO (backend): Add DELETE /admin_only/backups/{backup_id} endpoint
-  // to admin_only.py that removes the record from the backups table.
   deleteBackup: (backupId) =>
     request(`/admin_only/backups/${backupId}`, { method: "DELETE" }),
 
@@ -164,45 +152,24 @@ export const api = {
 
   adminGetCaretakers: () => request("/admin_only/caretakers"),
 
-  // Assign a caretaker to a group.
-  // Backend expects: { user_id: UUID, group_id: UUID }
-  // where user_id is the caretaker's user account ID.
   adminAssignCaretaker: (userId, groupId) =>
     request("/admin_only/assign-caretaker", {
       method: "POST",
       body: JSON.stringify({ user_id: userId, group_id: groupId }),
     }),
 
-  // Unassign the caretaker from a group.
   adminUnassignCaretaker: (groupId) =>
     request(`/admin_only/assign-caretaker/${groupId}`, { method: "DELETE" }),
 
   // ── Admin: Invites ──
-  // TODO (backend): Add GET /admin_only/invites — list all invites from
-  //   the signup_invites table with joined role name, group name, and
-  //   invited_by user name. Include status (pending/accepted/expired/revoked).
-  // TODO (backend): Add DELETE /admin_only/invites/{invite_id} — revoke
-  //   a pending invite by setting used=true or adding a revoked_at column.
+  // TODO (backend): Add GET /admin_only/invites and DELETE /admin_only/invites/{id}
   adminListInvites: () => request("/admin_only/invites"),
 
   adminRevokeInvite: (inviteId) =>
     request(`/admin_only/invites/${inviteId}`, { method: "DELETE" }),
 
   // ── Admin: User Management ──
-  // TODO (backend): Add GET /admin_only/users — list all users with
-  //   role-specific profile data (participant_profile, caretaker_profile, etc).
-  //   Should include: user_id, first_name, last_name, email, phone, role,
-  //   status (active/inactive), joined_at, and nested profile fields.
-  // TODO (backend): Add PATCH /admin_only/users/{id} — update user fields
-  //   (first_name, last_name, email, phone). If temp_password is provided,
-  //   hash it and set a must_change_password flag.
-  // TODO (backend): Add PATCH /admin_only/users/{id}/status — toggle
-  //   active/inactive. When deactivating, invalidate active sessions.
-  // TODO (backend): Add DELETE /admin_only/users/{id}?mode=anonymize|permanent
-  //   anonymize: replace first_name/last_name/email/phone with placeholder
-  //   values ("Deleted User #id", "deleted_id@removed.local") but keep all
-  //   linked submissions, goals, and health data intact.
-  //   permanent: cascade delete user and all associated data.
+  // TODO (backend): Add CRUD endpoints for user management
   adminListUsers: () => request("/admin_only/users"),
 
   adminUpdateUser: (userId, payload) =>
@@ -224,8 +191,6 @@ export const api = {
     }),
 
   // ── Auth: Invite ──
-  // Updated: now accepts optional group_id for participant invites.
-  // Backend SignupInviteRequest already has group_id: Optional[UUID].
   sendInvite: (email, target_role, group_id) =>
     request("/auth/signup_invite", {
       method: "POST",
@@ -270,8 +235,7 @@ export const api = {
       body: JSON.stringify(answers),
     }),
 
-  // ── Data Elements (researcher) added by Nima──
-  // ── Data Elements (Standardization Hub) ──
+  // ── Data Elements (researcher) ──
 
   listElements: () =>
     request(`/data-elements/elements?t=${new Date().getTime()}`),
@@ -288,14 +252,12 @@ export const api = {
   getFieldMapping: (field_id) =>
     request(`/data-elements/fields/${field_id}/map`),
 
-  // Map: field_id in path, element_id and transform_rule in body
   mapField: (field_id, payload) =>
     request(`/data-elements/fields/${field_id}/map`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
-  // Unmap: field_id in path, element_id in query string (?element_id=...)
   unmapField: (field_id, element_id) =>
     request(`/data-elements/fields/${field_id}/map?element_id=${element_id}`, {
       method: "DELETE",
@@ -304,12 +266,20 @@ export const api = {
   // ── Caretaker ──────────────────────────────────────────────────────────────
   // Backend routes: backend/app/api/routes/Caretakers.py
 
+  // Profile (requires backend changes — see pending backend backlog)
+  caretakerGetProfile: () => request("/caretaker/profile"),
+
+  caretakerUpdateProfile: (payload) =>
+    request("/caretaker/profile", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
   // Groups
   caretakerGetGroups: () => request("/caretaker/groups"),
 
   caretakerGetGroup: (groupId) => request(`/caretaker/groups/${groupId}`),
 
-  // FIX: added groupId — backend requires group_id as query param
   caretakerGetGroupMembers: (groupId) =>
     request(`/caretaker/groups/${groupId}/members`),
 
@@ -322,7 +292,6 @@ export const api = {
     return request(`/caretaker/participants${qs ? `?${qs}` : ""}`);
   },
 
-  // FIX: added groupId — backend requires group_id as query param
   caretakerGetParticipant: (participantId, groupId) =>
     request(`/caretaker/participants/${participantId}?group_id=${groupId}`),
 
@@ -331,13 +300,16 @@ export const api = {
     return request(`/caretaker/participants/activity-counts${qs}`);
   },
 
-  // FIX: participantId is now a path param (was incorrectly a query param)
+  // Submissions
   caretakerListSubmissions: (participantId, params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/caretaker/participants/${participantId}/submissions${qs ? `?${qs}` : ""}`);
   },
 
-  // NEW: Feedback (read + create) — backed by real endpoints
+  caretakerGetSubmissionDetail: (participantId, submissionId) =>
+    request(`/caretaker/participants/${participantId}/submissions/${submissionId}`),
+
+  // Feedback
   caretakerListFeedback: (participantId) =>
     request(`/caretaker/participants/${participantId}/feedback`),
 
@@ -347,11 +319,15 @@ export const api = {
       body: JSON.stringify({ message }),
     }),
 
-  // Health Goals (read-only for caretaker — no endpoint yet)
+  // Health Goals (read-only for caretaker)
+  caretakerGetGoals: (participantId) =>
+    request(`/caretaker/participants/${participantId}/goals`),
+
+  // Alias for backward compatibility
   caretakerGetParticipantGoals: (participantId) =>
     request(`/caretaker/participants/${participantId}/goals`),
 
-  // Health Trends (no endpoint yet)
+  // Health Trends
   caretakerGetHealthTrends: (participantId, params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(
@@ -379,14 +355,12 @@ export const api = {
     request(`/caretaker/notes/${noteId}`, { method: "DELETE" }),
 
   // Reports
-  // FIX: URL was /reports/group, backend is /reports/group/generate
   caretakerGenerateGroupReport: (groupId, payload) =>
     request(`/caretaker/reports/group/generate?group_id=${groupId}`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
-  // FIX: now accepts queryParams for compare_with, compare_participant_id, group_id
   caretakerGenerateComparisonReport: (participantId, queryParams = {}, payload = {}) => {
     const params = new URLSearchParams({ participant_id: participantId, ...queryParams });
     return request(`/caretaker/reports/comparison?${params.toString()}`, {
@@ -425,17 +399,13 @@ export const api = {
 
   // ── Researcher Analytics ──
 
-  // 1. Get the list of published surveys for the dropdown
   getAvailableSurveys: () => request("/researcher/query/available-surveys"),
 
-  // 2. Fetch the actual data and columns (accepts optional filters like survey_id)
   getResearcherResults: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/researcher/query/results${qs ? `?${qs}` : ""}`);
   },
 
-  // 3. Generate the CSV file download URL
-  // We don't use the standard request() here because we need to handle a file Blob, not JSON!
   downloadResearcherResults: async (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     const res = await fetch(
@@ -448,7 +418,6 @@ export const api = {
 
     if (!res.ok) throw new Error("Failed to download CSV");
 
-    // Convert response to a blob and trigger browser download
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -479,56 +448,44 @@ export const api = {
       method: "DELETE",
     }),
 
-  // ── Participant: Surveys (alias used by participant pages) ──
+  // ── Participant: Surveys ──
   getAssignedSurveys: () => request("/participant/surveys/assigned"),
 
   // ── Participant: Health Goals ──
 
-  // Browse templates created by researchers
   browseGoalTemplates: () => request("/participant/goal-templates"),
 
-  // List goals already active on the participant's dashboard
   listParticipantGoals: () => request("/participant/goals"),
 
-  // Get a single goal's status
   getParticipantGoal: (goalId) => request(`/participant/goals/${goalId}`),
 
-  // Add a goal from a template.
-  // Note: target_value is passed as a query param per the backend
   addGoalFromTemplate: (templateId, targetValue = null) => {
     const url = `/participant/goals/add/${templateId}${targetValue ? `?target_value=${targetValue}` : ""}`;
     return request(url, { method: "POST" });
   },
 
-  // Update a goal (e.g. changing the target)
   updateParticipantGoal: (goalId, payload) =>
     request(`/participant/goals/${goalId}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
 
-  // Delete a goal from the dashboard
   deleteParticipantGoal: (goalId) =>
     request(`/participant/goals/${goalId}`, { method: "DELETE" }),
 
-  // Log progress (e.g. "drank 500ml")
   logGoalProgress: (goalId, payload) =>
     request(`/participant/goals/${goalId}/log`, {
       method: "POST",
-      body: JSON.stringify(payload), // { value: number, observed_at: string }
+      body: JSON.stringify(payload),
     }),
 
   // ── Participant Stats (for Charts) ──
 
-  // Gets the overall health score/stats for the logged-in participant
   getMyStats: () => request("/stats/stats_me"),
 
-  // Gets the available elements (metrics) the participant is tracking
   getAvailableElements: () => request("/stats/me/available-elements"),
 
-  // Gets specific data points for the participant's elements
   getMyElementsData: () => request("/stats/me/elements"),
 
-  // Gets comparison data (Participant vs. Group average)
   getMyVsGroupStats: () => request("/stats/me/vs-group"),
 };

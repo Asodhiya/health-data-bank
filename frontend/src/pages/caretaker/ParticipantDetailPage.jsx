@@ -9,17 +9,15 @@ function fmt(d) { if (!d) return "—"; return new Date(d).toLocaleDateString("e
 function getAge(dob) { if (!dob) return null; const t = new Date(); const b = new Date(dob); let a = t.getFullYear() - b.getFullYear(); if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) a--; return a; }
 function daysSince(d) { if (!d) return null; const diff = Math.floor((Date.now() - new Date(d).getTime()) / 86400000); if (diff === 0) return "Today"; if (diff === 1) return "Yesterday"; return `${diff}d ago`; }
 
+const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
+const CHART_TT = { borderRadius: "10px", border: "none", boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)", fontSize: "12px" };
+
 // ─── Data transformers ──────────────────────────────────────────────────────────
-// Map backend response shapes → what the UI components expect.
 
 function transformParticipant(listItem, groupName, enrolledAt) {
-  // The list endpoint returns: participant_id, name, gender, age, status,
-  // group_id, survey_progress, goal_progress, last_login_at, last_submission_at
   const nameParts = (listItem.name || "").split(" ");
   const firstName = nameParts[0] || "";
   const lastName = nameParts.slice(1).join(" ") || "";
-
-  // Derive simple active/inactive + descriptive activity status
   const isActive = listItem.status !== "inactive";
   const activityLabel = {
     highly_active: "Highly Active",
@@ -27,20 +25,14 @@ function transformParticipant(listItem, groupName, enrolledAt) {
     low_active: "Low Activity",
     inactive: "Inactive",
   }[listItem.status] || "Unknown";
-
-  // Build flags from activity status
   const flags = [];
   if (listItem.status === "inactive") flags.push("Inactive");
   if (listItem.status === "low_active") flags.push("Low activity");
   if (listItem.survey_progress === "not_started") flags.push("No surveys completed");
-
   return {
     id: listItem.participant_id,
-    firstName,
-    lastName,
-    email: null,           // not exposed to caretaker endpoints
-    phone: null,           // not exposed to caretaker endpoints
-    dob: null,             // not exposed (age is available directly)
+    firstName, lastName,
+    email: null, phone: null, dob: null,
     age: listItem.age != null ? Math.round(listItem.age) : null,
     gender: listItem.gender || null,
     status: isActive ? "active" : "inactive",
@@ -52,7 +44,6 @@ function transformParticipant(listItem, groupName, enrolledAt) {
     lastActive: listItem.last_login_at || listItem.last_submission_at || null,
     surveyProgress: listItem.survey_progress || "not_started",
     goalProgress: listItem.goal_progress || "not_started",
-    latestMetrics: null,   // no endpoint available
     flags,
   };
 }
@@ -64,7 +55,6 @@ function transformSubmission(raw) {
     formName: raw.form_name || "Untitled Form",
     submittedAt: raw.submitted_at,
     status: "completed",
-    // Field-level answers are not available from the caretaker submissions list endpoint
     fields: [],
   };
 }
@@ -125,17 +115,63 @@ function ProgressBadge({ progress }) {
     not_started: { bg: "bg-slate-100", text: "text-slate-600", border: "border-slate-200", label: "Not Started" },
     in_progress: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", label: "In Progress" },
     completed: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", label: "Completed" },
+    active: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", label: "Active" },
   };
   const s = styles[progress] || styles.not_started;
   return <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${s.bg} ${s.text} ${s.border}`}>{s.label}</span>;
 }
 
+// ─── Health Metrics Cards (for Overview tab) ────────────────────────────────────
+
+function HealthMetricsCards({ trends }) {
+  if (!trends || trends.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Latest Health Metrics</p>
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-slate-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+          <p className="text-sm font-semibold text-slate-400">No health metrics available yet</p>
+          <p className="text-xs text-slate-300 mt-1">Metrics will appear here once health data points are collected.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const latest = trends.map(t => {
+    const last = t.points[t.points.length - 1];
+    const prev = t.points.length >= 2 ? t.points[t.points.length - 2] : null;
+    const change = prev ? last.value - prev.value : null;
+    return { label: t.label, unit: t.unit, value: last.value, date: last.date, change };
+  });
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Latest Health Metrics</p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {latest.map((m, i) => (
+          <div key={i} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center">
+            <p className="text-2xl font-extrabold text-slate-800">
+              {m.value}<span className="text-xs text-slate-400 ml-0.5">{m.unit}</span>
+            </p>
+            <p className="text-xs text-slate-400 mt-1">{m.label}</p>
+            {m.change !== null && (
+              <p className={`text-xs font-semibold mt-1 ${m.change < 0 ? "text-emerald-600" : m.change > 0 ? "text-amber-600" : "text-slate-400"}`}>
+                {m.change > 0 ? "+" : ""}{m.change.toFixed(1)} since last
+              </p>
+            )}
+            <p className="text-[10px] text-slate-300 mt-0.5">{fmt(m.date)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Tab: Overview ──────────────────────────────────────────────────────────────
 
-function OverviewTab({ p }) {
+function OverviewTab({ p, trends }) {
   return (
     <div className="space-y-6">
-      {/* Flags / alerts */}
       {p.flags.length > 0 && (
         <div className="bg-rose-50 rounded-2xl p-4 border border-rose-100">
           <div className="flex items-center gap-2 flex-wrap">
@@ -147,7 +183,6 @@ function OverviewTab({ p }) {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Personal Info */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Personal Info</p>
           <InfoRow label="Age" value={p.age != null ? `${p.age} years` : null} />
@@ -164,7 +199,6 @@ function OverviewTab({ p }) {
           )}
         </div>
 
-        {/* Activity Summary */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Activity Summary</p>
           <div className="grid grid-cols-2 gap-3 mb-4">
@@ -185,38 +219,20 @@ function OverviewTab({ p }) {
         </div>
       </div>
 
-      {/* Health Metrics placeholder */}
-      {p.latestMetrics ? (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Latest Health Metrics</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center"><p className={`text-2xl font-extrabold ${p.latestMetrics.bpSystolic >= 140 ? "text-rose-600" : p.latestMetrics.bpSystolic >= 130 ? "text-amber-600" : "text-emerald-600"}`}>{p.latestMetrics.bpSystolic}/{p.latestMetrics.bpDiastolic}</p><p className="text-xs text-slate-400 mt-1">Blood Pressure</p></div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center"><p className="text-2xl font-extrabold text-slate-700">{p.latestMetrics.weight}<span className="text-sm text-slate-400 ml-0.5">kg</span></p><p className="text-xs text-slate-400 mt-1">Weight</p></div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center"><p className={`text-2xl font-extrabold ${p.latestMetrics.painLevel >= 5 ? "text-rose-600" : p.latestMetrics.painLevel >= 3 ? "text-amber-600" : "text-emerald-600"}`}>{p.latestMetrics.painLevel}<span className="text-sm text-slate-400">/10</span></p><p className="text-xs text-slate-400 mt-1">Pain Level</p></div>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Latest Health Metrics</p>
-          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-slate-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-            <p className="text-sm font-semibold text-slate-400">No health metrics available</p>
-            <p className="text-xs text-slate-300 mt-1">Metrics will appear here once data element mapping and reporting are set up.</p>
-          </div>
-        </div>
-      )}
+      <HealthMetricsCards trends={trends} />
     </div>
   );
 }
 
-// ─── Tab: Submissions ───────────────────────────────────────────────────────────
+// ─── Tab: Submissions (with real answer detail) ─────────────────────────────────
 
 function SubmissionsTab({ submissions, participantId, participantName }) {
   const [viewingSubmission, setViewingSubmission] = useState(null);
+  const [submissionDetail, setSubmissionDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState({ field: "date", dir: "desc" });
 
-  // Feedback state for submission detail view
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
@@ -239,6 +255,23 @@ function SubmissionsTab({ submissions, participantId, participantName }) {
     setSort(prev => prev.field === field ? { field, dir: prev.dir === "asc" ? "desc" : "asc" } : { field, dir: "desc" });
   }
 
+  async function handleViewSubmission(s) {
+    setViewingSubmission(s);
+    setSubmissionDetail(null);
+    setDetailLoading(true);
+    setFeedbackText("");
+    setFeedbackSuccess(false);
+    try {
+      const detail = await api.caretakerGetSubmissionDetail(participantId, s.id);
+      setSubmissionDetail(detail);
+    } catch (err) {
+      console.warn("Could not fetch submission detail:", err.message);
+      setSubmissionDetail(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
   async function handleSendFeedback() {
     if (!feedbackText.trim() || !viewingSubmission) return;
     setFeedbackSaving(true);
@@ -257,9 +290,11 @@ function SubmissionsTab({ submissions, participantId, participantName }) {
   // ── Detail view for a single submission ──
   if (viewingSubmission) {
     const s = viewingSubmission;
+    const detail = submissionDetail;
     return (
       <div className="space-y-4">
-        <button onClick={() => { setViewingSubmission(null); setFeedbackText(""); setFeedbackSuccess(false); }} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+        <button onClick={() => { setViewingSubmission(null); setSubmissionDetail(null); setFeedbackText(""); setFeedbackSuccess(false); }}
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           Back to Submissions
         </button>
@@ -270,22 +305,62 @@ function SubmissionsTab({ submissions, participantId, participantName }) {
               <h2 className="text-lg font-bold text-slate-800">{s.formName}</h2>
               <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                 <span className="text-xs text-slate-400">Submitted {fmt(s.submittedAt)}</span>
+                {detail && <span className="text-xs text-slate-400">{detail.answers.length} answers</span>}
               </div>
             </div>
             <span className="text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-full capitalize">{s.status}</span>
           </div>
         </div>
 
-        {/* Answers placeholder */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-10 text-center">
-          <div className="w-12 h-12 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center mx-auto mb-4">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+        {/* Answers section */}
+        {detailLoading ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+            <div className="animate-pulse space-y-4">
+              {[...Array(4)].map((_, i) => <div key={i} className="h-14 bg-slate-200 rounded-xl" />)}
+            </div>
           </div>
-          <p className="text-sm font-semibold text-slate-600">Submission answers are not yet available</p>
-          <p className="text-xs text-slate-400 mt-1.5 max-w-sm mx-auto">
-            Individual answer viewing requires a submission detail endpoint. The submission was recorded on {fmt(s.submittedAt)}.
-          </p>
-        </div>
+        ) : detail && detail.answers && detail.answers.length > 0 ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Responses</p>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {detail.answers.map((a, i) => {
+                const displayValue = a.value_text || (a.value_number != null ? String(a.value_number) : null) || a.value_date || (a.value_json ? JSON.stringify(a.value_json) : null) || "—";
+                const isNumeric = a.value_number != null && !a.value_text;
+                return (
+                  <div key={a.answer_id} className="px-5 py-4">
+                    <div className="flex items-start gap-3">
+                      <span className="text-xs font-bold text-slate-300 mt-0.5 shrink-0 w-6 text-right">{i + 1}.</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-600 leading-relaxed">{a.field_label || "Untitled field"}</p>
+                        <div className="mt-2">
+                          {isNumeric ? (
+                            <span className="inline-flex items-center gap-1 text-lg font-extrabold text-blue-700 bg-blue-50 border border-blue-100 px-3 py-1 rounded-lg">
+                              {a.value_number}
+                            </span>
+                          ) : (
+                            <p className="text-sm font-semibold text-slate-800 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">{displayValue}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-10 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center mx-auto mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            </div>
+            <p className="text-sm font-semibold text-slate-600">No answer details available for this submission</p>
+            <p className="text-xs text-slate-400 mt-1.5 max-w-sm mx-auto">
+              The submission was recorded on {fmt(s.submittedAt)} but detailed answers could not be loaded.
+            </p>
+          </div>
+        )}
 
         {/* Feedback form */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-3">
@@ -348,13 +423,11 @@ function SubmissionsTab({ submissions, participantId, participantName }) {
           <button onClick={() => setSearch("")} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear search</button>
         </div>
       ) : filtered.map(s => (
-        <button key={s.id} onClick={() => setViewingSubmission(s)}
+        <button key={s.id} onClick={() => handleViewSubmission(s)}
           className="w-full text-left bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-4 flex items-center justify-between gap-3 hover:bg-slate-50 hover:border-slate-200 transition-all group">
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-700 transition-colors">{s.formName}</p>
-            <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-400">
-              <span>Submitted {fmt(s.submittedAt)}</span>
-            </div>
+            <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-400"><span>Submitted {fmt(s.submittedAt)}</span></div>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-300 group-hover:text-blue-500 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
         </button>
@@ -363,39 +436,248 @@ function SubmissionsTab({ submissions, participantId, participantName }) {
   );
 }
 
-// ─── Tab: Health Goals ──────────────────────────────────────────────────────────
+// ─── Tab: Health Goals (real data) ──────────────────────────────────────────────
 
-function GoalsTab() {
+function GoalsTab({ goals, loading: goalsLoading }) {
+  if (goalsLoading) {
+    return (
+      <div className="animate-pulse space-y-4">
+        <div className="grid grid-cols-3 gap-3">{[...Array(3)].map((_, i) => <div key={i} className="h-20 bg-slate-200 rounded-2xl" />)}</div>
+        {[...Array(3)].map((_, i) => <div key={i} className="h-28 bg-slate-200 rounded-2xl" />)}
+      </div>
+    );
+  }
+
+  if (!goals || goals.length === 0) {
+    return (
+      <EmptyPlaceholder
+        icon="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+        title="No health goals set"
+        description="This participant hasn't set any health goals yet. Goals will appear here once they add them from their dashboard."
+      />
+    );
+  }
+
+  const statusColors = {
+    active: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", dot: "bg-blue-500" },
+    completed: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", dot: "bg-emerald-500" },
+    paused: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", dot: "bg-amber-500" },
+    cancelled: { bg: "bg-slate-100", text: "text-slate-500", border: "border-slate-200", dot: "bg-slate-400" },
+  };
+
+  const activeGoals = goals.filter(g => g.status === "active");
+  const completedGoals = goals.filter(g => g.status === "completed");
+  const otherGoals = goals.filter(g => g.status !== "active" && g.status !== "completed");
+
   return (
-    <EmptyPlaceholder
-      icon="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
-      title="Health goals not available yet"
-      description="The caretaker view for health goals is being developed. Once available, you'll be able to view this participant's goal progress, baselines, and targets here."
-    />
+    <div className="space-y-5">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4 text-center">
+          <p className="text-2xl font-extrabold text-slate-800">{goals.length}</p>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Total Goals</p>
+        </div>
+        <div className="bg-white rounded-2xl shadow-sm border border-blue-100 px-4 py-4 text-center">
+          <p className="text-2xl font-extrabold text-blue-600">{activeGoals.length}</p>
+          <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider mt-1">Active</p>
+        </div>
+        <div className="bg-white rounded-2xl shadow-sm border border-emerald-100 px-4 py-4 text-center">
+          <p className="text-2xl font-extrabold text-emerald-600">{completedGoals.length}</p>
+          <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wider mt-1">Completed</p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {[...activeGoals, ...completedGoals, ...otherGoals].map(g => {
+          const sc = statusColors[g.status] || statusColors.active;
+          const elementLabel = g.element?.label || g.name;
+          const elementUnit = g.element?.unit || "";
+          return (
+            <div key={g.goal_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2.5">
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${sc.dot}`} />
+                    <h3 className="text-sm font-bold text-slate-800">{g.name}</h3>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1.5 ml-5">
+                    Tracking: <span className="font-semibold text-slate-500">{elementLabel}</span>
+                    {elementUnit && <span className="text-slate-300 ml-1">({elementUnit})</span>}
+                  </p>
+                </div>
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border capitalize ${sc.bg} ${sc.text} ${sc.border}`}>{g.status}</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 ml-5">
+                <div>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Target</p>
+                  <p className="text-sm font-bold text-slate-700 mt-0.5">{g.target_value != null ? `${g.target_value} ${elementUnit}` : "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Start Date</p>
+                  <p className="text-sm font-bold text-slate-700 mt-0.5">{g.start_date ? fmt(g.start_date) : "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">End Date</p>
+                  <p className="text-sm font-bold text-slate-700 mt-0.5">{g.end_date ? fmt(g.end_date) : "Ongoing"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Duration</p>
+                  <p className="text-sm font-bold text-slate-700 mt-0.5">
+                    {g.start_date ? `${Math.max(0, Math.floor((Date.now() - new Date(g.start_date).getTime()) / 86400000))}d` : "—"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-// ─── Tab: Health Trends ─────────────────────────────────────────────────────────
+// ─── Tab: Health Trends (real data) ─────────────────────────────────────────────
 
-function TrendsTab() {
+function TrendsTab({ trends, loading: trendsLoading }) {
+  const [selectedElements, setSelectedElements] = useState([]);
+
+  // Auto-select first 2 elements when trends load
+  useEffect(() => {
+    if (trends && trends.length > 0 && selectedElements.length === 0) {
+      setSelectedElements(trends.slice(0, 2).map(t => t.element_id));
+    }
+  }, [trends]);
+
+  if (trendsLoading) {
+    return (
+      <div className="animate-pulse space-y-4">
+        <div className="h-16 bg-slate-200 rounded-2xl" />
+        <div className="h-72 bg-slate-200 rounded-2xl" />
+        <div className="grid grid-cols-2 gap-4">{[...Array(2)].map((_, i) => <div key={i} className="h-28 bg-slate-200 rounded-2xl" />)}</div>
+      </div>
+    );
+  }
+
+  if (!trends || trends.length === 0) {
+    return (
+      <EmptyPlaceholder
+        icon="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
+        title="No health trends data yet"
+        description="Trends will appear here once health data points are being collected through survey submissions with data element mapping."
+      />
+    );
+  }
+
+  const toggleElement = (id) => {
+    setSelectedElements(prev => prev.includes(id) ? prev.filter(e => e !== id) : [...prev, id]);
+  };
+
+  const activeTrends = trends.filter(t => selectedElements.includes(t.element_id));
+
+  const chartData = (() => {
+    const dateMap = {};
+    activeTrends.forEach(t => {
+      t.points.forEach(p => {
+        if (!dateMap[p.date]) dateMap[p.date] = { date: p.date };
+        dateMap[p.date][t.label] = p.value;
+      });
+    });
+    return Object.values(dateMap).sort((a, b) => a.date.localeCompare(b.date));
+  })();
+
   return (
-    <EmptyPlaceholder
-      icon="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-      title="Health trends not available yet"
-      description="Trend visualizations require data element mapping to be configured. Once health data points are being collected and mapped, you'll see charts and trend analysis here."
-    />
+    <div className="space-y-5">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Select Metrics to Chart</p>
+        <div className="flex flex-wrap gap-2">
+          {trends.map((t, i) => {
+            const isSelected = selectedElements.includes(t.element_id);
+            return (
+              <button key={t.element_id} onClick={() => toggleElement(t.element_id)}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                  isSelected ? "text-white border-transparent" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                }`}
+                style={isSelected ? { backgroundColor: COLORS[i % COLORS.length] } : undefined}>
+                <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isSelected ? "bg-white/40" : ""}`}
+                  style={!isSelected ? { backgroundColor: COLORS[i % COLORS.length] } : undefined} />
+                {t.label}
+                <span className={isSelected ? "text-white/60" : "text-slate-400"}>({t.unit})</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeTrends.length > 0 && chartData.length > 0 ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Health Trends Over Time</p>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94a3b8" }}
+                  tickFormatter={(d) => new Date(d).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} />
+                <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                <Tooltip contentStyle={CHART_TT}
+                  labelFormatter={(d) => new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" })} />
+                <Legend wrapperStyle={{ fontSize: "11px" }} />
+                {activeTrends.map((t) => (
+                  <Line key={t.element_id} type="monotone" dataKey={t.label}
+                    name={`${t.label} (${t.unit})`}
+                    stroke={COLORS[trends.findIndex(x => x.element_id === t.element_id) % COLORS.length]}
+                    strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-10 text-center">
+          <p className="text-sm text-slate-400">Select at least one metric above to see trends.</p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {activeTrends.map((t) => {
+          const pts = t.points;
+          const latest = pts[pts.length - 1];
+          const earliest = pts[0];
+          const change = pts.length >= 2 ? latest.value - earliest.value : null;
+          const min = Math.min(...pts.map(p => p.value));
+          const max = Math.max(...pts.map(p => p.value));
+          const avg = (pts.reduce((sum, p) => sum + p.value, 0) / pts.length).toFixed(1);
+          return (
+            <div key={t.element_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: COLORS[trends.findIndex(x => x.element_id === t.element_id) % COLORS.length] }} />
+                <p className="text-sm font-bold text-slate-800">{t.label}</p>
+                <span className="text-xs text-slate-400">({t.unit})</span>
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div><p className="text-lg font-extrabold text-slate-800">{latest.value}</p><p className="text-[10px] text-slate-400 uppercase font-semibold">Latest</p></div>
+                <div><p className="text-lg font-extrabold text-slate-600">{avg}</p><p className="text-[10px] text-slate-400 uppercase font-semibold">Average</p></div>
+                <div><p className="text-lg font-extrabold text-slate-500">{min}–{max}</p><p className="text-[10px] text-slate-400 uppercase font-semibold">Range</p></div>
+                <div>
+                  <p className={`text-lg font-extrabold ${change < 0 ? "text-emerald-600" : change > 0 ? "text-amber-600" : "text-slate-400"}`}>
+                    {change != null ? `${change > 0 ? "+" : ""}${change.toFixed(1)}` : "—"}
+                  </p>
+                  <p className="text-[10px] text-slate-400 uppercase font-semibold">Change</p>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-300 mt-2 text-center">{pts.length} data points · {fmt(earliest.date)} to {fmt(latest.date)}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-// ─── Tab: Notes & Feedback ──────────────────────────────────────────────────────
+// ─── Tab: Notes & Feedback (unchanged — already working) ────────────────────────
 
 function NotesTab({ participantId, participantName, feedbackItems }) {
   const [notes, setNotes] = useState(feedbackItems);
   const [newNote, setNewNote] = useState("");
   const [writeTag, setWriteTag] = useState("check-in");
   const [saving, setSaving] = useState(false);
-
-  // Filter/sort state
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("all");
   const [sortDir, setSortDir] = useState("desc");
@@ -403,7 +685,6 @@ function NotesTab({ participantId, participantName, feedbackItems }) {
   async function handleSave() {
     if (!newNote.trim()) return;
     setSaving(true);
-    // Notes are local-only for now — just add to local state
     setNotes(prev => [{ id: `n${Date.now()}`, text: newNote.trim(), createdAt: new Date().toISOString().split("T")[0], tag: writeTag }, ...prev]);
     setNewNote("");
     setSaving(false);
@@ -438,7 +719,6 @@ function NotesTab({ participantId, participantName, feedbackItems }) {
 
   return (
     <div className="space-y-5">
-      {/* Write new note */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-3">
         <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">New Note</p>
         <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={3} placeholder={`Write a note about ${participantName}...`}
@@ -467,7 +747,6 @@ function NotesTab({ participantId, participantName, feedbackItems }) {
         />
       ) : (
         <>
-          {/* Search + filter + sort */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
             <div className="relative">
               <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
@@ -536,17 +815,23 @@ export default function ParticipantDetailPage() {
   const [participant, setParticipant] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [feedbackItems, setFeedbackItems] = useState([]);
+  const [goals, setGoals] = useState([]);
+  const [trends, setTrends] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [goalsLoading, setGoalsLoading] = useState(true);
+  const [trendsLoading, setTrendsLoading] = useState(true);
   const [error, setError] = useState(null);
 
   // ──────────────────────────────────────────────────────────────────────────────
   // Data fetching — uses real backend endpoints only, no mock fallbacks.
   //
-  //   GET /caretaker/groups                               → group name
-  //   GET /caretaker/participants                         → rich participant data
-  //   GET /caretaker/groups/{id}/members                  → enrolled date (joined_at)
-  //   GET /caretaker/participants/{id}/submissions        → submission list
-  //   GET /caretaker/participants/{id}/feedback           → feedback items
+  //   GET /caretaker/groups                                    → group name
+  //   GET /caretaker/participants                              → rich participant data
+  //   GET /caretaker/groups/{id}/members                       → enrolled date (joined_at)
+  //   GET /caretaker/participants/{id}/submissions             → submission list
+  //   GET /caretaker/participants/{id}/feedback                → feedback items
+  //   GET /caretaker/participants/{id}/goals                   → health goals
+  //   GET /caretaker/participants/{id}/health-trends           → trend data points
   //
   // If the backend returns nothing, placeholders are shown in the UI.
   // ──────────────────────────────────────────────────────────────────────────────
@@ -617,7 +902,38 @@ export default function ParticipantDetailPage() {
     }
   }, [participantId]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  // Fetch goals (non-blocking, separate loading state)
+  const fetchGoals = useCallback(async () => {
+    setGoalsLoading(true);
+    try {
+      const data = await api.caretakerGetGoals(participantId);
+      setGoals(Array.isArray(data) ? data : []);
+    } catch {
+      setGoals([]);
+    } finally {
+      setGoalsLoading(false);
+    }
+  }, [participantId]);
+
+  // Fetch trends (non-blocking, separate loading state)
+  const fetchTrends = useCallback(async () => {
+    setTrendsLoading(true);
+    try {
+      const data = await api.caretakerGetHealthTrends(participantId);
+      // Filter out elements with no data points
+      setTrends(Array.isArray(data) ? data.filter(t => t.points && t.points.length > 0) : []);
+    } catch {
+      setTrends([]);
+    } finally {
+      setTrendsLoading(false);
+    }
+  }, [participantId]);
+
+  useEffect(() => {
+    fetchData();
+    fetchGoals();
+    fetchTrends();
+  }, [fetchData, fetchGoals, fetchTrends]);
 
   // ── Loading state ──
   if (loading) {
@@ -706,10 +1022,10 @@ export default function ParticipantDetailPage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "overview" && <OverviewTab p={p} />}
+      {activeTab === "overview" && <OverviewTab p={p} trends={trends} />}
       {activeTab === "submissions" && <SubmissionsTab submissions={submissions} participantId={p.id} participantName={`${p.firstName} ${p.lastName}`} />}
-      {activeTab === "goals" && <GoalsTab />}
-      {activeTab === "trends" && <TrendsTab />}
+      {activeTab === "goals" && <GoalsTab goals={goals} loading={goalsLoading} />}
+      {activeTab === "trends" && <TrendsTab trends={trends} loading={trendsLoading} />}
       {activeTab === "notes" && <NotesTab participantId={p.id} participantName={`${p.firstName} ${p.lastName}`} feedbackItems={feedbackItems} />}
     </div>
   );
