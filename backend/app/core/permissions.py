@@ -51,3 +51,8 @@ CARETAKER_ASSIGN = "caretaker:assign"
 
 # ── Admin: Backup & Restore ────────────────────────────────────────
 BACKUP_CREATE  = "backup:create"
+
+# ── Onboarding ──────────────────────────────────────────────────────
+ONBOARDING_READ   = "onboarding:read"
+ONBOARDING_SUBMIT = "onboarding:submit"
+ONBOARDING_EDIT   = "onboarding:edit"
