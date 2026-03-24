@@ -105,18 +105,18 @@ class GoalTemplateUpdate(BaseModel):
 
 class HealthGoalPayload(BaseModel):
     template_id: UUID
-    target_value: float
+    target_value: float = Field(..., gt=0, le=10000)
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
 
 class HealthGoalUpdate(BaseModel):
-    target_value: Optional[float] = None
+    target_value: Optional[float] = Field(None, gt=0, le=10000)
     status: Optional[str] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
 
 class GoalProgressLog(BaseModel):
-    value: float
+    value: float = Field(..., gt=0, le=10000)
     notes: Optional[str] = None
     observed_at: Optional[datetime] = None
 

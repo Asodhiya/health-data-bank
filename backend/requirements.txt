@@ -13,3 +13,4 @@ asyncpg
 alembic
 python-multipart
 psutil
+apscheduler

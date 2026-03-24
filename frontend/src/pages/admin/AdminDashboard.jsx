@@ -66,6 +66,7 @@ export default function AdminDashboard() {
 
   const [groups, setGroups] = useState([]);
   const [caretakers, setCaretakers] = useState([]);
+  const [users, setUsers] = useState([]);
 
   // Fetch audit logs
   useEffect(() => {
@@ -85,10 +86,11 @@ export default function AdminDashboard() {
       .finally(() => setBackupsLoading(false));
   }, []);
 
-  // Fetch groups + caretakers
+  // Fetch groups + caretakers + users
   useEffect(() => {
     api.adminGetGroups().then(d => setGroups(Array.isArray(d) ? d : [])).catch(() => setGroups([]));
     api.adminGetCaretakers().then(d => setCaretakers(Array.isArray(d) ? d : [])).catch(() => setCaretakers([]));
+    api.adminListUsers().then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => setUsers([]));
   }, []);
 
   // ── Computed ──
@@ -99,11 +101,11 @@ export default function AdminDashboard() {
   const distributionData = useMemo(() => [
     { name: "Groups", count: groups.length, color: "#3b82f6" },
     { name: "Caretakers", count: caretakers.length, color: "#10b981" },
-    { name: "Participants", count: 0, color: "#6366f1" },
-    { name: "Researchers", count: 0, color: "#f59e0b" },
-  ], [groups, caretakers]);
+    { name: "Participants", count: users.filter(u => u.role === "participant").length, color: "#6366f1" },
+    { name: "Researchers", count: users.filter(u => u.role === "researcher").length, color: "#f59e0b" },
+  ], [groups, caretakers, users]);
 
-  const totalUsers = groups.length + caretakers.length;
+  const totalUsers = users.length || (groups.length + caretakers.length);
 
   const roleBadge = (role) => {
     const s = { participant: "bg-blue-50 text-blue-600", caretaker: "bg-emerald-50 text-emerald-600", researcher: "bg-indigo-50 text-indigo-600", admin: "bg-rose-50 text-rose-600" };
@@ -271,10 +273,6 @@ export default function AdminDashboard() {
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="mt-4 flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          <p className="text-xs text-amber-700">Participant and researcher counts will populate once the <span className="font-mono bg-amber-100 px-1 rounded">GET /admin_only/users</span> endpoint is available. Currently showing groups and caretakers from live data.</p>
-        </div>
 
         {/* USERS TABLE — switchable by role */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mt-6">
@@ -311,27 +309,50 @@ export default function AdminDashboard() {
             </table>
           )}
 
-          {tableView === "participants" && (
-            <div className="px-6 py-10 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center mx-auto mb-3">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-              </div>
-              <p className="text-sm font-semibold text-slate-600">Participant list coming soon</p>
-              <p className="text-xs text-slate-400 mt-1.5 max-w-sm mx-auto">Will populate once the <span className="font-mono bg-slate-100 px-1 rounded">GET /admin_only/users</span> endpoint is available.</p>
-              <button onClick={() => navigate("/users")} className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">Go to User Management →</button>
-            </div>
-          )}
+          {tableView === "participants" && (() => {
+            const participants = users.filter(u => u.role === "participant");
+            return (
+              <table className="w-full text-left border-collapse">
+                <thead><tr className="bg-slate-50/50 text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                  <th className="px-6 py-4">Full Name</th><th className="px-6 py-4">Email</th><th className="px-6 py-4">Group</th><th className="px-6 py-4">Status</th>
+                </tr></thead>
+                <tbody className="divide-y divide-slate-50">
+                  {participants.length === 0 ? (
+                    <tr><td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-400">No participants registered yet.</td></tr>
+                  ) : participants.map(u => (
+                    <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4 text-sm font-bold text-slate-700">{[u.first_name, u.last_name].filter(Boolean).join(" ") || "—"}</td>
+                      <td className="px-6 py-4 text-sm text-slate-500">{u.email}</td>
+                      <td className="px-6 py-4 text-sm text-slate-500">{u.group || "—"}</td>
+                      <td className="px-6 py-4"><span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${u.status ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"}`}>{u.status ? "Active" : "Inactive"}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+          })()}
 
-          {tableView === "researchers" && (
-            <div className="px-6 py-10 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center mx-auto mb-3">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-              </div>
-              <p className="text-sm font-semibold text-slate-600">Researcher list coming soon</p>
-              <p className="text-xs text-slate-400 mt-1.5 max-w-sm mx-auto">Will populate once the <span className="font-mono bg-slate-100 px-1 rounded">GET /admin_only/users</span> endpoint is available.</p>
-              <button onClick={() => navigate("/users")} className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">Go to User Management →</button>
-            </div>
-          )}
+          {tableView === "researchers" && (() => {
+            const researchers = users.filter(u => u.role === "researcher");
+            return (
+              <table className="w-full text-left border-collapse">
+                <thead><tr className="bg-slate-50/50 text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                  <th className="px-6 py-4">Full Name</th><th className="px-6 py-4">Email</th><th className="px-6 py-4">Status</th>
+                </tr></thead>
+                <tbody className="divide-y divide-slate-50">
+                  {researchers.length === 0 ? (
+                    <tr><td colSpan={3} className="px-6 py-8 text-center text-sm text-slate-400">No researchers registered yet.</td></tr>
+                  ) : researchers.map(u => (
+                    <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4 text-sm font-bold text-slate-700">{[u.first_name, u.last_name].filter(Boolean).join(" ") || "—"}</td>
+                      <td className="px-6 py-4 text-sm text-slate-500">{u.email}</td>
+                      <td className="px-6 py-4"><span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${u.status ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"}`}>{u.status ? "Active" : "Inactive"}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+          })()}
         </div>
       </div>
 

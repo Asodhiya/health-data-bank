@@ -637,7 +637,7 @@ function TrendsTab({ participants, elements }) {
                   style={isVisible ? { backgroundColor: COLORS[i % COLORS.length] } : undefined}>
                   <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isVisible ? "bg-white/40" : "bg-slate-300"}`} />
                   {t.label}
-                  <span className={isVisible ? "text-white/60" : "text-slate-300"}>({t.unit})</span>
+                  {t.unit && <span className={isVisible ? "text-white/60" : "text-slate-300"}>({t.unit})</span>}
                 </button>
               );
             })}
@@ -658,7 +658,7 @@ function TrendsTab({ participants, elements }) {
       ) : displayedTrends.map((t, idx) => (
         <div key={t.element_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
           <div className="flex items-center justify-between mb-4">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{t.label} <span className="text-slate-300 font-normal normal-case">({t.unit})</span></p>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{t.label}{t.unit && <span className="text-slate-300 font-normal normal-case"> ({t.unit})</span>}</p>
             {t.points.length >= 2 && (() => {
               const change = t.points[t.points.length - 1].value - t.points[0].value;
               return (
@@ -675,7 +675,7 @@ function TrendsTab({ participants, elements }) {
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94a3b8" }}
                   tickFormatter={d => new Date(d).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} />
                 <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                <ReTooltip contentStyle={CHART_TT} formatter={v => `${v} ${t.unit}`} labelFormatter={d => fmt(d)} />
+                <ReTooltip contentStyle={CHART_TT} formatter={v => t.unit ? `${v} ${t.unit}` : `${v}`} labelFormatter={d => fmt(d)} />
                 <Line type="monotone" dataKey="value" name={t.label} stroke={COLORS[trends.indexOf(t) % COLORS.length]} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
               </LineChart>
             </ResponsiveContainer>
