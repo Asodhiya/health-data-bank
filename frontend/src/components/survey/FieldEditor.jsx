@@ -8,7 +8,8 @@
     newField       – factory to create a blank field
     uid            – unique ID generator
 */
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { api } from '../../services/api';
 
 /* ── SVG helper — matches project pattern ── */
 const Svg = ({ d, size = 18, sw = 1.8, ...rest }) => (
@@ -57,13 +58,14 @@ export function newField(type) {
     field_type: type,
     is_required: false,
     display_order: 0,
+    element_id: null,
     options: ['single_select', 'multi_select', 'dropdown'].includes(type)
       ? [defaultOpt(0), defaultOpt(1)]
       : [],
-    likertMin: 0,
-    likertMax: 4,
+    likertMin: 1,
+    likertMax: 5,
     likertLabels: type === 'likert'
-      ? ['Never', 'Rarely', 'Sometimes', 'Often', 'Always']
+      ? ['Strongly Disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly Agree']
       : [],
   };
 }
@@ -117,56 +119,42 @@ function OptionEditor({ options, onChange }) {
 /* ═══════════════════════════════════════════
    LIKERT CONFIG — scale range + labels
    ═══════════════════════════════════════════ */
-function LikertConfig({ field, onChange }) {
-  const upd = (k, v) => onChange({ ...field, [k]: v });
+const LIKERT_MIN = 1;
 
+function LikertConfig({ field, onChange }) {
   const updateLabel = (i, val) => {
     const next = [...(field.likertLabels || [])];
     next[i] = val;
-    upd('likertLabels', next);
+    onChange({ ...field, likertLabels: next });
   };
 
-  const syncLabels = (min, max) => {
-    const count = max - min + 1;
+  const syncLabels = (max) => {
+    const count = max - LIKERT_MIN + 1;
     const existing = field.likertLabels || [];
     return Array.from({ length: count }, (_, i) => existing[i] || `Label ${i + 1}`);
   };
 
-  const count = (field.likertMax ?? 4) - (field.likertMin ?? 0) + 1;
+  const count = (field.likertMax ?? 5) - LIKERT_MIN + 1;
 
   return (
     <div className="mt-3 space-y-3">
       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Likert Scale</p>
-      <div className="flex gap-3">
-        <div className="flex-1">
-          <label className="text-xs text-slate-500">Min value</label>
-          <input type="number" value={field.likertMin ?? 0}
-            onChange={(e) => {
-              const v = parseInt(e.target.value) || 0;
-              upd('likertMin', v);
-              upd('likertLabels', syncLabels(v, field.likertMax || 4));
-            }}
-            className="w-full mt-0.5 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white
-              focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
-        </div>
-        <div className="flex-1">
-          <label className="text-xs text-slate-500">Max value</label>
-          <input type="number" value={field.likertMax ?? 4}
-            onChange={(e) => {
-              const v = parseInt(e.target.value) || 1;
-              upd('likertMax', v);
-              upd('likertLabels', syncLabels(field.likertMin || 0, v));
-            }}
-            className="w-full mt-0.5 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white
-              focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
-        </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-xs text-slate-500">Max value</label>
+        <input type="number" min={2} max={10} value={field.likertMax ?? 5}
+          onChange={(e) => {
+            const v = Math.max(2, parseInt(e.target.value) || 5);
+            onChange({ ...field, likertMax: v, likertMin: LIKERT_MIN, likertLabels: syncLabels(v) });
+          }}
+          className="w-24 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white
+            focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
       </div>
       <div className="space-y-1.5">
         <label className="text-xs text-slate-500">Scale labels ({count})</label>
         {Array.from({ length: count }, (_, i) => (
           <div key={i} className="flex items-center gap-2">
             <span className="text-xs text-slate-400 w-5 text-right font-mono">
-              {(field.likertMin ?? 0) + i}
+              {LIKERT_MIN + i}
             </span>
             <input value={(field.likertLabels || [])[i] || ''}
               onChange={(e) => updateLabel(i, e.target.value)}
@@ -182,13 +170,143 @@ function LikertConfig({ field, onChange }) {
 
 
 /* ═══════════════════════════════════════════
+   DATA ELEMENT SELECTOR — searchable dropdown
+   ═══════════════════════════════════════════ */
+function DataElementSelector({ value, dataElements = [], onChange, onCreated }) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [newCode, setNewCode] = useState('');
+  const [newDatatype, setNewDatatype] = useState('numeric');
+  const [saving, setSaving] = useState(false);
+  const [createError, setCreateError] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return dataElements.filter(
+      (e) => e.label?.toLowerCase().includes(q) || e.code?.toLowerCase().includes(q)
+    );
+  }, [search, dataElements]);
+
+  const selected = dataElements.find((e) => e.element_id === value);
+
+  const handleCreate = async () => {
+    if (!newLabel.trim() || !newCode.trim()) { setCreateError('Label and code are required'); return; }
+    setSaving(true);
+    setCreateError('');
+    try {
+      const el = await api.createDataElement({ label: newLabel.trim(), code: newCode.trim().toLowerCase().replace(/\s+/g, '_'), datatype: newDatatype });
+      onCreated?.(el);
+      onChange(el.element_id);
+      setCreating(false);
+      setOpen(false);
+      setNewLabel(''); setNewCode(''); setNewDatatype('numeric');
+    } catch (e) {
+      setCreateError(e.message || 'Failed to create element');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-1.5">
+        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Link Data Element</label>
+        {!value && <span className="text-xs font-semibold text-rose-500 uppercase tracking-wider">• Required</span>}
+      </div>
+      <div className="mt-1 flex items-center gap-1">
+        <div
+          onClick={() => { setOpen((o) => !o); setCreating(false); }}
+          className={`flex-1 flex items-center justify-between px-3 py-2 text-sm border rounded-lg cursor-pointer transition
+            ${value ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'}`}>
+          <span className="truncate">{selected ? `${selected.label || selected.code}` : 'Select a data element…'}</span>
+          <Svg size={14} d="M6 9l6 6 6-6" />
+        </div>
+        {value && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onChange(null); }}
+            title="Remove link"
+            className="p-2 text-slate-400 hover:text-rose-500 transition shrink-0">
+            <Svg size={14} sw={2.5} d="M18 6L6 18M6 6l12 12" />
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+          {!creating ? (
+            <>
+              <div className="p-2 border-b border-slate-100 flex gap-2">
+                <input
+                  autoFocus
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search elements…"
+                  className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
+                />
+                <button
+                  onClick={() => setCreating(true)}
+                  className="px-2.5 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition shrink-0">
+                  + New
+                </button>
+              </div>
+              <div className="max-h-44 overflow-y-auto">
+                {filtered.length === 0 && (
+                  <p className="text-xs text-slate-400 text-center py-3">No elements found</p>
+                )}
+                {filtered.map((e) => (
+                  <button key={e.element_id}
+                    onClick={() => { onChange(e.element_id); setOpen(false); setSearch(''); }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 transition flex items-center justify-between
+                      ${e.element_id === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700'}`}>
+                    <span className="truncate">{e.label || e.code}</span>
+                    <span className="text-xs text-slate-400 ml-2 shrink-0">{e.code}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="p-3 space-y-2">
+              <p className="text-xs font-semibold text-slate-600">Create New Data Element</p>
+              <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)}
+                placeholder="Label (e.g. Blood Pressure)"
+                className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
+              <input value={newCode} onChange={(e) => setNewCode(e.target.value)}
+                placeholder="Code (e.g. blood_pressure)"
+                className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
+              <select value={newDatatype} onChange={(e) => setNewDatatype(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition bg-white">
+                <option value="numeric">Numeric</option>
+                <option value="text">Text</option>
+                <option value="boolean">Boolean</option>
+                <option value="date">Date</option>
+              </select>
+              {createError && <p className="text-xs text-rose-500">{createError}</p>}
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setCreating(false)} className="flex-1 py-1.5 text-xs text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg transition">Cancel</button>
+                <button onClick={handleCreate} disabled={saving}
+                  className="flex-1 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 transition">
+                  {saving ? 'Creating…' : 'Create & Link'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════
    FIELD CARD — collapsible editor for one field.
    Supports drag-and-drop via native HTML5 DnD.
    ═══════════════════════════════════════════ */
 export function FieldCard({
   field, index, total, isExpanded, isSelected,
   onToggle, onSelect, onUpdate, onRemove, onDuplicate, onMove,
-  onDragStart, onDragOver, onDrop,
+  onDragStart, onDragOver, onDrop, dataElements = [], onDataElementCreated,
 }) {
   const [showDesc, setShowDesc] = useState(false);
   const info = FIELD_TYPES.find((t) => t.value === field.field_type) || {};
@@ -282,6 +400,13 @@ export function FieldCard({
               </div>
             )}
           </div>
+
+          <DataElementSelector
+            value={field.element_id || null}
+            dataElements={dataElements}
+            onChange={(id) => onUpdate({ element_id: id })}
+            onCreated={onDataElementCreated}
+          />
 
           <div className="flex items-center gap-4">
             <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">

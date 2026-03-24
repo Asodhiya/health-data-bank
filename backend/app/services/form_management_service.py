@@ -5,9 +5,10 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, delete as sa_delete, func
 from sqlalchemy.orm import selectinload
-from uuid import UUID
+from uuid import UUID, uuid4
 from typing import List, Optional
 import time
+import asyncio
 
 from app.db.models import SurveyForm, FormField, FieldOption, FormDeployment, Group, FieldElementMap
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
@@ -37,28 +38,31 @@ async def create_survey_form(form_data: SurveyCreate, user_id: UUID, db: AsyncSe
     db.add(new_form)
     await db.flush()
 
+    field_map = {}
     for field_in in form_data.fields:
-        new_field = FormField(
+        field_id = uuid4()
+        db.add(FormField(
+            field_id=field_id,
             form_id=new_form.form_id,
             label=field_in.label,
             field_type=field_in.field_type,
             is_required=field_in.is_required,
             display_order=field_in.display_order
-        )
-        db.add(new_field)
-        await db.flush()
+        ))
+        field_map[field_id] = field_in
 
+    await db.flush()  # one flush — all fields now exist in DB
+
+    for field_id, field_in in field_map.items():
         if field_in.element_id:
-            db.add(FieldElementMap(field_id=new_field.field_id, element_id=field_in.element_id))
-
+            db.add(FieldElementMap(field_id=field_id, element_id=field_in.element_id))
         for option_in in field_in.options:
-            new_option = FieldOption(
-                field_id=new_field.field_id,
+            db.add(FieldOption(
+                field_id=field_id,
                 label=option_in.label,
                 value=option_in.value,
                 display_order=option_in.display_order
-            )
-            db.add(new_option)
+            ))
 
     await db.commit()
     invalidate_forms_cache()
@@ -117,65 +121,63 @@ async def get_form_by_id(form_id: UUID, db: AsyncSession) -> Optional[SurveyForm
     if not form:
         return None
 
-    # Attach element_id to each field from FieldElementMap
+    # Run FieldElementMap + FormDeployment lookups in parallel
     field_ids = [f.field_id for f in form.fields]
-    if field_ids:
-        map_result = await db.execute(
-            select(FieldElementMap).where(FieldElementMap.field_id.in_(field_ids))
-        )
-        element_map = {row.field_id: row.element_id for row in map_result.scalars().all()}
-        for field in form.fields:
-            field.element_id = element_map.get(field.field_id)
-
-    # Attach deployed group IDs
-    dep_result = await db.execute(
-        select(FormDeployment.group_id).where(FormDeployment.form_id == form_id)
+    map_result, dep_result = await asyncio.gather(
+        db.execute(select(FieldElementMap).where(FieldElementMap.field_id.in_(field_ids))),
+        db.execute(select(FormDeployment.group_id).where(FormDeployment.form_id == form_id))
     )
-    form.deployed_group_ids = [row for row in dep_result.scalars().all()]
+    element_map = {row.field_id: row.element_id for row in map_result.scalars().all()}
+    for field in form.fields:
+        field.element_id = element_map.get(field.field_id)
+    form.deployed_group_ids = list(dep_result.scalars().all())
 
     return form
 
 async def update_survey_form(form_id: UUID, form_data: SurveyCreate, db: AsyncSession):
     """Update an existing form"""
-    form = await get_form_by_id(form_id, db)
+    # Lightweight fetch — only what we need
+    result = await db.execute(select(SurveyForm).where(SurveyForm.form_id == form_id))
+    form = result.scalar_one_or_none()
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
-
     if form.status == "PUBLISHED":
         raise HTTPException(status_code=400, detail="Published forms cannot be edited. Unpublish the form first.")
 
-    # Delete FieldElementMap rows before clearing fields to avoid FK violations
-    old_field_ids = [f.field_id for f in form.fields]
+    # Get old field IDs in one query, delete dependents in bulk
+    old_ids_result = await db.execute(select(FormField.field_id).where(FormField.form_id == form_id))
+    old_field_ids = old_ids_result.scalars().all()
     if old_field_ids:
-        await db.execute(
-            sa_delete(FieldElementMap).where(FieldElementMap.field_id.in_(old_field_ids))
-        )
+        await db.execute(sa_delete(FieldElementMap).where(FieldElementMap.field_id.in_(old_field_ids)))
+        await db.execute(sa_delete(FieldOption).where(FieldOption.field_id.in_(old_field_ids)))
+        await db.execute(sa_delete(FormField).where(FormField.form_id == form_id))
 
-    form.fields = []
-    await db.flush()
-
+    # Insert all fields first, flush once to satisfy FK, then add maps and options
+    field_map = {}  # field_id -> field_in
     for field_in in form_data.fields:
-        new_field = FormField(
-            form_id=form.form_id,
+        field_id = uuid4()
+        db.add(FormField(
+            field_id=field_id,
+            form_id=form_id,
             label=field_in.label,
             field_type=field_in.field_type,
             is_required=field_in.is_required,
             display_order=field_in.display_order
-        )
-        db.add(new_field)
-        await db.flush()
+        ))
+        field_map[field_id] = field_in
 
+    await db.flush()  # one flush — all fields now exist in DB
+
+    for field_id, field_in in field_map.items():
         if field_in.element_id:
-            db.add(FieldElementMap(field_id=new_field.field_id, element_id=field_in.element_id))
-
+            db.add(FieldElementMap(field_id=field_id, element_id=field_in.element_id))
         for option_in in field_in.options:
-            new_option = FieldOption(
-                field_id=new_field.field_id,
+            db.add(FieldOption(
+                field_id=field_id,
                 label=option_in.label,
                 value=option_in.value,
                 display_order=option_in.display_order
-            )
-            db.add(new_option)
+            ))
 
     form.title = form_data.title
     form.description = form_data.description

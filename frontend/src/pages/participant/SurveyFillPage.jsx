@@ -173,6 +173,8 @@ export default function SurveyFillPage() {
   const [submitted, setSubmitted] = useState(false);
   const [showExitPrompt, setShowExitPrompt] = useState(false);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState("idle");
   const [descExpanded, setDescExpanded] = useState(false); // #14
@@ -444,19 +446,25 @@ export default function SurveyFillPage() {
     setShowSubmitConfirm(true);
   };
   const handleConfirmSubmit = async () => {
-    // Persist submission in localStorage so it survives reload
-    localStorage.setItem(
-      draftKey(id),
-      JSON.stringify({
-        answers,
-        savedAt: new Date().toISOString(),
-        submitted: true,
-      }),
-    );
-    // Try API submission (don't block success screen on failure)
-    api.submitSurvey(id, answersToArray(answers)).catch(() => {});
-    setSubmitted(true);
-    setShowSubmitConfirm(false);
+    setSubmitError(null);
+    setSubmitting(true);
+    try {
+      await api.submitSurvey(id, answersToArray(answers));
+      localStorage.setItem(
+        draftKey(id),
+        JSON.stringify({
+          answers,
+          savedAt: new Date().toISOString(),
+          submitted: true,
+        }),
+      );
+      setSubmitted(true);
+      setShowSubmitConfirm(false);
+    } catch (e) {
+      setSubmitError("Submission failed. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
   const handleBackClick = () => {
     if (isReadOnly.current) {
@@ -856,15 +864,20 @@ export default function SurveyFillPage() {
               )}
             </div>
             <div className="flex flex-col gap-2 px-6 pb-6">
+              {submitError && (
+                <p className="text-xs text-red-600 text-center mb-1">{submitError}</p>
+              )}
               <button
                 onClick={handleConfirmSubmit}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition"
+                disabled={submitting}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition"
               >
-                Yes, Submit My Answers
+                {submitting ? "Submitting…" : "Yes, Submit My Answers"}
               </button>
               <button
                 onClick={() => setShowSubmitConfirm(false)}
-                className="w-full py-2.5 text-sm font-medium text-slate-500 hover:text-slate-700 transition"
+                disabled={submitting}
+                className="w-full py-2.5 text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-60 transition"
               >
                 Go Back and Review
               </button>

@@ -1,8 +1,8 @@
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     User, FormSubmission, ParticipantProfile, SurveyForm,
-    HealthDataPoint, DataElement,
+    HealthDataPoint, DataElement, UserRole, Role,
 )
 from app.schemas.filter_data_schema import ParticipantFilter
 from datetime import date, timedelta
@@ -32,7 +32,7 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
     """
 
     demographic_columns = [
-        User.user_id.label("participant_id"),
+        ParticipantProfile.participant_id.label("participant_id"),
         ParticipantProfile.gender,
         ParticipantProfile.pronouns,
         ParticipantProfile.primary_language,
@@ -43,6 +43,13 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
         ParticipantProfile.marital_status,
         ParticipantProfile.dob,
     ]
+
+    participant_role_filter = (
+        select(UserRole.user_id)
+        .join(Role, UserRole.role_id == Role.role_id)
+        .where(Role.role_name == "participant")
+        .scalar_subquery()
+    )
 
     if survey_id:
         stmt = (
@@ -60,12 +67,14 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
             .join(ParticipantProfile, User.user_id == ParticipantProfile.user_id)
             .join(HealthDataPoint, ParticipantProfile.participant_id == HealthDataPoint.participant_id)
             .join(DataElement, HealthDataPoint.element_id == DataElement.element_id)
+            .where(User.user_id.in_(participant_role_filter))
         )
     else:
         stmt = (
             select(*demographic_columns)
             .select_from(User)
             .join(ParticipantProfile, User.user_id == ParticipantProfile.user_id)
+            .where(User.user_id.in_(participant_role_filter))
         )
 
     conditions = []
@@ -104,15 +113,7 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
         if filters.age_max:
             min_dob = date.today() - timedelta(days=(filters.age_max + 1) * 365.25)
             conditions.append(ParticipantProfile.dob >= min_dob)
-        if filters.search:
-            term = f"%{filters.search}%"
-            conditions.append(
-                or_(
-                    User.first_name.ilike(term),
-                    User.last_name.ilike(term),
-                    User.email.ilike(term),
-                )
-            )
+        # search by name/email intentionally excluded to preserve anonymity
 
     if conditions:
         stmt = stmt.where(and_(*conditions))
@@ -131,7 +132,6 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
 
         if participant_id not in pivoted_data:
             pivoted_data[participant_id] = {
-                "participant_id": participant_id,
                 "gender": row.gender,
                 "pronouns": row.pronouns,
                 "primary_language": row.primary_language,
@@ -160,7 +160,6 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
                 elements_meta[element_id] = f"{row.element_label}{unit_suffix}"
 
     columns_list = [
-        {"id": "participant_id",          "text": "Participant ID"},
         {"id": "gender",                  "text": "Gender"},
         {"id": "pronouns",                "text": "Pronouns"},
         {"id": "primary_language",        "text": "Primary Language"},

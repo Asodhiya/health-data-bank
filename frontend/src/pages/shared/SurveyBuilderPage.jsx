@@ -141,7 +141,7 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
 function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublish, groups, pageTitle = 'Survey Forms' }) {
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
-  const [sort, setSort]                 = useState('newest');
+  const [sort, setSort]                 = useState('edited');
   const [showSort, setShowSort]         = useState(false);
   const [groupFilter, setGroupFilter]   = useState('ALL');
   const [dateFrom, setDateFrom]         = useState('');
@@ -725,7 +725,7 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
    BUILDER VIEW
    #1 unsaved changes, #2 auto-save, #3 drag reorder, #4 validation
    ══════════════════════════════════════════════ */
-function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete }) {
+function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete, dataElements, onDataElementCreated }) {
   const [title, setTitle]       = useState(form?.title || '');
   const [desc, setDesc]         = useState(form?.description || '');
   const [fields, setFields]     = useState(form?.fields || []);
@@ -736,6 +736,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete })
   const [showDelete, setShowDelete]   = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [validationErrors, setValidationErrors] = useState([]);
+  const [validationContext, setValidationContext] = useState('saving');
   const [lastSaved, setLastSaved]       = useState(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
@@ -787,11 +788,13 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete })
   useEffect(() => { const i = setInterval(() => setTick((t) => t + 1), 15000); return () => clearInterval(i); }, []);
 
   /* #4 — Validation */
-  const validate = () => {
+  const validate = ({ requireElementLinks = false } = {}) => {
     const errs = [];
+    setValidationContext(requireElementLinks ? 'publishing' : 'saving');
     if (!title.trim()) errs.push('Form title is required');
     fields.forEach((f, i) => {
       if (!f.label.trim()) errs.push(`Q${i + 1}: Question text is required`);
+      if (requireElementLinks && !f.element_id) errs.push(`Q${i + 1}: Must be linked to a data element before publishing`);
       if (f.field_type === 'likert' && (f.likertMin ?? 0) >= (f.likertMax ?? 4)) errs.push(`Q${i + 1}: Likert min must be less than max`);
       if (['single_select', 'multi_select', 'dropdown'].includes(f.field_type)) {
         if (!f.options || f.options.length < 2) errs.push(`Q${i + 1}: Needs at least 2 options`);
@@ -876,7 +879,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete })
   };
 
   const handlePublishClick = () => {
-    if (!validate()) return;
+    if (!validate({ requireElementLinks: true })) return;
     setShowPublish(true);
   };
 
@@ -899,13 +902,21 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete })
               )}
             </span>
           )}
-          <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg">
-            <button onClick={() => setMode('edit')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'edit' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>Edit</button>
-            <button onClick={() => setMode('preview')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'preview' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>Preview</button>
-          </div>
-          <button onClick={handleSaveDraft} className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm flex items-center gap-1.5">
-            <SaveIco /> Save Draft
-          </button>
+          {isDraft ? (
+            <>
+              <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg">
+                <button onClick={() => setMode('edit')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'edit' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>Edit</button>
+                <button onClick={() => setMode('preview')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'preview' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>Preview</button>
+              </div>
+              <button onClick={handleSaveDraft} className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm flex items-center gap-1.5">
+                <SaveIco /> Save Draft
+              </button>
+            </>
+          ) : (
+            <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl font-medium">
+              Remove from all groups to edit
+            </span>
+          )}
           {form?.form_id && !form.form_id.startsWith('tmp-') && (
             <button onClick={() => setShowDelete(true)} className="px-4 py-2 text-sm font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-xl hover:bg-rose-100 transition shadow-sm">
               Delete
@@ -920,16 +931,22 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete })
       {/* #4 — Validation errors panel */}
       {validationErrors.length > 0 && (
         <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 mb-4">
-          <p className="text-xs font-bold text-rose-700 mb-1">Please fix the following before saving:</p>
+          <p className="text-xs font-bold text-rose-700 mb-1">Please fix the following before {validationContext}:</p>
           {validationErrors.map((err, i) => (
             <p key={i} className="text-xs text-rose-600 flex items-center gap-1.5"><AlertIco /> {err}</p>
           ))}
         </div>
       )}
 
+      {!isDraft && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-xs text-amber-800">
+          This form is published and cannot be edited. Use <strong>Manage Groups</strong> to remove it from all groups, which will revert it to a draft.
+        </div>
+      )}
+
       {mode === 'edit' ? (
         <div className="flex-1 overflow-y-auto pr-1">
-          <div className="bg-white rounded-xl border border-slate-200 p-5 mb-4 shadow-sm">
+          <div className={`bg-white rounded-xl border border-slate-200 p-5 mb-4 shadow-sm ${!isDraft ? 'pointer-events-none opacity-60' : ''}`}>
             <input value={title} onChange={(e) => handleTitleChange(e.target.value)} placeholder="Form title…"
               className={`w-full text-lg font-bold text-slate-800 bg-transparent border-0 border-b-2 pb-2 focus:outline-none transition placeholder-slate-300 ${
                 !title.trim() && validationErrors.length > 0 ? 'border-rose-300 focus:border-rose-500' : 'border-slate-200 focus:border-blue-500'
@@ -966,7 +983,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete })
               <p className="text-xs mt-1">Add your first question below</p>
             </div>
           )}
-          <div className="space-y-2.5 mb-4">
+          <div className={`space-y-2.5 mb-4 ${!isDraft ? 'pointer-events-none opacity-60' : ''}`}>
             {fields.map((f, i) => (
               <FieldCard key={f.id} field={f} index={i} total={fields.length}
                 isExpanded={expanded === f.id}
@@ -979,7 +996,9 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete })
                 onMove={(dir) => moveField(i, dir)}
                 onDragStart={onDragStart}
                 onDragOver={() => {}}
-                onDrop={onDrop} />
+                onDrop={onDrop}
+                dataElements={dataElements}
+                onDataElementCreated={onDataElementCreated} />
             ))}
           </div>
           <button onClick={() => setShowAdd(true)} className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm font-semibold text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-all flex items-center justify-center gap-2"><PlusIco /> Add Question</button>
@@ -1044,6 +1063,9 @@ export default function SurveyBuilderPage() {
   const [view, setView]               = useState('list');
   const [editingForm, setEditingForm] = useState(null);
   const [toast, setToast]             = useState(null);
+  const [dataElements, setDataElements] = useState([]);
+
+  useEffect(() => { api.listElements().then(setDataElements).catch(() => {}); }, []);
 
   const loadForms = async () => {
     try {
@@ -1065,7 +1087,27 @@ export default function SurveyBuilderPage() {
     }
   };
 
-  useEffect(() => { loadForms(); loadGroups(); }, []);
+  useEffect(() => {
+    loadForms();
+    loadGroups();
+    // Restore builder session after a page refresh
+    try {
+      const session = localStorage.getItem('hdb_builder_session');
+      if (session) {
+        const { formId, form } = JSON.parse(session);
+        // For new forms, restore from draft if available
+        const draftKey = `hdb_builder_draft_${formId}`;
+        const draft = localStorage.getItem(draftKey);
+        if (draft) {
+          const { title, description, fields } = JSON.parse(draft);
+          setEditingForm({ ...(form || {}), title, description, fields });
+        } else {
+          setEditingForm(form);
+        }
+        setView('builder');
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   /* Infer role context from URL path for display purposes */
   const isAdminContext = window.location.pathname.startsWith('/surveys');
@@ -1079,15 +1121,26 @@ export default function SurveyBuilderPage() {
   const handleEdit = async (form) => {
     try {
       const fullForm = await api.getFormDetail(form.form_id);
-      setEditingForm(transformForEdit(fullForm));
+      const transformed = transformForEdit(fullForm);
+      localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: fullForm.form_id, form: transformed }));
+      setEditingForm(transformed);
       setView('builder');
     } catch (err) {
       showToast('Error loading form');
     }
   };
 
-  const handleCreate = () => { setEditingForm(null); setView('builder'); };
-  const handleBack   = () => { setView('list'); setEditingForm(null); loadForms(); };
+  const handleCreate = () => {
+    localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: 'new', form: null }));
+    setEditingForm(null);
+    setView('builder');
+  };
+  const handleBack = () => {
+    localStorage.removeItem('hdb_builder_session');
+    setView('list');
+    setEditingForm(null);
+    loadForms();
+  };
 
   const handleSave = async (formData) => {
     try {
@@ -1198,6 +1251,9 @@ export default function SurveyBuilderPage() {
           onPublish={handlePublishFromBuilder}
           onUnpublish={handleUnpublish}
           onDelete={handleDelete}
+          dataElements={dataElements}
+          onDataElementCreated={(el) => setDataElements((prev) => [...prev, el])}
+
         />
       )}
 
