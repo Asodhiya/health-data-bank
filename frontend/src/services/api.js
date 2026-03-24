@@ -8,19 +8,25 @@ async function request(endpoint, options = {}) {
   });
 
   const data = await res.json();
-
+ 
   if (!res.ok) {
-    throw new Error(data.detail || "Something went wrong");
+    const msg =
+      typeof data.detail === "string"
+        ? data.detail
+        : Array.isArray(data.detail)
+          ? data.detail.map((d) => d.msg).join(", ")
+          : "Something went wrong";
+    throw new Error(msg);
   }
-
+ 
   return data;
 }
 
 export const api = {
-  login: (email, password) =>
+  login: (identifier, password) =>
     request("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identifier, password }),
     }),
 
   logout: () => request("/auth/logout", { method: "POST" }),
