@@ -329,7 +329,7 @@ class GoalTemplateQuery:
         if not template:
             raise HTTPException(status_code=404, detail="Goal template not found")
         for field, value in payload.model_dump(exclude_none=True).items():
-            setattr(template, field, value)
+           setattr(template, field, value)
         await self.db.flush()
         await self.db.refresh(template)
         return template
@@ -875,7 +875,7 @@ class CaretakersQuery:
                 FormSubmission.participant_id,
                 FormSubmission.form_id,
                 SurveyForm.title.label("form_name"),
-                func.cast(FormSubmission.submitted_at, SADate).label("submitted_at"),
+                FormSubmission.submitted_at,
             )
             .join(SurveyForm, SurveyForm.form_id == FormSubmission.form_id)
             .where(FormSubmission.participant_id == participant_id)
@@ -1173,7 +1173,7 @@ class CaretakersQuery:
                 FormSubmission.participant_id,
                 FormSubmission.form_id,
                 SurveyForm.title.label("form_name"),
-                func.cast(FormSubmission.submitted_at, SADate).label("submitted_at"),
+                FormSubmission.submitted_at,
             )
             .join(SurveyForm, SurveyForm.form_id == FormSubmission.form_id)
             .where(

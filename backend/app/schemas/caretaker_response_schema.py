@@ -118,7 +118,7 @@ class SubmissionListItem(BaseModel):
     participant_id: UUID
     form_id: UUID
     form_name: str
-    submitted_at: date
+    submitted_at: Optional[datetime]
 
 
 class SubmissionAnswerItem(BaseModel):
@@ -135,7 +135,7 @@ class SubmissionDetailItem(BaseModel):
     participant_id: UUID
     form_id: UUID
     form_name: str
-    submitted_at: date
+    submitted_at: Optional[datetime]
     answers: list[SubmissionAnswerItem] = Field(default_factory=list)
 
 
