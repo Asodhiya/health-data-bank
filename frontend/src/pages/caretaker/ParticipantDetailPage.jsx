@@ -599,7 +599,7 @@ function TrendsTab({ trends, loading: trendsLoading }) {
                 <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isSelected ? "bg-white/40" : ""}`}
                   style={!isSelected ? { backgroundColor: COLORS[i % COLORS.length] } : undefined} />
                 {t.label}
-                <span className={isSelected ? "text-white/60" : "text-slate-400"}>({t.unit})</span>
+                {t.unit && <span className={isSelected ? "text-white/60" : "text-slate-400"}>({t.unit})</span>}
               </button>
             );
           })}
@@ -621,7 +621,7 @@ function TrendsTab({ trends, loading: trendsLoading }) {
                 <Legend wrapperStyle={{ fontSize: "11px" }} />
                 {activeTrends.map((t) => (
                   <Line key={t.element_id} type="monotone" dataKey={t.label}
-                    name={`${t.label} (${t.unit})`}
+                    name={t.unit ? `${t.label} (${t.unit})` : t.label}
                     stroke={COLORS[trends.findIndex(x => x.element_id === t.element_id) % COLORS.length]}
                     strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                 ))}
@@ -649,7 +649,7 @@ function TrendsTab({ trends, loading: trendsLoading }) {
               <div className="flex items-center gap-2 mb-3">
                 <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: COLORS[trends.findIndex(x => x.element_id === t.element_id) % COLORS.length] }} />
                 <p className="text-sm font-bold text-slate-800">{t.label}</p>
-                <span className="text-xs text-slate-400">({t.unit})</span>
+                {t.unit && <span className="text-xs text-slate-400">({t.unit})</span>}
               </div>
               <div className="grid grid-cols-4 gap-2 text-center">
                 <div><p className="text-lg font-extrabold text-slate-800">{latest.value}</p><p className="text-[10px] text-slate-400 uppercase font-semibold">Latest</p></div>
