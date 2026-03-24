@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useOutletContext } from "react-router-dom";
 import { api } from "../../services/api";
 import {
@@ -21,32 +21,71 @@ export default function ResearcherDashboard() {
   const [loading, setLoading] = useState(true);
   const [hiddenColumns, setHiddenColumns] = useState([]);
 
+  const [attributeSearch, setAttributeSearch] = useState("");
+
   // 👈 3. New states to hold our filter data (we will use these in Step 2)
   const [availableSurveys, setAvailableSurveys] = useState([]);
+  const [allGroups, setAllGroups] = useState([]);
+  const [availableGroups, setAvailableGroups] = useState([]);
+  // 🟢 UPDATED: group_id is now an array (group_ids) for multi-select
   const [filters, setFilters] = useState({
     survey_id: "",
-    group_id: "",
+    group_ids: [],
     search: "",
     status: "",
     gender: "",
-    age_min: "",
-    age_max: "",
+    primary_language: "",
+    date_range: "all_time", // 🟢 New!
+    age_min: "18", // 🟢 New!
+    age_max: "100", // 🟢 New!
   });
+
+  const [surveySearch, setSurveySearch] = useState("");
+  const [groupSearch, setGroupSearch] = useState("");
+  const [isSurveyOpen, setIsSurveyOpen] = useState(false);
+  const [isGroupOpen, setIsGroupOpen] = useState(false);
+
+  // Ref to detect clicking outside the dropdowns
+  const filterRef = useRef(null);
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (filterRef.current && !filterRef.current.contains(event.target)) {
+        setIsSurveyOpen(false);
+        setIsGroupOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const [viewMode, setViewMode] = useState("table"); // "table" or "charts"
 
-  // 👈 4. Fetch the real data using api.js
+  // 1. Initial Data Load
   useEffect(() => {
     setLoading(true);
-    // Fetch both the survey list and the table data at the same time
+    // 🟢 Use listForms() just like the SurveyBuilder!
     Promise.all([
-      api.getAvailableSurveys().catch(() => []),
+      api.listForms().catch(() => []),
       api.getResearcherResults().catch(() => ({ columns: [], data: [] })),
+      api.listGroups().catch(() => []),
     ])
-      .then(([surveysRes, resultsRes]) => {
-        setAvailableSurveys(surveysRes || []);
+      .then(([formsRes, resultsRes, groupsRes]) => {
+        // Only show PUBLISHED surveys in the dropdown
+        const publishedForms = (formsRes || []).filter(
+          (f) => f.status === "PUBLISHED",
+        );
+        setAvailableSurveys(publishedForms);
+
+        const fetchedGroups = groupsRes || [];
+        setAllGroups(fetchedGroups);
+        setAvailableGroups(fetchedGroups);
+
         setQueryData({
-          columns: resultsRes.columns || [],
+          columns: (resultsRes.columns || []).filter(
+            (col) =>
+              col.id !== "participant_id" &&
+              col.text?.toLowerCase() !== "participant id",
+          ),
           data: resultsRes.data || [],
         });
       })
@@ -54,26 +93,67 @@ export default function ResearcherDashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  // RE-ADD STATS CALCULATION (Unchanged)
+  // 2. The Instant Local Group Filter (NOW WITH AUTO-SELECT!)
+  useEffect(() => {
+    if (!filters.survey_id) {
+      setAvailableGroups(allGroups); // Show all if no survey is selected
+      // Don't auto-clear groups here just in case they are browsing all surveys
+    } else {
+      const survey = availableSurveys.find(
+        (s) => (s.form_id || s.id) === filters.survey_id,
+      );
+
+      if (
+        survey &&
+        survey.deployed_groups &&
+        survey.deployed_groups.length > 0
+      ) {
+        // Find the actual group objects from the master list
+        const validGroups = allGroups.filter((g) =>
+          survey.deployed_groups.includes(g.name),
+        );
+        setAvailableGroups(validGroups);
+
+        // 🟢 THE FIX: Auto-select ALL deployed groups by default!
+        const validIds = validGroups.map((g) => g.group_id || g.id);
+        setFilters((prev) => ({
+          ...prev,
+          group_ids: validIds, // Instantly selects them all so the pills appear
+        }));
+      } else {
+        setAvailableGroups([]);
+        setFilters((prev) => ({ ...prev, group_ids: [] }));
+      }
+    }
+  }, [filters.survey_id, allGroups, availableSurveys]);
+
+  // NEW STATS CALCULATION: Filtered Results, Total Participants, Active Groups
   const stats = useMemo(() => {
     const count = queryData.data.length;
-    const scoredRows = queryData.data.filter(
-      (r) => r.score !== null && r.score !== undefined,
-    );
-    const mean =
-      scoredRows.length > 0
-        ? (
-            scoredRows.reduce((acc, row) => acc + Number(row.score), 0) /
-            scoredRows.length
-          ).toFixed(1)
-        : "0.0";
+    const uniqueParticipants = new Set();
+    queryData.data.forEach((row) => {
+      const pId = row.participant_id || row.email || row.name;
+      if (pId) uniqueParticipants.add(pId);
+    });
+
+    // 🟢 NEW RATIO LOGIC
+    const selectedCount = filters.group_ids.length;
+    const totalAssigned = availableGroups.length;
 
     return {
       count,
-      mean,
-      scoredCount: scoredRows.length,
+      totalParticipants:
+        uniqueParticipants.size > 0 ? uniqueParticipants.size : count,
+      // This creates the "1 of 2" text
+      activeGroupsText:
+        selectedCount > 0
+          ? `${selectedCount} of ${totalAssigned}`
+          : totalAssigned > 0
+            ? `All (${totalAssigned})`
+            : "0",
+      isFiltered: selectedCount > 0 && selectedCount < totalAssigned,
     };
-  }, [queryData]);
+  }, [queryData, filters.group_ids, availableGroups]);
 
   // DERIVE CHART DATA
   const chartData = useMemo(() => {
@@ -115,17 +195,26 @@ export default function ResearcherDashboard() {
     setLoading(true);
     setFilters({
       survey_id: "",
-      group_id: "",
+      group_ids: [],
       search: "",
       status: "",
       gender: "",
-      age_min: "",
-      age_max: "",
+      primary_language: "",
+      date_range: "all_time",
+      age_min: "18",
+      age_max: "65",
     });
     api
       .getResearcherResults()
       .then((res) =>
-        setQueryData({ columns: res.columns || [], data: res.data || [] }),
+        setQueryData({
+          columns: (res.columns || []).filter(
+            (col) =>
+              col.id !== "participant_id" &&
+              col.text?.toLowerCase() !== "participant id",
+          ),
+          data: res.data || [],
+        }),
       )
       .catch((err) => console.error("API Error:", err))
       .finally(() => setLoading(false));
@@ -154,13 +243,28 @@ export default function ResearcherDashboard() {
 
   const applyFilters = () => {
     setLoading(true);
-    const activeFilters = Object.fromEntries(
-      Object.entries(filters).filter(([_, v]) => v !== ""),
-    );
+    const activeFilters = {};
+
+    Object.entries(filters).forEach(([key, value]) => {
+      if (key === "group_ids") {
+        if (value.length > 0) activeFilters.group_id = value.join(",");
+      } else if (value !== "" && value !== "all_time") {
+        // skip sending if it's default
+        activeFilters[key] = value;
+      }
+    });
+
     api
       .getResearcherResults(activeFilters)
       .then((res) =>
-        setQueryData({ columns: res.columns || [], data: res.data || [] }),
+        setQueryData({
+          columns: (res.columns || []).filter(
+            (col) =>
+              col.id !== "participant_id" &&
+              col.text?.toLowerCase() !== "participant id",
+          ),
+          data: res.data || [],
+        }),
       )
       .catch((err) => console.error("Filter Error:", err))
       .finally(() => setLoading(false));
@@ -172,9 +276,6 @@ export default function ResearcherDashboard() {
         Connecting to Research Vault...
       </div>
     );
-
-  // DO NOT DELETE OR CHANGE ANYTHING BELOW THIS LINE.
-  // Your `return (` starts here!
 
   return (
     <div className="w-full space-y-6">
@@ -213,121 +314,417 @@ export default function ResearcherDashboard() {
             : `Export ${stats.count} Rows (CSV)`}
         </button>
       </div>
-
-      {/* NEW SECTION: DATA FILTERS */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-        <div className="flex justify-between items-center mb-5 pb-4 border-b border-slate-100">
-          <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5 text-indigo-500"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
-            Data Filters
-          </h2>
+      {/* ── NEW DATA FILTERS UI (MOCKUP STYLE) ── */}
+      <div
+        className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6"
+        ref={filterRef}
+      >
+        {/* Header */}
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-3">
+            <h2 className="text-[15px] font-bold text-slate-800 flex items-center gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5 text-blue-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+              Data filters
+            </h2>
+            {/* Active Filters Badge */}
+            {(filters.group_ids.length > 0 ||
+              filters.survey_id ||
+              filters.status ||
+              filters.gender ||
+              filters.primary_language) && (
+              <span className="bg-blue-50 text-blue-600 px-2.5 py-0.5 rounded-full text-[11px] font-bold border border-blue-100 uppercase tracking-wide">
+                {filters.group_ids.length + (filters.survey_id ? 1 : 0)} Active
+              </span>
+            )}
+          </div>
           <button
             onClick={resetFilters}
-            className="text-xs font-bold text-slate-400 hover:text-rose-500 transition-colors uppercase tracking-widest"
+            className="text-xs font-semibold text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 px-4 py-1.5 rounded-full transition-colors flex items-center gap-1"
           >
-            Clear Filters
+            Clear filters
           </button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* 1. Search Box (Spans 2 columns) */}
-          <input
-            type="text"
-            placeholder="🔍 Search name or email..."
-            className="lg:col-span-2 p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 placeholder-slate-400"
-            value={filters.search}
-            onChange={(e) => handleFilterChange("search", e.target.value)}
-          />
 
-          {/* 2. Survey Dropdown (Spans 2 columns) */}
-          <select
-            className="lg:col-span-2 p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500"
-            value={filters.survey_id}
-            onChange={(e) => handleFilterChange("survey_id", e.target.value)}
-          >
-            <option value="">All Surveys</option>
-            {availableSurveys.map((s) => (
-              <option key={s.form_id || s.id} value={s.form_id || s.id}>
-                {s.title || s.name}
-              </option>
-            ))}
-          </select>
+        <div className="space-y-5">
+          {/* Survey Combobox */}
+          {/* ── Survey Combobox ── */}
+          <div className="relative z-30">
+            <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+              Survey
+            </label>
 
-          {/* 3. Group ID */}
-          <input
-            type="text"
-            placeholder="Group ID (Optional)"
-            className="p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 placeholder-slate-400"
-            value={filters.group_id}
-            onChange={(e) => handleFilterChange("group_id", e.target.value)}
-          />
+            {/* Inner wrapper keeps dropdown perfectly attached to the input */}
+            <div className="relative">
+              <div className="flex items-center border border-slate-200 rounded-lg p-1.5 bg-white focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all shadow-sm">
+                <span className="pl-2 pr-2 text-slate-400">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                    />
+                  </svg>
+                </span>
+                {filters.survey_id && !isSurveyOpen ? (
+                  <div
+                    className="flex-1 text-sm font-medium text-slate-800 p-1 cursor-pointer truncate"
+                    onClick={() => setIsSurveyOpen(true)}
+                  >
+                    {availableSurveys.find(
+                      (s) => (s.form_id || s.id) === filters.survey_id,
+                    )?.title || "Selected Survey"}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    className="flex-1 text-sm text-slate-800 p-1 outline-none bg-transparent placeholder-slate-400"
+                    placeholder="Search for a survey..."
+                    value={surveySearch}
+                    onChange={(e) => setSurveySearch(e.target.value)}
+                    onFocus={() => setIsSurveyOpen(true)}
+                  />
+                )}
+                {filters.survey_id && (
+                  <button
+                    onClick={() =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        survey_id: "",
+                        group_ids: [],
+                      }))
+                    }
+                    className="p-1 hover:bg-slate-100 rounded-md text-slate-400 mr-1 transition-colors"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                )}
+              </div>
 
-          {/* 4. Status Dropdown */}
-          <select
-            className="p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500"
-            value={filters.status}
-            onChange={(e) => handleFilterChange("status", e.target.value)}
-          >
-            <option value="">All Statuses</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive / Dropped</option>
-          </select>
-
-          {/* 5. Gender Dropdown */}
-          <select
-            className="p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500"
-            value={filters.gender}
-            onChange={(e) => handleFilterChange("gender", e.target.value)}
-          >
-            <option value="">All Genders</option>
-            <option value="male">Male</option>
-            <option value="female">Female</option>
-            <option value="other">Other</option>
-          </select>
-
-          {/* 6. Age Range (Grouped in one column) */}
-          <div className="flex gap-2">
-            <input
-              type="number"
-              placeholder="Min Age"
-              className="w-1/2 p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500"
-              value={filters.age_min}
-              onChange={(e) => handleFilterChange("age_min", e.target.value)}
-            />
-            <input
-              type="number"
-              placeholder="Max Age"
-              className="w-1/2 p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500"
-              value={filters.age_max}
-              onChange={(e) => handleFilterChange("age_max", e.target.value)}
-            />
+              {/* Dropdown snaps directly below the input using top-full */}
+              {isSurveyOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-50">
+                  {availableSurveys
+                    .filter((s) =>
+                      (s.title || s.name || "")
+                        .toLowerCase()
+                        .includes(surveySearch.toLowerCase()),
+                    )
+                    .map((s) => (
+                      <div
+                        key={s.form_id || s.id}
+                        className="px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer border-b border-slate-50 last:border-0 truncate"
+                        onClick={() => {
+                          setFilters((prev) => ({
+                            ...prev,
+                            survey_id: s.form_id || s.id,
+                          }));
+                          setSurveySearch("");
+                          setIsSurveyOpen(false);
+                        }}
+                      >
+                        {s.title || s.name}
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* 7. Apply Button (Spans full width at the bottom) */}
+          {/* ── Groups Combobox ── */}
+          <div className="relative z-20">
+            <label className="text-xs font-semibold text-slate-500 mb-1.5 flex justify-between items-center">
+              Groups
+              {filters.group_ids.length > 0 && (
+                <button
+                  onClick={() =>
+                    setFilters((prev) => ({ ...prev, group_ids: [] }))
+                  }
+                  className="text-[10px] text-blue-500 hover:text-blue-700 uppercase tracking-widest font-bold"
+                >
+                  Deselect All
+                </button>
+              )}
+            </label>
+
+            <div className="relative">
+              <div className="flex items-center border border-slate-200 rounded-lg p-1.5 bg-white focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all shadow-sm">
+                <span className="pl-2 pr-2 text-slate-400">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M15 20v-2a3 3 0 00-5.356-1.857M15 20H9m6 0v-2c0-.656-.126-1.283-.356-1.857M9 20H4v-2a3 3 0 015.356-1.857M15 7a4 4 0 11-8 0 4 4 0 018 0zm6 3a3 3 0 11-6 0 3 3 0 016 0zM7 10a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                  </svg>
+                </span>
+                <input
+                  type="text"
+                  className="flex-1 text-sm text-slate-800 p-1 outline-none bg-transparent placeholder-slate-400"
+                  placeholder={
+                    filters.survey_id
+                      ? "Filter assigned groups..."
+                      : "Select a survey first..."
+                  }
+                  value={groupSearch}
+                  onChange={(e) => setGroupSearch(e.target.value)}
+                  onFocus={() => setIsGroupOpen(true)}
+                />
+              </div>
+
+              {/* 🟢 DROPDOWN: absolute positioning prevents "popping" */}
+              {isGroupOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-2xl max-h-48 overflow-y-auto z-[100]">
+                  {availableGroups
+                    .filter((g) =>
+                      (g.name || "")
+                        .toLowerCase()
+                        .includes(groupSearch.toLowerCase()),
+                    )
+                    .map((g) => {
+                      const gid = g.group_id || g.id;
+                      const isChecked = filters.group_ids.includes(gid);
+                      return (
+                        <label
+                          key={gid}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-blue-50 cursor-pointer border-b border-slate-50 last:border-0 transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              setFilters((prev) => ({
+                                ...prev,
+                                group_ids: isChecked
+                                  ? prev.group_ids.filter((id) => id !== gid)
+                                  : [...prev.group_ids, gid],
+                              }));
+                            }}
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="truncate flex-1">{g.name}</span>
+                        </label>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+
+            {/* 🟢 PILLS: Only show when dropdown is CLOSED for a cleaner look */}
+            {!isGroupOpen && filters.group_ids.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-3 animate-in fade-in slide-in-from-top-1">
+                {filters.group_ids.map((gid) => {
+                  const g = allGroups.find((x) => (x.group_id || x.id) === gid);
+                  return (
+                    <span
+                      key={gid}
+                      className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-[11px] font-bold border border-blue-100 shadow-sm"
+                    >
+                      {g?.name || `Group ${gid}`}
+                      <button
+                        onClick={() =>
+                          setFilters((prev) => ({
+                            ...prev,
+                            group_ids: prev.group_ids.filter(
+                              (id) => id !== gid,
+                            ),
+                          }))
+                        }
+                        className="hover:bg-blue-200 hover:text-rose-600 rounded-full p-0.5"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-3 w-3"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2.5}
+                            d="M6 18L18 6M6 6l12 12"
+                          />
+                        </svg>
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Row 3: Status, Gender, Language */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+            <div>
+              <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                Participant status
+              </label>
+              <select
+                className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
+                value={filters.status}
+                onChange={(e) =>
+                  setFilters((prev) => ({ ...prev, status: e.target.value }))
+                }
+              >
+                <option value="">All statuses</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                Gender
+              </label>
+              <select
+                className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
+                value={filters.gender}
+                onChange={(e) =>
+                  setFilters((prev) => ({ ...prev, gender: e.target.value }))
+                }
+              >
+                <option value="">All genders</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                Primary language
+              </label>
+              <select
+                className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
+                value={filters.primary_language || ""}
+                onChange={(e) =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    primary_language: e.target.value,
+                  }))
+                }
+              >
+                <option value="">All languages</option>
+                <option value="english">English</option>
+                <option value="spanish">Spanish</option>
+                <option value="french">French</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Row 4: Date Range & Age Range */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-1">
+            <div>
+              <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                Date range
+              </label>
+              <select
+                className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
+                value={filters.date_range}
+                onChange={(e) =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    date_range: e.target.value,
+                  }))
+                }
+              >
+                <option value="all_time">All time</option>
+                <option value="last_7_days">Last 7 days</option>
+                <option value="last_30_days">Last 30 days</option>
+                <option value="last_3_months">Last 3 months</option>
+                <option value="last_year">Last year</option>
+              </select>
+            </div>
+
+            {/* Custom Age Range Control */}
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="text-xs font-semibold text-slate-500">
+                  Age range
+                </label>
+                <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                  {filters.age_min || 0} – {filters.age_max || 100}
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min="0"
+                  max="120"
+                  placeholder="Min"
+                  className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm text-center"
+                  value={filters.age_min}
+                  onChange={(e) =>
+                    setFilters((prev) => ({ ...prev, age_min: e.target.value }))
+                  }
+                />
+                <span className="text-slate-300 font-bold">-</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="120"
+                  placeholder="Max"
+                  className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm text-center"
+                  value={filters.age_max}
+                  onChange={(e) =>
+                    setFilters((prev) => ({ ...prev, age_max: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Apply Button */}
           <button
             onClick={applyFilters}
-            className="lg:col-span-4 bg-slate-800 text-white p-2.5 rounded-lg text-sm font-bold hover:bg-blue-600 transition shadow-sm active:scale-95 flex justify-center items-center"
+            className="w-full bg-[#1e5899] hover:bg-blue-800 text-white py-3 rounded-lg text-sm font-bold transition shadow-md active:scale-[0.99] mt-4 flex justify-center items-center gap-2"
           >
-            {loading ? "Searching Database..." : "Apply Filters"}
+            {loading ? "Applying filters..." : "Apply filters"}
           </button>
         </div>
       </div>
 
       {/* SECTION A: THE ATTRIBUTE SELECTOR */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-        <div className="flex justify-between items-center mb-5 pb-4 border-b border-slate-100">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5 pb-4 border-b border-slate-100">
           <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -345,39 +742,74 @@ export default function ResearcherDashboard() {
             </svg>
             Visible Attributes
           </h2>
-          <button
-            onClick={resetFilters}
-            className="text-xs font-bold text-slate-400 hover:text-rose-500 transition-colors uppercase tracking-widest"
-          >
-            Refresh Schema
-          </button>
+
+          <div className="flex items-center gap-4 w-full md:w-auto">
+            {/* 🟢 NEW: Search Bar for the checkboxes */}
+            <input
+              type="text"
+              placeholder="🔍 Search attributes..."
+              value={attributeSearch}
+              onChange={(e) => setAttributeSearch(e.target.value)}
+              className="p-2 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 w-full md:w-64"
+            />
+            <button
+              onClick={resetFilters}
+              className="text-xs font-bold text-slate-400 hover:text-blue-600 transition-colors uppercase tracking-widest whitespace-nowrap"
+            >
+              Refresh Schema
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-3">
-          {queryData.columns.map((col) => (
-            <label key={col.id} className="flex items-center gap-2 ...">
-              <input
-                type="checkbox"
-                checked={!hiddenColumns.includes(col.id)} // It's checked if it's NOT in the hidden list
-                onChange={() => {
-                  if (hiddenColumns.includes(col.id)) {
-                    setHiddenColumns(
-                      hiddenColumns.filter((id) => id !== col.id),
-                    ); // Remove from hidden
-                  } else {
-                    setHiddenColumns([...hiddenColumns, col.id]); // Add to hidden
-                  }
-                }}
-                className="..."
-              />
-              <span>{col.text}</span>
-            </label>
-          ))}
+          {queryData.columns
+            // 🟢 SAFELY filter the checkboxes based on the search bar typing
+            .filter((col) =>
+              String(col?.text || col?.id || "")
+                .toLowerCase()
+                .includes(String(attributeSearch || "").toLowerCase()),
+            )
+            .map((col) => (
+              <label
+                key={col.id}
+                className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 hover:border-blue-300 transition-colors"
+              >
+                <input
+                  type="checkbox"
+                  checked={!hiddenColumns.includes(col.id)}
+                  onChange={() => {
+                    if (hiddenColumns.includes(col.id)) {
+                      setHiddenColumns(
+                        hiddenColumns.filter((id) => id !== col.id),
+                      );
+                    } else {
+                      setHiddenColumns([...hiddenColumns, col.id]);
+                    }
+                  }}
+                  className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-slate-700">
+                  {col?.text || col?.id}
+                </span>
+              </label>
+            ))}
+
+          {/* Quick empty state if they search for something that doesn't exist */}
+          {queryData.columns.filter((col) =>
+            String(col?.text || col?.id || "")
+              .toLowerCase()
+              .includes(String(attributeSearch || "").toLowerCase()),
+          ).length === 0 && (
+            <p className="text-sm text-slate-400 italic">
+              No attributes match your search.
+            </p>
+          )}
         </div>
       </div>
 
       {/* MIDDLE SECTION: DYNAMIC SUMMARY CALCULATIONS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Card 1: Filtered Results (Kept this one!) */}
         <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
             <svg
@@ -405,6 +837,7 @@ export default function ResearcherDashboard() {
           </div>
         </div>
 
+        {/* Card 2: Total Participants (NEW) */}
         <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
             <svg
@@ -418,22 +851,27 @@ export default function ResearcherDashboard() {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M15 20v-2a3 3 0 00-5.356-1.857M15 20H9m6 0v-2c0-.656-.126-1.283-.356-1.857M9 20H4v-2a3 3 0 015.356-1.857M15 7a4 4 0 11-8 0 4 4 0 018 0zm6 3a3 3 0 11-6 0 3 3 0 016 0zM7 10a3 3 0 11-6 0 3 3 0 016 0z"
               />
             </svg>
           </div>
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Mean Score
+              Total Participants
             </p>
             <p className="text-xl font-extrabold text-slate-800">
-              {stats.mean} Avg
+              {stats.totalParticipants} Unique
             </p>
           </div>
         </div>
 
+        {/* Card 3: Active Groups (NEW) */}
+        {/* Card 3: Active Groups */}
         <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center">
+          <div
+            className={`w-12 h-12 rounded-full flex items-center justify-center ${stats.isFiltered ? "bg-amber-50 text-amber-600" : "bg-indigo-50 text-indigo-600"}`}
+          >
+            {/* Same SVG as before */}
             <svg
               xmlns="http://www.w3.org/2000/svg"
               className="h-6 w-6"
@@ -445,16 +883,16 @@ export default function ResearcherDashboard() {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857"
+                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
               />
             </svg>
           </div>
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Valid Entries
+              Active Groups
             </p>
             <p className="text-xl font-extrabold text-slate-800">
-              {stats.scoredCount} Scored
+              {stats.activeGroupsText}
             </p>
           </div>
         </div>
