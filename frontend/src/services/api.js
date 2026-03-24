@@ -161,6 +161,12 @@ export const api = {
   adminUnassignCaretaker: (groupId) =>
     request(`/admin_only/assign-caretaker/${groupId}`, { method: "DELETE" }),
 
+  adminUpdateGroup: (groupId, payload) =>
+    request(`/admin_only/groups/${groupId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
   // ── Admin: Invites ──
   // TODO (backend): Add GET /admin_only/invites and DELETE /admin_only/invites/{id}
   adminListInvites: () => request("/admin_only/invites"),
