@@ -56,3 +56,8 @@ BACKUP_CREATE  = "backup:create"
 USER_READ   = "user:read"
 USER_WRITE  = "user:write"
 USER_DELETE = "user:delete"
+
+# ── Onboarding ──────────────────────────────────────────────────────
+ONBOARDING_READ   = "onboarding:read"
+ONBOARDING_SUBMIT = "onboarding:submit"
+ONBOARDING_EDIT   = "onboarding:edit"
