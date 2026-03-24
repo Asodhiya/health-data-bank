@@ -373,7 +373,6 @@ async def get_submission_detail(
         submitted_at=row.submitted_at,
         answers=[
             SubmissionAnswerItem(
-                answer_id=a.answer_id,
                 field_id=a.field_id,
                 field_label=a.field_label,
                 value_text=a.value_text,

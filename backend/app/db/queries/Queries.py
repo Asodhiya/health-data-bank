@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from app.schemas.schemas import HealthGoalUpdate, GoalTemplateCreate, GoalTemplateUpdate, GoalProgressLog
 from app.schemas.data_element_schema import DataElementCreate
 from app.services.participant_survey_service import _get_deployed_forms
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta, time
 from app.db.models import FormField
 
 def get_participant_id(current_user: User) -> uuid.UUID:
@@ -241,7 +241,8 @@ class ParticipantQuery:
                 HealthDataPoint.participant_id == participant_id,
                 HealthDataPoint.element_id == goal.element_id,
                 HealthDataPoint.source_type == "goal",
-                func.date(HealthDataPoint.observed_at) == today,
+                HealthDataPoint.observed_at >= datetime.combine(today, time.min).replace(tzinfo=timezone.utc),
+                HealthDataPoint.observed_at < datetime.combine(today + timedelta(days=1), time.min).replace(tzinfo=timezone.utc),
             ).limit(1)
         )
         entry = entry_result.scalar_one_or_none()
@@ -275,7 +276,8 @@ class ParticipantQuery:
                 HealthDataPoint.participant_id == participant_id,
                 HealthDataPoint.element_id == goal.element_id,
                 HealthDataPoint.source_type == "goal",
-                func.date(HealthDataPoint.observed_at) == log_date,
+                HealthDataPoint.observed_at >= datetime.combine(log_date, time.min).replace(tzinfo=timezone.utc),
+                HealthDataPoint.observed_at < datetime.combine(log_date + timedelta(days=1), time.min).replace(tzinfo=timezone.utc),
             ).order_by(HealthDataPoint.observed_at.desc()).limit(1)
         )
         data_point = existing_result.scalar_one_or_none()
@@ -470,22 +472,28 @@ class StatsQuery:
         deployed = await _get_deployed_forms(participant_id, self.db)
         active_forms = len(deployed)
 
-        # Forms filled today: distinct form_ids submitted on the current calendar day
-        forms_filled_result = await self.db.execute(
+        # Forms filled today + active goals count — combined into one round trip
+        today_start = datetime.combine(date.today(), time.min).replace(tzinfo=timezone.utc)
+        today_end = datetime.combine(date.today() + timedelta(days=1), time.min).replace(tzinfo=timezone.utc)
+        forms_filled_sq = (
             select(func.count(distinct(FormSubmission.form_id)))
             .where(
                 FormSubmission.participant_id == participant_id,
-                func.date(FormSubmission.submitted_at) == date.today()
+                FormSubmission.submitted_at >= today_start,
+                FormSubmission.submitted_at < today_end,
             )
+            .scalar_subquery()
         )
-        forms_filled = forms_filled_result.scalar() or 0
-
-        # Active goals count
-        active_goals_result = await self.db.execute(
+        active_goals_sq = (
             select(func.count(HealthGoal.goal_id))
             .where(HealthGoal.participant_id == participant_id)
+            .scalar_subquery()
         )
-        active_goals = active_goals_result.scalar() or 0
+        combined = (await self.db.execute(
+            select(forms_filled_sq.label("forms_filled"), active_goals_sq.label("active_goals"))
+        )).one()
+        forms_filled = combined.forms_filled or 0
+        active_goals = combined.active_goals or 0
 
         # Goals met: latest survey data point per element >= target_value
         # Subquery: most recent survey observation per element for this participant
@@ -497,7 +505,8 @@ class StatsQuery:
             .where(
                 HealthDataPoint.participant_id == participant_id,
                 HealthDataPoint.source_type == "goal",
-                func.date(HealthDataPoint.observed_at) == date.today(),
+                HealthDataPoint.observed_at >= datetime.combine(date.today(), time.min).replace(tzinfo=timezone.utc),
+                HealthDataPoint.observed_at < datetime.combine(date.today() + timedelta(days=1), time.min).replace(tzinfo=timezone.utc),
             )
             .group_by(HealthDataPoint.element_id)
             .subquery()
@@ -575,9 +584,9 @@ class StatsQuery:
         if element_ids:
             stmt = stmt.where(HealthDataPoint.element_id.in_(element_ids))
         if date_from:
-            stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) >= date_from)
+            stmt = stmt.where(HealthDataPoint.observed_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
         if date_to:
-            stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) <= date_to)
+            stmt = stmt.where(HealthDataPoint.observed_at < datetime.combine(date_to + timedelta(days=1), time.min).replace(tzinfo=timezone.utc))
 
         rows = (await self.db.execute(stmt)).all()
         return [
@@ -612,24 +621,14 @@ class CaretakersQuery:
 
 
     async def get_group(self, group_id: uuid.UUID, user_id: uuid.UUID) -> Group:
-        # Check if the group exists at all
         result = await self.db.execute(
-            select(Group).where(Group.group_id == group_id)
+            select(Group)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(Group.group_id == group_id, CaretakerProfile.user_id == user_id)
         )
         group = result.scalar_one_or_none()
-
         if not group:
-            raise HTTPException(status_code=404, detail="No group found with that id")
-
-        # Check if this group belongs to the current caretaker via user_id
-        caretaker = await self.db.execute(
-            select(CaretakerProfile).where(CaretakerProfile.user_id == user_id)
-        )
-        caretaker_profile = caretaker.scalar_one_or_none()
-
-        if not caretaker_profile or group.caretaker_id != caretaker_profile.caretaker_id:
-            raise HTTPException(status_code=403, detail="This group is not assigned to you")
-
+            raise HTTPException(status_code=404, detail="Group not found or not assigned to you")
         return group
 
     async def get_group_participants(self, group_id: uuid.UUID, user_id: uuid.UUID):
@@ -658,11 +657,20 @@ class CaretakersQuery:
 
     async def get_participant_activity_counts(self, user_id: uuid.UUID, group_id: uuid.UUID | None = None):
         today = date.today()
+        caretaker_participants_sq = (
+            select(ParticipantProfile.participant_id)
+            .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+            .join(Group, Group.group_id == GroupMember.group_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(CaretakerProfile.user_id == user_id)
+            .where(GroupMember.left_at == None)
+        )
         last_submission_sq = (
             select(
                 FormSubmission.participant_id,
                 func.max(func.cast(FormSubmission.submitted_at, SADate)).label("last_submission_at"),
             )
+            .where(FormSubmission.participant_id.in_(caretaker_participants_sq))
             .group_by(FormSubmission.participant_id)
             .subquery()
         )
@@ -718,17 +726,26 @@ class CaretakersQuery:
             .subquery()
         )
 
+        caretaker_participants_sq = (
+            select(ParticipantProfile.participant_id)
+            .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+            .join(Group, Group.group_id == GroupMember.group_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(CaretakerProfile.user_id == user_id)
+            .where(GroupMember.left_at == None)
+        )
         submissions_stmt = (
             select(
                 FormSubmission.participant_id,
                 func.count(distinct(FormSubmission.form_id)).label("submitted_count"),
                 func.cast(func.max(FormSubmission.submitted_at), SADate).label("last_submission_at"),
             )
+            .where(FormSubmission.participant_id.in_(caretaker_participants_sq))
         )
         if submission_date_from:
-            submissions_stmt = submissions_stmt.where(func.cast(FormSubmission.submitted_at, SADate) >= submission_date_from)
+            submissions_stmt = submissions_stmt.where(FormSubmission.submitted_at >= datetime.combine(submission_date_from, time.min).replace(tzinfo=timezone.utc))
         if submission_date_to:
-            submissions_stmt = submissions_stmt.where(func.cast(FormSubmission.submitted_at, SADate) <= submission_date_to)
+            submissions_stmt = submissions_stmt.where(FormSubmission.submitted_at < datetime.combine(submission_date_to + timedelta(days=1), time.min).replace(tzinfo=timezone.utc))
         submissions_sq = submissions_stmt.group_by(FormSubmission.participant_id).subquery()
 
         # Goals reset daily — progress is based on today's HealthDataPoint vs target
@@ -866,9 +883,9 @@ class CaretakersQuery:
         )
 
         if date_from:
-            stmt = stmt.where(func.cast(FormSubmission.submitted_at, SADate) >= date_from)
+            stmt = stmt.where(FormSubmission.submitted_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
         if date_to:
-            stmt = stmt.where(func.cast(FormSubmission.submitted_at, SADate) <= date_to)
+            stmt = stmt.where(FormSubmission.submitted_at < datetime.combine(date_to + timedelta(days=1), time.min).replace(tzinfo=timezone.utc))
 
         result = await self.db.execute(stmt)
         return result.all()
@@ -921,9 +938,9 @@ class CaretakersQuery:
         if element_ids:
             stmt = stmt.where(HealthDataPoint.element_id.in_(element_ids))
         if date_from:
-            stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) >= date_from)
+            stmt = stmt.where(HealthDataPoint.observed_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
         if date_to:
-            stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) <= date_to)
+            stmt = stmt.where(HealthDataPoint.observed_at < datetime.combine(date_to + timedelta(days=1), time.min).replace(tzinfo=timezone.utc))
 
         rows = (await self.db.execute(stmt)).all()
 
@@ -992,9 +1009,9 @@ class CaretakersQuery:
             if element_ids:
                 stmt = stmt.where(HealthDataPoint.element_id.in_(element_ids))
             if date_from:
-                stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) >= date_from)
+                stmt = stmt.where(HealthDataPoint.observed_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
             if date_to:
-                stmt = stmt.where(func.cast(HealthDataPoint.observed_at, SADate) <= date_to)
+                stmt = stmt.where(HealthDataPoint.observed_at < datetime.combine(date_to + timedelta(days=1), time.min).replace(tzinfo=timezone.utc))
             return stmt.subquery()
 
         subject_sq = _build_stats_sq(HealthDataPoint.participant_id == participant_id)
@@ -1109,22 +1126,16 @@ class CaretakersQuery:
         message: str,
         submission_id: uuid.UUID | None = None,
     ) -> CaretakerFeedback:
-        caretaker_result = await self.db.execute(
-            select(CaretakerProfile).where(CaretakerProfile.user_id == caretaker_user_id)
-        )
-        caretaker = caretaker_result.scalar_one_or_none()
-        if not caretaker:
-            raise HTTPException(status_code=403, detail="Caretaker profile not found")
-
-        participant_result = await self.db.execute(
-            select(ParticipantProfile).where(ParticipantProfile.participant_id == participant_id)
-        )
-        participant = participant_result.scalar_one_or_none()
-        if not participant:
-            raise HTTPException(status_code=404, detail="Participant not found")
+        row = (await self.db.execute(
+            select(CaretakerProfile.caretaker_id, ParticipantProfile.user_id)
+            .where(CaretakerProfile.user_id == caretaker_user_id)
+            .where(ParticipantProfile.participant_id == participant_id)
+        )).one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Caretaker or participant not found")
 
         feedback = CaretakerFeedback(
-            caretaker_id=caretaker.caretaker_id,
+            caretaker_id=row.caretaker_id,
             participant_id=participant_id,
             submission_id=submission_id,
             message=message,
@@ -1133,7 +1144,7 @@ class CaretakersQuery:
         await self.db.flush()
 
         notification = Notification(
-            user_id=participant.user_id,
+            user_id=row.user_id,
             type="feedback",
             title="New feedback from your caretaker",
             message=message[:200],
@@ -1175,7 +1186,6 @@ class CaretakersQuery:
 
         answers = (await self.db.execute(
             select(
-                SubmissionAnswer.answer_id,
                 SubmissionAnswer.field_id,
                 FormField.label.label("field_label"),
                 SubmissionAnswer.value_text,
@@ -1218,7 +1228,7 @@ class CaretakersQuery:
         if date_to:
             stmt = stmt.where(HealthDataPoint.observed_at < date_to + timedelta(days=1))
 
-        rows = (await self.db.execute(stmt)).all()
+        rows = (await self.db.execute(stmt.limit(1000))).all()
         trends: dict[str, dict] = {}
         for row in rows:
             key = str(row.element_id)
@@ -1235,6 +1245,7 @@ class CaretakersQuery:
             select(Report)
             .where(Report.requested_by == user_id)
             .order_by(Report.created_at.desc())
+            .limit(100)
         )
         return result.scalars().all()
 
@@ -1243,6 +1254,7 @@ class CaretakersQuery:
             select(Notification)
             .where(Notification.user_id == user_id)
             .order_by(Notification.created_at.desc())
+            .limit(100)
         )
         return result.scalars().all()
 

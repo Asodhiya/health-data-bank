@@ -1,18 +1,18 @@
 from fastapi import APIRouter, Depends, Query, UploadFile, File
 from fastapi.responses import Response
 from app.schemas.schemas import Role_schema, Permissions_schema, Role_user_link, Link_role_permission_schema
-from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResponse, UnassignCaretakerResponse, CaretakerItem, DeleteGroupResponse, RestoreResponse
+from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResponse, UnassignCaretakerResponse, CaretakerItem, DeleteGroupResponse, RestoreResponse, AdminProfileUpdate, AdminProfileOut, UserListItem, AdminUserUpdate, UserStatusUpdate, InviteListItem, BackupListItem
 from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem
 from app.services.role_service import addroles, viewroles, add_permissions, link_user_roles, link_role_permisson
-from app.services.admin_service import assign_caretaker_to_group, unassign_caretaker_from_group, create_group, delete_group, list_groups, list_caretakers, backup_database, restore_database
+from app.services.admin_service import assign_caretaker_to_group, unassign_caretaker_from_group, create_group, delete_group, list_groups, list_caretakers, backup_database, restore_database, list_users, update_user, update_user_status, delete_user, list_invites, revoke_invite, list_backups, delete_backup
 from typing import List
 from app.db.session import get_db
-from app.db.models import Role, AuditLog, User
+from app.db.models import Role, AuditLog, User, AdminProfile
+from app.core.dependency import require_permissions, check_current_user
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
-from app.core.dependency import require_permissions
 from typing import Optional
-from app.core.permissions import ROLE_READ_ALL, GROUP_READ, GROUP_WRITE, GROUP_DELETE, CARETAKER_READ, CARETAKER_ASSIGN, BACKUP_CREATE
+from app.core.permissions import ROLE_READ_ALL, GROUP_READ, GROUP_WRITE, GROUP_DELETE, CARETAKER_READ, CARETAKER_ASSIGN, BACKUP_CREATE, USER_READ, USER_WRITE, USER_DELETE
 from uuid import UUID
 
 router = APIRouter()
@@ -190,3 +190,109 @@ async def restore_endpoint(
     """Upload a backup JSON file to wipe and restore the database."""
     raw_content = await file.read()
     return await restore_database(raw_content, db)
+
+
+# ── Admin Profile ────────────────────────────────────────────────────────────
+
+@router.get("/profile", response_model=AdminProfileOut)
+async def get_admin_profile(
+    user: User = Depends(check_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(AdminProfile).where(AdminProfile.user_id == user.user_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        profile = AdminProfile(user_id=user.user_id)
+        db.add(profile)
+        await db.commit()
+        await db.refresh(profile)
+    return profile
+
+
+@router.patch("/profile", response_model=AdminProfileOut)
+async def update_admin_profile(
+    payload: AdminProfileUpdate,
+    user: User = Depends(check_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(AdminProfile).where(AdminProfile.user_id == user.user_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        profile = AdminProfile(user_id=user.user_id)
+        db.add(profile)
+
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(profile, field, value)
+
+    if not profile.onboarding_completed:
+        profile.onboarding_completed = True
+
+    await db.commit()
+    await db.refresh(profile)
+    return profile
+
+
+# ── User Management ──────────────────────────────────────────────────────────
+
+@router.get("/users", response_model=list[UserListItem], dependencies=[Depends(require_permissions(USER_READ))])
+async def get_users(db: AsyncSession = Depends(get_db)):
+    return await list_users(db)
+
+
+@router.patch("/users/{user_id}", dependencies=[Depends(require_permissions(USER_WRITE))])
+async def patch_user(
+    user_id: UUID,
+    payload: AdminUserUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    return await update_user(user_id, payload, db)
+
+
+@router.patch("/users/{user_id}/status", dependencies=[Depends(require_permissions(USER_WRITE))])
+async def patch_user_status(
+    user_id: UUID,
+    payload: UserStatusUpdate,
+    actor: User = Depends(check_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await update_user_status(user_id, payload.status, actor.user_id, db)
+
+
+@router.delete("/users/{user_id}", dependencies=[Depends(require_permissions(USER_DELETE))])
+async def remove_user(
+    user_id: UUID,
+    mode: str = "anonymize",
+    actor: User = Depends(check_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await delete_user(user_id, mode, actor.user_id, db)
+
+
+# ── Invite Management ────────────────────────────────────────────────────────
+
+@router.get("/invites", response_model=list[InviteListItem], dependencies=[Depends(require_permissions(USER_READ))])
+async def get_invites(db: AsyncSession = Depends(get_db)):
+    return await list_invites(db)
+
+
+@router.delete("/invites/{invite_id}", dependencies=[Depends(require_permissions(USER_WRITE))])
+async def delete_invite(invite_id: UUID, db: AsyncSession = Depends(get_db)):
+    return await revoke_invite(invite_id, db)
+
+
+# ── Backup History ───────────────────────────────────────────────────────────
+
+@router.get("/backups", response_model=list[BackupListItem], dependencies=[Depends(require_permissions(BACKUP_CREATE))])
+async def get_backups(db: AsyncSession = Depends(get_db)):
+    return await list_backups(db)
+
+
+@router.delete("/backups/{backup_id}", dependencies=[Depends(require_permissions(BACKUP_CREATE))])
+async def remove_backup(backup_id: UUID, db: AsyncSession = Depends(get_db)):
+    return await delete_backup(backup_id, db)
+
+

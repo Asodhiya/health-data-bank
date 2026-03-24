@@ -261,6 +261,12 @@ class AdminProfile(Base):
 
     admin_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
+    role_title: Mapped[str | None] = mapped_column(Text)
+    department: Mapped[str | None] = mapped_column(Text)
+    organization: Mapped[str | None] = mapped_column(Text)
+    bio: Mapped[str | None] = mapped_column(Text)
+    contact_preference: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'email'"))
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
     user = relationship("User", back_populates="admin_profile")
 
 
@@ -350,10 +356,12 @@ class FormSubmission(Base):
 
 class SubmissionAnswer(Base):
     __tablename__ = "submission_answers"
+    __table_args__ = (
+        PrimaryKeyConstraint("submission_id", "field_id", name="pk_submission_answers"),
+    )
 
-    answer_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     submission_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("form_submissions.submission_id", ondelete="CASCADE"))
-    field_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("form_fields.field_id"))
+    field_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("form_fields.field_id"))
     value_text: Mapped[str | None] = mapped_column(Text)
     value_number: Mapped[float | None] = mapped_column(Numeric)
     value_date: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
@@ -445,6 +453,8 @@ class RestoreEvent(Base):
     restored_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id"))
     restored_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     notes: Mapped[str | None] = mapped_column(Text)
+
+
 
 
 class AuditLog(Base):

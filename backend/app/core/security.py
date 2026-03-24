@@ -28,7 +28,7 @@ class PasswordHash:
         self._value = value
 
     @classmethod
-    def from_password(cls, password: str, rounds: int = 12):
+    def from_password(cls, password: str, rounds: int = 10):
         hashed = bcrypt.hashpw(
             password.encode("utf-8"),
             bcrypt.gensalt(rounds)

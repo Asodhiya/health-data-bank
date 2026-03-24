@@ -47,16 +47,15 @@ async def login(
     ip = _get_client_ip(request)
 
     try:
-        user = await authenticate_user(data.email, data.password, db)
+        user = await authenticate_user(data.identifier, data.password, db)
     except HTTPException:
-        # Log the failed attempt — no user_id since we can't confirm the email exists
         await write_audit_log(
             db,
             action="LOGIN_FAILED",
             ip_address=ip,
             actor_user_id=None,
             entity_type="user",
-            details={"email_attempted": data.email},
+            details={"identifier_attempted": data.identifier},
         )
         raise  # re-raise the original 401
 
@@ -190,6 +189,10 @@ async def get_current_user(
     if any(r == "participant" for r in user_roles):
         intake_completed = await check_intake_completed(user.user_id, db)
 
+    onboarding_completed = None
+    if any(r == "admin" for r in user_roles):
+        onboarding_completed = user.admin_profile.onboarding_completed if user.admin_profile else False
+
     return {
         "user_id": str(user.user_id),
         "email": user.email,
@@ -197,6 +200,7 @@ async def get_current_user(
         "last_name": user.last_name,
         "Role": user_roles,
         "intake_completed": intake_completed,
+        "onboarding_completed": onboarding_completed,
     }
 
 

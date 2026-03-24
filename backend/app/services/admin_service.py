@@ -2,11 +2,12 @@
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func, insert, text
+from sqlalchemy import select, update, func, insert, text, delete as sa_delete
+from sqlalchemy.orm import aliased
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy import TIMESTAMP, Date
 from uuid import UUID
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from decimal import Decimal
 import uuid as uuid_module
 import hashlib
@@ -28,6 +29,10 @@ from app.schemas.admin_schema import (
     UnassignCaretakerResponse,
     CaretakerItem,
     DeleteGroupResponse,
+    AdminUserUpdate,
+    UserListItem,
+    InviteListItem,
+    BackupListItem,
 )
 from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem
 from typing import List
@@ -364,3 +369,234 @@ async def restore_database(raw_content: bytes, db: AsyncSession) -> RestoreRespo
         tables_restored=len(TABLE_ORDER),
         message=f"Database successfully restored from '{snapshot_name}'.",
     )
+
+
+# ── User Management ────────────────────────────────────────────────────────────
+
+async def list_users(db: AsyncSession) -> list[UserListItem]:
+    """Return all users with their role, group, and caretaker info."""
+    CaretakerUser = aliased(User)
+
+    result = await db.execute(
+        select(
+            User.user_id,
+            User.first_name,
+            User.last_name,
+            User.email,
+            User.phone,
+            User.status,
+            User.created_at,
+            Role.role_name,
+            Group.group_id,
+            Group.name.label("group_name"),
+            CaretakerProfile.caretaker_id,
+            func.concat(CaretakerUser.first_name, " ", CaretakerUser.last_name).label("caretaker_name"),
+            ParticipantProfile.dob,
+            ParticipantProfile.gender,
+        )
+        .outerjoin(UserRole, UserRole.user_id == User.user_id)
+        .outerjoin(Role, Role.role_id == UserRole.role_id)
+        .outerjoin(ParticipantProfile, ParticipantProfile.user_id == User.user_id)
+        .outerjoin(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+        .outerjoin(Group, Group.group_id == GroupMember.group_id)
+        .outerjoin(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+        .outerjoin(CaretakerUser, CaretakerUser.user_id == CaretakerProfile.user_id)
+        .order_by(User.created_at.desc())
+    )
+
+    rows = result.all()
+    return [
+        UserListItem(
+            id=row.user_id,
+            first_name=row.first_name,
+            last_name=row.last_name,
+            email=row.email,
+            phone=row.phone,
+            role=row.role_name,
+            status=row.status,
+            joined_at=row.created_at,
+            group_id=row.group_id,
+            group=row.group_name,
+            caretaker_id=row.caretaker_id,
+            caretaker=row.caretaker_name.strip() if row.caretaker_name else None,
+            dob=row.dob,
+            gender=row.gender,
+        )
+        for row in rows
+    ]
+
+
+async def update_user(user_id: UUID, payload: AdminUserUpdate, db: AsyncSession) -> User:
+    """Update a user's basic info. Validates email uniqueness if changed."""
+    user = await db.scalar(select(User).where(User.user_id == user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if payload.email and payload.email != user.email:
+        existing = await db.scalar(select(User).where(User.email == payload.email))
+        if existing:
+            raise HTTPException(status_code=409, detail="Email already in use")
+
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(user, field, value)
+
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def update_user_status(user_id: UUID, status: str, actor_id: UUID, db: AsyncSession) -> User:
+    """Set a user's active/inactive status and log the action."""
+    user = await db.scalar(select(User).where(User.user_id == user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    new_status = status.lower() == "active"
+    user.status = new_status
+    await db.commit()
+
+    from app.services.audit_service import write_audit_log
+    await write_audit_log(
+        db,
+        action="USER_STATUS_CHANGED",
+        actor_user_id=actor_id,
+        entity_type="user",
+        entity_id=user_id,
+        details={"new_status": status, "email": user.email},
+    )
+
+    return user
+
+
+async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession) -> dict:
+    """Delete or anonymize a user. mode='anonymize' or mode='delete'."""
+    user = await db.scalar(select(User).where(User.user_id == user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    from app.services.audit_service import write_audit_log
+
+    if mode == "anonymize":
+        user.first_name = "Anonymized"
+        user.last_name = "User"
+        user.email = f"anonymized_{user_id}@deleted.local"
+        user.phone = None
+        user.Address = None
+        user.status = False
+        await db.commit()
+        await write_audit_log(
+            db,
+            action="USER_ANONYMIZED",
+            actor_user_id=actor_id,
+            entity_type="user",
+            entity_id=user_id,
+            details={"mode": "anonymize"},
+        )
+        return {"detail": "User anonymized successfully"}
+
+    elif mode == "delete":
+        await db.delete(user)
+        await db.commit()
+        await write_audit_log(
+            db,
+            action="USER_DELETED",
+            actor_user_id=actor_id,
+            entity_type="user",
+            entity_id=user_id,
+            details={"mode": "delete"},
+        )
+        return {"detail": "User deleted successfully"}
+
+    else:
+        raise HTTPException(status_code=400, detail="mode must be 'anonymize' or 'delete'")
+
+
+# ── Invite Management ──────────────────────────────────────────────────────────
+
+async def list_invites(db: AsyncSession) -> list[InviteListItem]:
+    """Return all invites with role, group, and derived status."""
+    now = datetime.now(timezone.utc)
+
+    result = await db.execute(
+        select(
+            SignupInvite.invite_id,
+            SignupInvite.email,
+            SignupInvite.group_id,
+            SignupInvite.invited_by,
+            SignupInvite.created_at,
+            SignupInvite.expires_at,
+            SignupInvite.used,
+            Role.role_name,
+            Group.name.label("group_name"),
+        )
+        .outerjoin(Role, Role.role_id == SignupInvite.role_id)
+        .outerjoin(Group, Group.group_id == SignupInvite.group_id)
+        .order_by(SignupInvite.created_at.desc())
+    )
+
+    rows = result.all()
+    return [
+        InviteListItem(
+            invite_id=row.invite_id,
+            email=row.email,
+            role=row.role_name,
+            group_id=row.group_id,
+            group_name=row.group_name,
+            invited_by=row.invited_by,
+            created_at=row.created_at,
+            expires_at=row.expires_at,
+            used=row.used,
+            status="accepted" if row.used else ("expired" if row.expires_at < now else "pending"),
+        )
+        for row in rows
+    ]
+
+
+async def revoke_invite(invite_id: UUID, db: AsyncSession) -> dict:
+    """Revoke a pending invite. Rejects if already used or expired."""
+    now = datetime.now(timezone.utc)
+
+    invite = await db.scalar(select(SignupInvite).where(SignupInvite.invite_id == invite_id))
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    if invite.used:
+        raise HTTPException(status_code=400, detail="Invite has already been used")
+    if invite.expires_at < now:
+        raise HTTPException(status_code=400, detail="Invite has already expired")
+
+    await db.delete(invite)
+    await db.commit()
+    return {"detail": "Invite revoked successfully"}
+
+
+# ── Backup History ─────────────────────────────────────────────────────────────
+
+async def list_backups(db: AsyncSession) -> list[BackupListItem]:
+    """Return all backup records ordered by newest first."""
+    result = await db.execute(
+        select(Backup).order_by(Backup.created_at.desc())
+    )
+    backups = result.scalars().all()
+    return [
+        BackupListItem(
+            backup_id=b.backup_id,
+            storage_path=b.storage_path,
+            created_at=b.created_at,
+            checksum=b.checksum,
+            created_by=b.created_by,
+        )
+        for b in backups
+    ]
+
+
+async def delete_backup(backup_id: UUID, db: AsyncSession) -> dict:
+    """Delete a backup record. Returns 404 if not found."""
+    backup = await db.scalar(select(Backup).where(Backup.backup_id == backup_id))
+    if not backup:
+        raise HTTPException(status_code=404, detail="Backup not found")
+
+    await db.delete(backup)
+    await db.commit()
+    return {"detail": "Backup deleted successfully"}
+
+

@@ -56,7 +56,7 @@ async def _get_submissions_map(participant_id: UUID, form_ids: list, db: AsyncSe
 async def _get_answer_counts(sub_ids: list, db: AsyncSession) -> dict:
     """Return {submission_id: answer_count} for the given submission ids."""
     result = await db.execute(
-        select(SubmissionAnswer.submission_id, func.count(SubmissionAnswer.answer_id))
+        select(SubmissionAnswer.submission_id, func.count(SubmissionAnswer.field_id))
         .where(SubmissionAnswer.submission_id.in_(sub_ids))
         .group_by(SubmissionAnswer.submission_id)
     )

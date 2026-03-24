@@ -122,7 +122,6 @@ class SubmissionListItem(BaseModel):
 
 
 class SubmissionAnswerItem(BaseModel):
-    answer_id: UUID
     field_id: Optional[UUID] = None
     field_label: Optional[str] = None
     value_text: Optional[str] = None

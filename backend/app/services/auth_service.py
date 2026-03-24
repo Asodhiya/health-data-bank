@@ -15,9 +15,13 @@ from app.db.queries.Queries import RoleQuery, UserQuery
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_DURATION_MINUTES = 15
 
-async def authenticate_user(email: str, password: str, db: AsyncSession):
-    """Checks email and password if in db or not"""
-    res = await(db.execute(select(User).where(User.email == email)))
+async def authenticate_user(identifier: str, password: str, db: AsyncSession):
+    """Checks email or username and password if in db or not"""
+    res = await db.execute(
+        select(User).where(
+            (User.email == identifier) | (User.username == identifier)
+        )
+    )
     user = res.scalar_one_or_none()
 
     if not user:
@@ -55,7 +59,6 @@ async def authenticate_user(email: str, password: str, db: AsyncSession):
     user.locked_until = None
     user.last_login_at = now
     await db.commit()
-    await db.refresh(user)
 
     return user
 
