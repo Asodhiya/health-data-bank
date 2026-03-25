@@ -19,6 +19,7 @@ export default function ResearcherDashboard() {
 
   const [queryData, setQueryData] = useState({ columns: [], data: [] });
   const [loading, setLoading] = useState(true);
+  const [filtering, setFiltering] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState([]);
 
   const [attributeSearch, setAttributeSearch] = useState("");
@@ -127,14 +128,17 @@ export default function ResearcherDashboard() {
     }
   }, [filters.survey_id, allGroups, availableSurveys]);
 
+  // Auto-fetch when any filter changes (debounced 400ms)
+  const filterMounted = useRef(false);
+  useEffect(() => {
+    if (!filterMounted.current) { filterMounted.current = true; return; }
+    const timer = setTimeout(() => applyFilters(), 400);
+    return () => clearTimeout(timer);
+  }, [filters.survey_id, filters.gender, filters.status, filters.primary_language, filters.age_min, filters.age_max, filters.group_ids]);
+
   // NEW STATS CALCULATION: Filtered Results, Total Participants, Active Groups
   const stats = useMemo(() => {
     const count = queryData.data.length;
-    const uniqueParticipants = new Set();
-    queryData.data.forEach((row) => {
-      const pId = row.participant_id || row.email || row.name;
-      if (pId) uniqueParticipants.add(pId);
-    });
 
     // 🟢 NEW RATIO LOGIC
     const selectedCount = filters.group_ids.length;
@@ -142,8 +146,7 @@ export default function ResearcherDashboard() {
 
     return {
       count,
-      totalParticipants:
-        uniqueParticipants.size > 0 ? uniqueParticipants.size : count,
+      totalParticipants: count,
       // This creates the "1 of 2" text
       activeGroupsText:
         selectedCount > 0
@@ -225,9 +228,8 @@ export default function ResearcherDashboard() {
   const handleExport = async () => {
     setIsExporting(true);
     try {
-      // Clean filters (removes empty strings)
       const activeFilters = Object.fromEntries(
-        Object.entries(filters).filter(([_, v]) => v !== ""),
+        Object.entries(filters).filter(([k, v]) => k !== "group_ids" && v !== ""),
       );
       await api.downloadResearcherResults(activeFilters);
     } catch (err) {
@@ -242,14 +244,13 @@ export default function ResearcherDashboard() {
   };
 
   const applyFilters = () => {
-    setLoading(true);
+    setFiltering(true);
     const activeFilters = {};
 
     Object.entries(filters).forEach(([key, value]) => {
       if (key === "group_ids") {
-        if (value.length > 0) activeFilters.group_id = value.join(",");
+        // group filtering not yet implemented on backend, skip
       } else if (value !== "" && value !== "all_time") {
-        // skip sending if it's default
         activeFilters[key] = value;
       }
     });
@@ -267,13 +268,15 @@ export default function ResearcherDashboard() {
         }),
       )
       .catch((err) => console.error("Filter Error:", err))
-      .finally(() => setLoading(false));
+      .finally(() => setFiltering(false));
   };
 
   if (loading)
     return (
-      <div className="p-10 text-slate-500 font-bold">
-        Connecting to Research Vault...
+      <div className="flex h-full items-center justify-center">
+        <p className="text-xl font-semibold animate-pulse text-blue-400">
+          Loading Health Data Bank... 🩺
+        </p>
       </div>
     );
 
@@ -346,7 +349,7 @@ export default function ResearcherDashboard() {
               filters.gender ||
               filters.primary_language) && (
               <span className="bg-blue-50 text-blue-600 px-2.5 py-0.5 rounded-full text-[11px] font-bold border border-blue-100 uppercase tracking-wide">
-                {filters.group_ids.length + (filters.survey_id ? 1 : 0)} Active
+                {[filters.survey_id, filters.status, filters.gender, filters.primary_language, ...filters.group_ids].filter(Boolean).length} filters active
               </span>
             )}
           </div>
@@ -646,6 +649,7 @@ export default function ResearcherDashboard() {
                 <option value="english">English</option>
                 <option value="spanish">Spanish</option>
                 <option value="french">French</option>
+                <option value="other">Other</option>
               </select>
             </div>
           </div>
@@ -919,7 +923,12 @@ export default function ResearcherDashboard() {
         {/* CONDITIONALLY RENDER TABLE OR CHARTS */}
         <div className="p-0">
           {viewMode === "table" ? (
-            <div className="overflow-x-auto">
+            <div className={`overflow-x-auto relative transition-opacity duration-200 ${filtering ? "opacity-50 pointer-events-none" : ""}`}>
+              {filtering && (
+                <div className="absolute inset-0 flex items-center justify-center z-10">
+                  <span className="text-sm text-slate-500 font-medium bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200">Updating...</span>
+                </div>
+              )}
               <table className="w-full text-left border-collapse whitespace-nowrap">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">

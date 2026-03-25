@@ -1,4 +1,4 @@
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     User, FormSubmission, ParticipantProfile, SurveyForm,
@@ -88,21 +88,21 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
 
     if filters:
         if filters.gender:
-            conditions.append(ParticipantProfile.gender == filters.gender)
+            conditions.append(func.lower(ParticipantProfile.gender) == filters.gender.lower())
         if filters.pronouns:
-            conditions.append(ParticipantProfile.pronouns == filters.pronouns)
+            conditions.append(func.lower(ParticipantProfile.pronouns) == filters.pronouns.lower())
         if filters.primary_language:
-            conditions.append(ParticipantProfile.primary_language == filters.primary_language)
+            conditions.append(func.lower(ParticipantProfile.primary_language) == filters.primary_language.lower())
         if filters.occupation_status:
-            conditions.append(ParticipantProfile.occupation_status == filters.occupation_status)
+            conditions.append(func.lower(ParticipantProfile.occupation_status) == filters.occupation_status.lower())
         if filters.living_arrangement:
-            conditions.append(ParticipantProfile.living_arrangement == filters.living_arrangement)
+            conditions.append(func.lower(ParticipantProfile.living_arrangement) == filters.living_arrangement.lower())
         if filters.highest_education_level:
-            conditions.append(ParticipantProfile.highest_education_level == filters.highest_education_level)
+            conditions.append(func.lower(ParticipantProfile.highest_education_level) == filters.highest_education_level.lower())
         if filters.dependents is not None:
             conditions.append(ParticipantProfile.dependents == filters.dependents)
         if filters.marital_status:
-            conditions.append(ParticipantProfile.marital_status == filters.marital_status)
+            conditions.append(func.lower(ParticipantProfile.marital_status) == filters.marital_status.lower())
         if filters.status:
             conditions.append(User.status == (filters.status.lower() == 'active'))
         if filters.group_id:
