@@ -196,13 +196,30 @@ async def update_survey_form(form_id: UUID, form_data: SurveyCreate, db: AsyncSe
     return {"msg": "form updated"}
 
 async def delete_survey_form(form_id: UUID, db: AsyncSession):
-    """Soft-delete a form by marking it DELETED. Data is preserved for query reports."""
+    """Hard-delete if no submissions exist, soft-delete otherwise to preserve data."""
     form = await get_form_by_id(form_id, db)
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
 
-    form.status = "DELETED"
-    await db.commit()
+    sub_check = await db.execute(
+        select(FormSubmission.submission_id).where(FormSubmission.form_id == form_id).limit(1)
+    )
+    has_submissions = sub_check.scalar_one_or_none() is not None
+
+    if has_submissions:
+        form.status = "DELETED"
+        await db.commit()
+    else:
+        field_ids_result = await db.execute(select(FormField.field_id).where(FormField.form_id == form_id))
+        field_ids = field_ids_result.scalars().all()
+        if field_ids:
+            await db.execute(sa_delete(FieldElementMap).where(FieldElementMap.field_id.in_(field_ids)))
+            await db.execute(sa_delete(FieldOption).where(FieldOption.field_id.in_(field_ids)))
+            await db.execute(sa_delete(FormField).where(FormField.form_id == form_id))
+        await db.execute(sa_delete(FormDeployment).where(FormDeployment.form_id == form_id))
+        await db.delete(form)
+        await db.commit()
+
     invalidate_forms_cache()
     return {"msg": "form deleted"}
 

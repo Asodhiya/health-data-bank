@@ -6,6 +6,11 @@ from app.db.models import (
 )
 from app.schemas.filter_data_schema import ParticipantFilter
 from datetime import date, timedelta
+import csv
+import io
+import asyncio
+from typing import Optional, Set
+from starlette.responses import StreamingResponse
 
 
 def calculate_age(born):
@@ -16,10 +21,25 @@ def calculate_age(born):
 
 
 async def get_available_surveys(db: AsyncSession):
-    """Fetches all published survey forms for dropdown."""
-    stmt = select(SurveyForm).where(SurveyForm.status == 'PUBLISHED')
-    result = await db.execute(stmt)
-    return result.scalars().all()
+    """Fetches published forms, plus deleted forms that have at least one submission."""
+    published_stmt = select(SurveyForm).where(SurveyForm.status == 'PUBLISHED')
+    deleted_with_submissions_stmt = (
+        select(SurveyForm)
+        .where(SurveyForm.status == 'DELETED')
+        .where(
+            select(func.count(FormSubmission.submission_id))
+            .where(FormSubmission.form_id == SurveyForm.form_id)
+            .correlate(SurveyForm)
+            .scalar_subquery() > 0
+        )
+    )
+
+    published_result, deleted_result = await asyncio.gather(
+        db.execute(published_stmt),
+        db.execute(deleted_with_submissions_stmt),
+    )
+
+    return published_result.scalars().all() + deleted_result.scalars().all()
 
 
 async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, filters: ParticipantFilter = None):
@@ -178,3 +198,37 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
         "columns": columns_list,
         "data": list(pivoted_data.values()),
     }
+
+
+async def export_survey_results_csv(
+    db: AsyncSession,
+    survey_id: Optional[str] = None,
+    filters: Optional[ParticipantFilter] = None,
+    exclude_columns: Optional[Set[str]] = None,
+) -> StreamingResponse:
+    """Build and return a UTF-8 CSV StreamingResponse of survey results."""
+    results = await get_survey_results_pivoted(db, survey_id, filters)
+
+    if not results["data"]:
+        return StreamingResponse(
+            io.BytesIO(b"\xef\xbb\xbf"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=survey_results.csv"},
+        )
+
+    excluded = exclude_columns or set()
+    visible_columns = [col for col in results["columns"] if col["id"] not in excluded]
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([col["text"] for col in visible_columns])
+    for record in results["data"]:
+        writer.writerow([record.get(col["id"]) or "" for col in visible_columns])
+
+    csv_bytes = ("\ufeff" + output.getvalue()).encode("utf-8")
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=survey_results.csv"},
+    )

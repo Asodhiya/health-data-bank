@@ -61,26 +61,28 @@ export default function ResearcherDashboard() {
 
   const [viewMode, setViewMode] = useState("table"); // "table" or "charts"
 
-  // 1. Initial Data Load
+  // 1. Initial Data Load — load surveys+groups first so the page renders immediately,
+  //    then fetch results in the background (shown as filtering spinner, not full-page block)
   useEffect(() => {
     setLoading(true);
-    // 🟢 Use listForms() just like the SurveyBuilder!
     Promise.all([
-      api.listForms().catch(() => []),
-      api.getResearcherResults().catch(() => ({ columns: [], data: [] })),
+      api.getAvailableSurveys().catch(() => []),
       api.listGroups().catch(() => []),
     ])
-      .then(([formsRes, resultsRes, groupsRes]) => {
-        // Only show PUBLISHED surveys in the dropdown
-        const publishedForms = (formsRes || []).filter(
-          (f) => f.status === "PUBLISHED",
-        );
-        setAvailableSurveys(publishedForms);
-
+      .then(([formsRes, groupsRes]) => {
+        setAvailableSurveys(formsRes || []);
         const fetchedGroups = groupsRes || [];
         setAllGroups(fetchedGroups);
         setAvailableGroups(fetchedGroups);
+      })
+      .catch((err) => console.error("API Error:", err))
+      .finally(() => setLoading(false));
 
+    // Results load in the background — page is already visible by the time this finishes
+    setFiltering(true);
+    api
+      .getResearcherResults()
+      .then((resultsRes) =>
         setQueryData({
           columns: (resultsRes.columns || []).filter(
             (col) =>
@@ -88,10 +90,10 @@ export default function ResearcherDashboard() {
               col.text?.toLowerCase() !== "participant id",
           ),
           data: resultsRes.data || [],
-        });
-      })
-      .catch((err) => console.error("API Error:", err))
-      .finally(() => setLoading(false));
+        }),
+      )
+      .catch((err) => console.error("Results Error:", err))
+      .finally(() => setFiltering(false));
   }, []);
 
   // 2. The Instant Local Group Filter (NOW WITH AUTO-SELECT!)
@@ -134,7 +136,7 @@ export default function ResearcherDashboard() {
     if (!filterMounted.current) { filterMounted.current = true; return; }
     const timer = setTimeout(() => applyFilters(), 400);
     return () => clearTimeout(timer);
-  }, [filters.survey_id, filters.gender, filters.status, filters.primary_language, filters.age_min, filters.age_max, filters.group_ids]);
+  }, [filters.survey_id, filters.gender, filters.status, filters.primary_language, filters.age_min, filters.age_max]);
 
   // NEW STATS CALCULATION: Filtered Results, Total Participants, Active Groups
   const stats = useMemo(() => {
@@ -223,6 +225,7 @@ export default function ResearcherDashboard() {
       .finally(() => setLoading(false));
   };
 
+
   const [isExporting, setIsExporting] = useState(false);
 
   const handleExport = async () => {
@@ -231,7 +234,7 @@ export default function ResearcherDashboard() {
       const activeFilters = Object.fromEntries(
         Object.entries(filters).filter(([k, v]) => k !== "group_ids" && v !== ""),
       );
-      await api.downloadResearcherResults(activeFilters);
+      await api.downloadResearcherResults(activeFilters, hiddenColumns);
     } catch (err) {
       alert("Export failed: " + err.message);
     } finally {
@@ -312,9 +315,7 @@ export default function ResearcherDashboard() {
               d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
             />
           </svg>
-          {isExporting
-            ? "Exporting CSV..."
-            : `Export ${stats.count} Rows (CSV)`}
+          {isExporting ? "Exporting..." : `Export ${stats.count} Rows (CSV)`}
         </button>
       </div>
       {/* ── NEW DATA FILTERS UI (MOCKUP STYLE) ── */}
@@ -439,28 +440,51 @@ export default function ResearcherDashboard() {
               {/* Dropdown snaps directly below the input using top-full */}
               {isSurveyOpen && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-50">
-                  {availableSurveys
-                    .filter((s) =>
-                      (s.title || s.name || "")
-                        .toLowerCase()
-                        .includes(surveySearch.toLowerCase()),
-                    )
-                    .map((s) => (
+                  {(() => {
+                    const q = surveySearch.toLowerCase();
+                    const published = availableSurveys.filter((s) => s.status !== "DELETED" && (s.title || "").toLowerCase().includes(q));
+                    const deleted = availableSurveys.filter((s) => s.status === "DELETED" && (s.title || "").toLowerCase().includes(q));
+                    const renderItem = (s) => (
                       <div
                         key={s.form_id || s.id}
-                        className="px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer border-b border-slate-50 last:border-0 truncate"
+                        className={`px-4 py-2.5 text-sm font-medium cursor-pointer border-b border-slate-50 last:border-0 truncate ${
+                          s.status === "DELETED"
+                            ? "text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                            : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"
+                        }`}
                         onClick={() => {
-                          setFilters((prev) => ({
-                            ...prev,
-                            survey_id: s.form_id || s.id,
-                          }));
+                          setFilters((prev) => ({ ...prev, survey_id: s.form_id || s.id }));
                           setSurveySearch("");
                           setIsSurveyOpen(false);
                         }}
                       >
-                        {s.title || s.name}
+                        {s.title || s.name}{s.status === "DELETED" && " (Deleted)"}
                       </div>
-                    ))}
+                    );
+                    return (
+                      <>
+                        {published.length > 0 && (
+                          <>
+                            <div className="px-4 py-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider bg-slate-50 border-y border-slate-100">
+                              Published Forms
+                            </div>
+                            {published.map(renderItem)}
+                          </>
+                        )}
+                        {deleted.length > 0 && (
+                          <>
+                            <div className="px-4 py-1.5 text-xs font-semibold text-rose-400 uppercase tracking-wider bg-rose-50 border-y border-rose-100">
+                              Deleted Forms
+                            </div>
+                            {deleted.map(renderItem)}
+                          </>
+                        )}
+                        {published.length === 0 && deleted.length === 0 && (
+                          <div className="px-4 py-3 text-sm text-slate-400">No surveys found</div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>

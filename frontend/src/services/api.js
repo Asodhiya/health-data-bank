@@ -432,14 +432,13 @@ export const api = {
     return request(`/researcher/query/results${qs ? `?${qs}` : ""}`);
   },
 
+  // 3. Generate the CSV file download URL
+  // We don't use the standard request() here because we need to handle a file Blob, not JSON!
   downloadResearcherResults: async (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     const res = await fetch(
       `${API_BASE}/researcher/query/results/download${qs ? `?${qs}` : ""}`,
-      {
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-      },
+      { credentials: "include" },
     );
 
     if (!res.ok) throw new Error("Failed to download CSV");
@@ -452,6 +451,7 @@ export const api = {
     document.body.appendChild(a);
     a.click();
     a.remove();
+    window.URL.revokeObjectURL(url);
   },
 
   // ── Goal Templates (Researcher) ──
