@@ -144,12 +144,22 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
   const [sort, setSort]                 = useState('edited');
   const [showSort, setShowSort]         = useState(false);
   const [groupFilter, setGroupFilter]   = useState('ALL');
+  const [groupSearch, setGroupSearch]   = useState('');
+  const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
+  const groupDropdownRef = useRef(null);
+  useEffect(() => {
+    const handler = (e) => { if (groupDropdownRef.current && !groupDropdownRef.current.contains(e.target)) setGroupDropdownOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
   const [dateFrom, setDateFrom]         = useState('');
   const [dateTo, setDateTo]             = useState('');
   const [showFilters, setShowFilters]   = useState(false);
   const [selected, setSelected]         = useState(new Set());
   const [modal, setModal]               = useState(null);
   const [publishGroups, setPublishGroups] = useState(new Set());
+  const [publishGroupSearch, setPublishGroupSearch] = useState('');
+  const [publishError, setPublishError] = useState('');
 
   const hasDateFilter  = dateFrom || dateTo;
   const hasGroupFilter = groupFilter !== 'ALL';
@@ -165,9 +175,9 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
   const filtered = forms.filter((f) => {
     const matchSearch = f.title.toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === 'ALL' || f.status === statusFilter;
-    const matchGroup  = groupFilter === 'ALL' || f.group_id === groupFilter;
-    const matchFrom   = !dateFrom || f.created_at >= dateFrom;
-    const matchTo     = !dateTo   || f.created_at <= dateTo;
+    const matchGroup  = groupFilter === 'ALL' || (f.status === 'PUBLISHED' && Array.isArray(f.deployed_group_ids) && f.deployed_group_ids.map(String).includes(groupFilter));
+    const matchFrom   = !dateFrom || new Date(f.created_at) >= new Date(dateFrom);
+    const matchTo     = !dateTo   || new Date(f.created_at) <= new Date(dateTo + 'T23:59:59.999');
     return matchSearch && matchStatus && matchGroup && matchFrom && matchTo;
   });
 
@@ -311,7 +321,7 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
             }`}>
             <FilterIco /> Filters
             {activeFilterCount > 0 && (
-              <span className="ml-1 w-4 h-4 bg-blue-600 text-white text-xs rounded-full flex items-center justify-center">{activeFilterCount}</span>
+              <span className="text-xs rounded-full px-1.5 font-bold leading-none bg-blue-100 text-blue-700">{activeFilterCount}</span>
             )}
           </button>
         </div>
@@ -325,17 +335,52 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
                   className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Created Before</label>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Created On or Before</label>
                 <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
                   className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
               </div>
-              <div>
+              <div className="relative" ref={groupDropdownRef}>
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Group</label>
-                <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}
-                  className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition min-w-[200px]">
-                  <option value="ALL">All Groups</option>
-                  {groups.map((g) => <option key={g.group_id} value={g.group_id}>{g.name}</option>)}
-                </select>
+                <button
+                  onClick={() => setGroupDropdownOpen((o) => !o)}
+                  className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400 transition min-w-[200px] w-full">
+                  <span className="truncate text-slate-700">
+                    {groupFilter === 'ALL' ? 'All Groups' : (groups.find((g) => String(g.group_id) === groupFilter)?.name ?? 'All Groups')}
+                  </span>
+                  <Svg size={14} d="M6 9l6 6 6-6" className="shrink-0 text-slate-400" />
+                </button>
+                {groupDropdownOpen && (
+                  <div className="absolute z-20 mt-1 w-full min-w-[220px] bg-white border border-slate-200 rounded-xl shadow-lg">
+                    <div className="p-2 border-b border-slate-100">
+                      <input
+                        autoFocus
+                        value={groupSearch}
+                        onChange={(e) => setGroupSearch(e.target.value)}
+                        placeholder="Search groups…"
+                        className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
+                      />
+                    </div>
+                    <div className="max-h-48 overflow-y-auto py-1">
+                      <button
+                        onClick={() => { setGroupFilter('ALL'); setGroupDropdownOpen(false); setGroupSearch(''); }}
+                        className={`w-full text-left px-3 py-2 text-sm transition ${groupFilter === 'ALL' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}>
+                        All Groups
+                      </button>
+                      {groups
+                        .filter((g) => g.name.toLowerCase().includes(groupSearch.toLowerCase()))
+                        .map((g) => (
+                          <button key={g.group_id}
+                            onClick={() => { setGroupFilter(String(g.group_id)); setGroupDropdownOpen(false); setGroupSearch(''); }}
+                            className={`w-full text-left px-3 py-2 text-sm transition ${String(groupFilter) === String(g.group_id) ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}>
+                            {g.name}
+                          </button>
+                        ))}
+                      {groups.filter((g) => g.name.toLowerCase().includes(groupSearch.toLowerCase())).length === 0 && (
+                        <p className="px-3 py-2 text-xs text-slate-400">No groups found</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
               {(hasDateFilter || hasGroupFilter) && (
                 <button onClick={clearFilters} className="text-xs text-slate-400 hover:text-rose-500 font-medium transition pb-1">Clear all filters</button>
@@ -344,6 +389,12 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
           </div>
         )}
       </div>
+
+      {publishError && (
+        <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-rose-700">
+          <AlertIco /> {publishError}
+        </div>
+      )}
 
       {/* Multi-select toolbar */}
       <div className={`flex items-center justify-between bg-white border rounded-xl px-4 py-2.5 mb-3 transition-all ${
@@ -441,7 +492,16 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                   {form.status === 'DRAFT' && (
                     <button className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition" title="Publish"
-                      onClick={(e) => { e.stopPropagation(); setModal({ type: 'publish', ids: [form.form_id], formTitle: form.title }); }}>
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!form.field_count || form.field_count === 0) {
+                          setPublishError(`"${form.title}" has no questions. Add at least one question before publishing.`);
+                          setTimeout(() => setPublishError(''), 5000);
+                          return;
+                        }
+                        setPublishError('');
+                        setModal({ type: 'publish', ids: [form.form_id], formTitle: form.title });
+                      }}>
                       <CheckIco />
                     </button>
                   )}
@@ -501,34 +561,48 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
           message={modal.formTitle ? `Assign "${modal.formTitle}" to one or more groups.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select groups to assign.`}
           confirmLabel={publishGroups.size > 1 ? `Publish to ${publishGroups.size} Groups` : 'Publish'}
           confirmClass="bg-emerald-600 hover:bg-emerald-700" onConfirm={handleConfirmPublish}
-          onClose={() => { setModal(null); setPublishGroups(new Set()); }} disabled={publishGroups.size === 0}>
+          onClose={() => { setModal(null); setPublishGroups(new Set()); setPublishGroupSearch(''); }} disabled={publishGroups.size === 0}>
           <div className="mb-1">
-            <button onClick={() => {
-              if (publishGroups.size === groups.length) setPublishGroups(new Set());
-              else setPublishGroups(new Set(groups.map((g) => g.group_id)));
-            }} className="text-xs text-blue-600 hover:text-blue-800 font-semibold mb-2 transition">
-              {publishGroups.size === groups.length ? 'Deselect all' : 'Select all'}
-            </button>
-            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-              {groups.map((g) => {
-                const checked = publishGroups.has(g.group_id);
-                return (
-                  <label key={g.group_id}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
-                      checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}>
-                    <input type="checkbox" checked={checked}
-                      onChange={() => setPublishGroups((prev) => { const n = new Set(prev); n.has(g.group_id) ? n.delete(g.group_id) : n.add(g.group_id); return n; })}
-                      className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-400" />
-                    <span className="text-sm font-medium text-slate-700 truncate flex-1">{g.name}</span>
-                    {checked && <span className="text-emerald-600 shrink-0"><Svg size={14} sw={2.5} d={<polyline points="20 6 9 17 4 12" />} /></span>}
-                  </label>
-                );
-              })}
+            <input
+              autoFocus
+              value={publishGroupSearch}
+              onChange={(e) => setPublishGroupSearch(e.target.value)}
+              placeholder="Search groups…"
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 transition mb-2"
+            />
+            <div className="flex items-center justify-between mb-2">
+              <button onClick={() => {
+                if (publishGroups.size === groups.length) setPublishGroups(new Set());
+                else setPublishGroups(new Set(groups.map((g) => g.group_id)));
+              }} className="text-xs text-blue-600 hover:text-blue-800 font-semibold transition">
+                {publishGroups.size === groups.length ? 'Deselect all' : 'Select all'}
+              </button>
+              {publishGroups.size > 0 && (
+                <p className="text-xs text-emerald-600 font-medium">{publishGroups.size} group{publishGroups.size > 1 ? 's' : ''} selected</p>
+              )}
             </div>
-            {publishGroups.size > 0 && (
-              <p className="text-xs text-emerald-600 font-medium mt-2">{publishGroups.size} group{publishGroups.size > 1 ? 's' : ''} selected</p>
-            )}
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              {groups
+                .filter((g) => g.name.toLowerCase().includes(publishGroupSearch.toLowerCase()))
+                .map((g) => {
+                  const checked = publishGroups.has(g.group_id);
+                  return (
+                    <label key={g.group_id}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
+                        checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      }`}>
+                      <input type="checkbox" checked={checked}
+                        onChange={() => setPublishGroups((prev) => { const n = new Set(prev); n.has(g.group_id) ? n.delete(g.group_id) : n.add(g.group_id); return n; })}
+                        className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-400" />
+                      <span className="text-sm font-medium text-slate-700 truncate flex-1">{g.name}</span>
+                      {checked && <span className="text-emerald-600 shrink-0"><Svg size={14} sw={2.5} d={<polyline points="20 6 9 17 4 12" />} /></span>}
+                    </label>
+                  );
+                })}
+              {groups.filter((g) => g.name.toLowerCase().includes(publishGroupSearch.toLowerCase())).length === 0 && (
+                <p className="text-xs text-slate-400 px-1 py-2">No groups match your search</p>
+              )}
+            </div>
           </div>
         </ConfirmModal>
       )}
@@ -633,6 +707,7 @@ function PreviewView({ title, description, fields }) {
 function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds = [] }) {
   const [groups, setGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState(new Set());
+  const [groupSearch, setGroupSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -674,44 +749,59 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
           </div>
         ) : (
           <div className="mb-4">
-            <button onClick={selectAll}
-              className="text-xs text-blue-600 hover:text-blue-800 font-semibold mb-2 transition">
-              {selectedGroups.size === groups.length ? 'Deselect all' : 'Select all'}
-            </button>
-            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-              {groups.map((g) => {
-                const checked = selectedGroups.has(g.group_id);
-                return (
-                  <label key={g.group_id}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
-                      checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}>
-                    <input type="checkbox" checked={checked} onChange={() => toggleGroup(g.group_id)}
-                      className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-400" />
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm font-medium text-slate-700 block truncate">{g.name}</span>
-                    </div>
-                    {checked && (
-                      <span className="text-emerald-600 shrink-0">
-                        <Svg size={14} sw={2.5} d={<polyline points="20 6 9 17 4 12" />} />
-                      </span>
-                    )}
-                  </label>
-                );
-              })}
+            <input
+              autoFocus
+              value={groupSearch}
+              onChange={(e) => setGroupSearch(e.target.value)}
+              placeholder="Search groups…"
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 transition mb-2"
+            />
+            <div className="flex items-center justify-between mb-2">
+              <button onClick={selectAll}
+                className="text-xs text-blue-600 hover:text-blue-800 font-semibold transition">
+                {selectedGroups.size === groups.length ? 'Deselect all' : 'Select all'}
+              </button>
+              {selectedGroups.size > 0 && (
+                <p className="text-xs text-emerald-600 font-medium">
+                  {selectedGroups.size} group{selectedGroups.size > 1 ? 's' : ''} selected
+                </p>
+              )}
             </div>
-            {selectedGroups.size > 0 && (
-              <p className="text-xs text-emerald-600 font-medium mt-2">
-                {selectedGroups.size} group{selectedGroups.size > 1 ? 's' : ''} selected
-              </p>
-            )}
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              {groups
+                .filter((g) => g.name.toLowerCase().includes(groupSearch.toLowerCase()))
+                .map((g) => {
+                  const checked = selectedGroups.has(g.group_id);
+                  return (
+                    <label key={g.group_id}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
+                        checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      }`}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleGroup(g.group_id)}
+                        className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-400" />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium text-slate-700 block truncate">{g.name}</span>
+                      </div>
+                      {checked && (
+                        <span className="text-emerald-600 shrink-0">
+                          <Svg size={14} sw={2.5} d={<polyline points="20 6 9 17 4 12" />} />
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
+              {groups.filter((g) => g.name.toLowerCase().includes(groupSearch.toLowerCase())).length === 0 && (
+                <p className="text-xs text-slate-400 px-1 py-2">No groups match your search</p>
+              )}
+            </div>
           </div>
         )}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium hover:text-slate-700 transition">Cancel</button>
           <button
             onClick={() => onConfirm([...selectedGroups], new Set(deployedGroupIds.map(String)))}
-            className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold transition">
+            disabled={selectedGroups.size === 0 && deployedGroupIds.length === 0}
+            className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">
             Save
           </button>
         </div>
@@ -725,7 +815,7 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
    BUILDER VIEW
    #1 unsaved changes, #2 auto-save, #3 drag reorder, #4 validation
    ══════════════════════════════════════════════ */
-function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete, dataElements, onDataElementCreated }) {
+function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, onDataElementCreated }) {
   const [title, setTitle]       = useState(form?.title || '');
   const [desc, setDesc]         = useState(form?.description || '');
   const [fields, setFields]     = useState(form?.fields || []);
@@ -737,6 +827,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete, d
   const [selected, setSelected] = useState(new Set());
   const [validationErrors, setValidationErrors] = useState([]);
   const [validationContext, setValidationContext] = useState('saving');
+  const [validationErrorIds, setValidationErrorIds] = useState(new Set());
   const [lastSaved, setLastSaved]       = useState(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
@@ -790,22 +881,29 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete, d
   /* #4 — Validation */
   const validate = ({ requireElementLinks = false } = {}) => {
     const errs = [];
+    const errIds = new Set();
     setValidationContext(requireElementLinks ? 'publishing' : 'saving');
     if (!title.trim()) errs.push('Form title is required');
+    if (requireElementLinks && fields.length === 0) errs.push('Add at least one question before publishing');
     fields.forEach((f, i) => {
-      if (!f.label.trim()) errs.push(`Q${i + 1}: Question text is required`);
-      if (requireElementLinks && !f.element_id) errs.push(`Q${i + 1}: Must be linked to a data element before publishing`);
-      if (f.field_type === 'likert' && (f.likertMin ?? 0) >= (f.likertMax ?? 4)) errs.push(`Q${i + 1}: Likert min must be less than max`);
+      const n = `Question ${i + 1}`;
+      if (!f.label.trim()) { errs.push(`${n}: Question text is required`); errIds.add(f.id); }
+      if (requireElementLinks && !f.element_id) { errs.push(`${n}: Must be linked to a data element before publishing`); errIds.add(f.id); }
+      if (f.field_type === 'likert' && (f.likertMin ?? 0) >= (f.likertMax ?? 4)) { errs.push(`${n}: Likert min must be less than max`); errIds.add(f.id); }
       if (['single_select', 'multi_select', 'dropdown'].includes(f.field_type)) {
-        if (!f.options || f.options.length < 2) errs.push(`Q${i + 1}: Needs at least 2 options`);
-        else if (f.options.some((o) => !o.label.trim())) errs.push(`Q${i + 1}: All options need labels`);
+        if (!f.options || f.options.length < 2) { errs.push(`${n}: Needs at least 2 options`); errIds.add(f.id); }
+        else if (f.options.some((o) => !o.label.trim())) { errs.push(`${n}: All options need labels`); errIds.add(f.id); }
       }
     });
     setValidationErrors(errs);
+    setValidationErrorIds(errIds);
     return errs.length === 0;
   };
 
+  const MAX_FIELDS = 30;
+
   const addField = (type) => {
+    if (fields.length >= MAX_FIELDS) return;
     const f = newField(type);
     f.display_order = fields.length;
     setFields((prev) => [...prev, f]);
@@ -946,7 +1044,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete, d
 
       {mode === 'edit' ? (
         <div className="flex-1 overflow-y-auto pr-1">
-          <div className={`bg-white rounded-xl border border-slate-200 p-5 mb-4 shadow-sm ${!isDraft ? 'pointer-events-none opacity-60' : ''}`}>
+          <div className={`rounded-xl border p-5 mb-4 shadow-sm ${!isDraft ? 'pointer-events-none bg-slate-50 border-slate-200' : 'bg-white border-slate-200'}`}>
             <input value={title} onChange={(e) => handleTitleChange(e.target.value)} placeholder="Form title…"
               className={`w-full text-lg font-bold text-slate-800 bg-transparent border-0 border-b-2 pb-2 focus:outline-none transition placeholder-slate-300 ${
                 !title.trim() && validationErrors.length > 0 ? 'border-rose-300 focus:border-rose-500' : 'border-slate-200 focus:border-blue-500'
@@ -983,11 +1081,13 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete, d
               <p className="text-xs mt-1">Add your first question below</p>
             </div>
           )}
-          <div className={`space-y-2.5 mb-4 ${!isDraft ? 'pointer-events-none opacity-60' : ''}`}>
+          <div className="space-y-2.5 mb-4">
             {fields.map((f, i) => (
               <FieldCard key={f.id} field={f} index={i} total={fields.length}
                 isExpanded={expanded === f.id}
                 isSelected={selected.has(f.id)}
+                hasError={validationErrorIds.has(f.id)}
+                readOnly={!isDraft}
                 onToggle={() => setExpanded(expanded === f.id ? null : f.id)}
                 onSelect={() => toggleSelect(f.id)}
                 onUpdate={(data) => updateField(f.id, data)}
@@ -1001,7 +1101,15 @@ function BuilderView({ form, onSave, onBack, onPublish, onUnpublish, onDelete, d
                 onDataElementCreated={onDataElementCreated} />
             ))}
           </div>
-          <button onClick={() => setShowAdd(true)} className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm font-semibold text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-all flex items-center justify-center gap-2"><PlusIco /> Add Question</button>
+          {fields.length < MAX_FIELDS ? (
+            <button onClick={() => setShowAdd(true)} className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm font-semibold text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-all flex items-center justify-center gap-2">
+              <PlusIco /> Add Question <span className="text-xs font-normal opacity-60">{fields.length} / {MAX_FIELDS}</span>
+            </button>
+          ) : (
+            <div className="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400 flex items-center justify-center gap-2">
+              Maximum of {MAX_FIELDS} questions reached
+            </div>
+          )}
           {showAdd && <AddFieldPanel onAdd={addField} onClose={() => setShowAdd(false)} />}
         </div>
       ) : (
@@ -1153,7 +1261,7 @@ export default function SurveyBuilderPage() {
       showToast('Draft saved!');
       handleBack();
     } catch (err) {
-      showToast('Error saving form');
+      showToast(err.message || 'Error saving form');
     }
   };
 
@@ -1164,21 +1272,22 @@ export default function SurveyBuilderPage() {
         const payload = transformForSave(formData);
         const newForm = await api.createForm(payload);
         formId = newForm.form_id;
-      } else if (formData.status !== 'PUBLISHED') {
-        const payload = transformForSave(formData);
-        await api.updateForm(formId, payload);
       }
       const finalIds = new Set(Array.isArray(groupIds) ? groupIds : [groupIds]);
       const toPublish   = [...finalIds].filter((gid) => !prevDeployed.has(gid));
       const toUnpublish = [...prevDeployed].filter((gid) => !finalIds.has(gid));
-      await Promise.all([
-        ...toPublish.map((gid) => api.publishForm(formId, gid)),
-        ...toUnpublish.map((gid) => api.unpublishFormFromGroup(formId, gid)),
-      ]);
+      if (finalIds.size === 0 && prevDeployed.size > 0) {
+        await api.unpublishForm(formId);
+      } else {
+        await Promise.all([
+          ...toPublish.map((gid) => api.publishForm(formId, gid)),
+          ...toUnpublish.map((gid) => api.unpublishFormFromGroup(formId, gid)),
+        ]);
+      }
       showToast('Group assignments saved!');
       handleBack();
     } catch (err) {
-      showToast('Error saving group assignments');
+      showToast(err.message || 'Error saving group assignments');
     }
   };
 

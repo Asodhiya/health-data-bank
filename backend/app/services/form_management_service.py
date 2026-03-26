@@ -10,7 +10,7 @@ from typing import List, Optional
 import time
 import asyncio
 
-from app.db.models import SurveyForm, FormField, FieldOption, FormDeployment, Group, FieldElementMap
+from app.db.models import SurveyForm, FormField, FieldOption, FormDeployment, Group, FieldElementMap, FormSubmission
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
 
 # Simple in-memory cache for the forms list
@@ -95,15 +95,18 @@ async def list_researcher_forms(db: AsyncSession):
     if forms:
         form_ids = [f.form_id for f in forms]
         dep_result = await db.execute(
-            select(FormDeployment.form_id, Group.name)
+            select(FormDeployment.form_id, Group.group_id, Group.name)
             .join(Group, Group.group_id == FormDeployment.group_id)
             .where(FormDeployment.form_id.in_(form_ids))
         )
         group_map: dict = {}
-        for fid, gname in dep_result.all():
+        group_id_map: dict = {}
+        for fid, gid, gname in dep_result.all():
             group_map.setdefault(fid, []).append(gname)
+            group_id_map.setdefault(fid, []).append(gid)
         for form in forms:
             form.deployed_groups = group_map.get(form.form_id, [])
+            form.deployed_group_ids = group_id_map.get(form.form_id, [])
 
     _forms_cache["data"] = forms
     _forms_cache["ts"] = time.time()
@@ -143,6 +146,12 @@ async def update_survey_form(form_id: UUID, form_data: SurveyCreate, db: AsyncSe
         raise HTTPException(status_code=404, detail="Form not found.")
     if form.status == "PUBLISHED":
         raise HTTPException(status_code=400, detail="Published forms cannot be edited. Unpublish the form first.")
+
+    sub_check = await db.execute(
+        select(FormSubmission.submission_id).where(FormSubmission.form_id == form_id).limit(1)
+    )
+    if sub_check.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="This form has existing submissions and cannot be edited.")
 
     # Get old field IDs in one query, delete dependents in bulk
     old_ids_result = await db.execute(select(FormField.field_id).where(FormField.form_id == form_id))

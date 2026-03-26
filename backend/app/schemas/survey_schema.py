@@ -66,6 +66,7 @@ class SurveyListItem(BaseModel):
     deployment_id: Optional[UUID] = None
     field_count: int = 0
     deployed_groups: List[str] = []
+    deployed_group_ids: List[UUID] = []
 
     class Config:
         from_attributes = True
