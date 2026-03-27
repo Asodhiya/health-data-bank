@@ -102,19 +102,12 @@ async def register(
 
     invite.used = True
 
-    if role.role_name == "participant":
-        participant = ParticipantProfile(user_id=new_user.user_id)
-        db.add(participant)
-        await db.flush()
-
-        if invite.group_id:
-            db.add(GroupMember(
-                group_id=invite.group_id,
-                participant_id=participant.participant_id,
-            ))
-
-    elif role.role_name == "researcher":
-        db.add(ResearcherProfile(user_id=new_user.user_id))
+    if role.role_name == "participant" and invite.group_id:
+        participant_profile = new_user.participant_profile
+        db.add(GroupMember(
+            group_id=invite.group_id,
+            participant_id=participant_profile.participant_id,
+        ))
 
     await db.commit()
 
