@@ -21,14 +21,16 @@ export default function ResearcherDashboard() {
   const [loading, setLoading] = useState(true);
   const [filtering, setFiltering] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState([]);
-
   const [attributeSearch, setAttributeSearch] = useState("");
 
   // 👈 3. New states to hold our filter data (we will use these in Step 2)
   const [availableSurveys, setAvailableSurveys] = useState([]);
   const [allGroups, setAllGroups] = useState([]);
   const [availableGroups, setAvailableGroups] = useState([]);
+  const [allForms, setAllForms] = useState([]);
   // 🟢 UPDATED: group_id is now an array (group_ids) for multi-select
+  const [showMoreFilters, setShowMoreFilters] = useState(false);
+
   const [filters, setFilters] = useState({
     survey_id: "",
     group_ids: [],
@@ -36,9 +38,15 @@ export default function ResearcherDashboard() {
     status: "",
     gender: "",
     primary_language: "",
-    date_range: "all_time", // 🟢 New!
-    age_min: "18", // 🟢 New!
-    age_max: "100", // 🟢 New!
+    date_range: "all_time",
+    age_min: "18",
+    age_max: "100",
+    highest_education_level: "",
+    marital_status: "",
+    living_arrangement: "",
+    dependents: "",
+    pronouns: "",
+    occupation_status: "",
   });
 
   const [surveySearch, setSurveySearch] = useState("");
@@ -46,12 +54,24 @@ export default function ResearcherDashboard() {
   const [isSurveyOpen, setIsSurveyOpen] = useState(false);
   const [isGroupOpen, setIsGroupOpen] = useState(false);
 
-  // Ref to detect clicking outside the dropdowns
-  const filterRef = useRef(null);
+  // 🟢 NEW: Individual refs for each dropdown so they close properly
+  const surveyDropdownRef = useRef(null);
+  const groupDropdownRef = useRef(null);
+
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (filterRef.current && !filterRef.current.contains(event.target)) {
+      // If click is outside the survey box, close survey
+      if (
+        surveyDropdownRef.current &&
+        !surveyDropdownRef.current.contains(event.target)
+      ) {
         setIsSurveyOpen(false);
+      }
+      // If click is outside the group box, close group
+      if (
+        groupDropdownRef.current &&
+        !groupDropdownRef.current.contains(event.target)
+      ) {
         setIsGroupOpen(false);
       }
     };
@@ -62,18 +82,21 @@ export default function ResearcherDashboard() {
   const [viewMode, setViewMode] = useState("table"); // "table" or "charts"
 
   // 1. Initial Data Load — load surveys+groups first so the page renders immediately,
-  //    then fetch results in the background (shown as filtering spinner, not full-page block)
   useEffect(() => {
     setLoading(true);
     Promise.all([
       api.getAvailableSurveys().catch(() => []),
       api.listGroups().catch(() => []),
+      api.listForms().catch(() => []), // 🟢 FETCH THE FULL FORMS LIST HERE
     ])
-      .then(([formsRes, groupsRes]) => {
+      .then(([formsRes, groupsRes, allFormsRes]) => {
         setAvailableSurveys(formsRes || []);
+
         const fetchedGroups = groupsRes || [];
         setAllGroups(fetchedGroups);
         setAvailableGroups(fetchedGroups);
+
+        setAllForms(allFormsRes || []); // 🟢 STORE THE FULL FORMS LIST
       })
       .catch((err) => console.error("API Error:", err))
       .finally(() => setLoading(false));
@@ -96,47 +119,71 @@ export default function ResearcherDashboard() {
       .finally(() => setFiltering(false));
   }, []);
 
-  // 2. The Instant Local Group Filter (NOW WITH AUTO-SELECT!)
+  // 2. The Instant Local Group Filter (USING LISTFORMS DATA)
   useEffect(() => {
     if (!filters.survey_id) {
-      setAvailableGroups(allGroups); // Show all if no survey is selected
-      // Don't auto-clear groups here just in case they are browsing all surveys
-    } else {
-      const survey = availableSurveys.find(
-        (s) => (s.form_id || s.id) === filters.survey_id,
-      );
-
-      if (
-        survey &&
-        survey.deployed_groups &&
-        survey.deployed_groups.length > 0
-      ) {
-        // Find the actual group objects from the master list
-        const validGroups = allGroups.filter((g) =>
-          survey.deployed_groups.includes(g.name),
-        );
-        setAvailableGroups(validGroups);
-
-        // 🟢 THE FIX: Auto-select ALL deployed groups by default!
-        const validIds = validGroups.map((g) => g.group_id || g.id);
-        setFilters((prev) => ({
-          ...prev,
-          group_ids: validIds, // Instantly selects them all so the pills appear
-        }));
-      } else {
-        setAvailableGroups([]);
-        setFilters((prev) => ({ ...prev, group_ids: [] }));
-      }
+      setAvailableGroups(allGroups); // Show all groups if no survey selected
+      return;
     }
-  }, [filters.survey_id, allGroups, availableSurveys]);
+
+    // 🟢 Look up the survey in allForms because it contains deployed_groups!
+    const surveyDetails = allForms.find(
+      (s) => (s.form_id || s.id) === filters.survey_id,
+    );
+
+    // Grab the exact arrays you saw in the Network tab
+    const groupIds = surveyDetails?.deployed_group_ids || [];
+    const groupNames = surveyDetails?.deployed_groups || [];
+
+    if (groupIds.length > 0) {
+      // Zip the IDs and Names together perfectly
+      const mappedGroups = groupIds.map((id, index) => ({
+        id: id,
+        group_id: id,
+        name: groupNames[index] || `Group ${id.substring(0, 8)}`,
+      }));
+
+      setAvailableGroups(mappedGroups);
+
+      // Auto-select them so the blue pills appear instantly
+      setFilters((prev) => {
+        const currentStr = (prev.group_ids || []).slice().sort().join(",");
+        const newStr = groupIds.slice().sort().join(",");
+        if (currentStr === newStr) return prev; // Prevent infinite loops
+
+        return { ...prev, group_ids: [...groupIds] };
+      });
+    } else {
+      // Survey has zero deployed groups
+      setAvailableGroups([]);
+      setFilters((prev) => ({ ...prev, group_ids: [] }));
+    }
+  }, [filters.survey_id, allGroups, allForms]); // 🟢 Added allForms to dependencies
 
   // Auto-fetch when any filter changes (debounced 400ms)
   const filterMounted = useRef(false);
   useEffect(() => {
-    if (!filterMounted.current) { filterMounted.current = true; return; }
+    if (!filterMounted.current) {
+      filterMounted.current = true;
+      return;
+    }
     const timer = setTimeout(() => applyFilters(), 400);
     return () => clearTimeout(timer);
-  }, [filters.survey_id, filters.gender, filters.status, filters.primary_language, filters.age_min, filters.age_max]);
+  }, [
+    filters.survey_id,
+    filters.group_ids, // 🟢 THIS WAS MISSING: It makes the table refresh when you click a pill
+    filters.gender,
+    filters.status,
+    filters.primary_language,
+    filters.age_min,
+    filters.age_max,
+    filters.highest_education_level,
+    filters.marital_status,
+    filters.living_arrangement,
+    filters.dependents,
+    filters.pronouns,
+    filters.occupation_status,
+  ]);
 
   // NEW STATS CALCULATION: Filtered Results, Total Participants, Active Groups
   const stats = useMemo(() => {
@@ -159,6 +206,37 @@ export default function ResearcherDashboard() {
       isFiltered: selectedCount > 0 && selectedCount < totalAssigned,
     };
   }, [queryData, filters.group_ids, availableGroups]);
+
+  // ── TABLE SORTING STATE & LOGIC ──
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
+
+  const handleSort = (key) => {
+    let direction = "asc";
+    if (sortConfig.key === key && sortConfig.direction === "asc") {
+      direction = "desc";
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const sortedData = useMemo(() => {
+    let sortableItems = [...queryData.data];
+    if (sortConfig.key !== null) {
+      sortableItems.sort((a, b) => {
+        // We use ?? "" to safely handle those annoying null values we talked about!
+        const aValue = a[sortConfig.key] ?? "";
+        const bValue = b[sortConfig.key] ?? "";
+
+        if (aValue < bValue) {
+          return sortConfig.direction === "asc" ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortConfig.direction === "asc" ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+    return sortableItems;
+  }, [queryData.data, sortConfig]);
 
   // DERIVE CHART DATA
   const chartData = useMemo(() => {
@@ -195,6 +273,38 @@ export default function ResearcherDashboard() {
 
   const CHART_COLORS = ["#3b82f6", "#10b981", "#6366f1"]; // Blue, Emerald, Indigo
 
+  // 🟢 NEW: Smart age validation that runs when the user clicks away from the input
+  const handleAgeBlur = (field) => {
+    setFilters((prev) => {
+      let currentMin = parseInt(prev.age_min, 10);
+      let currentMax = parseInt(prev.age_max, 10);
+
+      // Fallbacks if they leave it totally blank
+      if (isNaN(currentMin)) currentMin = 18;
+      if (isNaN(currentMax)) currentMax = 120;
+
+      // 1. Absolute Caps: Nothing below 18, nothing above 120
+      if (currentMin < 18) currentMin = 18;
+      if (currentMin > 120) currentMin = 120;
+      if (currentMax > 120) currentMax = 120;
+      if (currentMax < 18) currentMax = 18;
+
+      // 2. Logic Check: Min cannot be higher than Max
+      if (field === "min" && currentMin > currentMax) {
+        currentMin = currentMax;
+      }
+      if (field === "max" && currentMax < currentMin) {
+        currentMax = currentMin;
+      }
+
+      return {
+        ...prev,
+        age_min: String(currentMin),
+        age_max: String(currentMax),
+      };
+    });
+  };
+
   // 👈 5. Updated Reset Function
   const resetFilters = () => {
     setLoading(true);
@@ -207,7 +317,14 @@ export default function ResearcherDashboard() {
       primary_language: "",
       date_range: "all_time",
       age_min: "18",
-      age_max: "65",
+      age_max: "100",
+      // 🟢 Add to reset
+      highest_education_level: "",
+      marital_status: "",
+      living_arrangement: "",
+      dependents: "",
+      pronouns: "",
+      occupation_status: "",
     });
     api
       .getResearcherResults()
@@ -225,14 +342,15 @@ export default function ResearcherDashboard() {
       .finally(() => setLoading(false));
   };
 
-
   const [isExporting, setIsExporting] = useState(false);
 
   const handleExport = async () => {
     setIsExporting(true);
     try {
       const activeFilters = Object.fromEntries(
-        Object.entries(filters).filter(([k, v]) => k !== "group_ids" && v !== ""),
+        Object.entries(filters).filter(
+          ([k, v]) => k !== "group_ids" && v !== "",
+        ),
       );
       await api.downloadResearcherResults(activeFilters, hiddenColumns);
     } catch (err) {
@@ -252,7 +370,9 @@ export default function ResearcherDashboard() {
 
     Object.entries(filters).forEach(([key, value]) => {
       if (key === "group_ids") {
-        // group filtering not yet implemented on backend, skip
+        if (value.length > 0) {
+          activeFilters.group_id = value.join(","); // 👈 LOOK HERE
+        }
       } else if (value !== "" && value !== "all_time") {
         activeFilters[key] = value;
       }
@@ -273,15 +393,6 @@ export default function ResearcherDashboard() {
       .catch((err) => console.error("Filter Error:", err))
       .finally(() => setFiltering(false));
   };
-
-  if (loading)
-    return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-xl font-semibold animate-pulse text-blue-400">
-          Loading Health Data Bank... 🩺
-        </p>
-      </div>
-    );
 
   return (
     <div className="w-full space-y-6">
@@ -319,10 +430,7 @@ export default function ResearcherDashboard() {
         </button>
       </div>
       {/* ── NEW DATA FILTERS UI (MOCKUP STYLE) ── */}
-      <div
-        className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6"
-        ref={filterRef}
-      >
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-3">
@@ -348,9 +456,30 @@ export default function ResearcherDashboard() {
               filters.survey_id ||
               filters.status ||
               filters.gender ||
-              filters.primary_language) && (
+              filters.primary_language ||
+              filters.highest_education_level ||
+              filters.marital_status ||
+              filters.living_arrangement ||
+              filters.dependents ||
+              filters.pronouns ||
+              filters.occupation_status) && (
               <span className="bg-blue-50 text-blue-600 px-2.5 py-0.5 rounded-full text-[11px] font-bold border border-blue-100 uppercase tracking-wide">
-                {[filters.survey_id, filters.status, filters.gender, filters.primary_language, ...filters.group_ids].filter(Boolean).length} filters active
+                {
+                  [
+                    filters.survey_id,
+                    filters.status,
+                    filters.gender,
+                    filters.primary_language,
+                    filters.highest_education_level,
+                    filters.marital_status,
+                    filters.living_arrangement,
+                    filters.dependents,
+                    filters.pronouns,
+                    filters.occupation_status,
+                    ...filters.group_ids,
+                  ].filter(Boolean).length
+                }{" "}
+                filters active
               </span>
             )}
           </div>
@@ -363,9 +492,8 @@ export default function ResearcherDashboard() {
         </div>
 
         <div className="space-y-5">
-          {/* Survey Combobox */}
           {/* ── Survey Combobox ── */}
-          <div className="relative z-30">
+          <div className="relative z-20" ref={surveyDropdownRef}>
             <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
               Survey
             </label>
@@ -442,8 +570,16 @@ export default function ResearcherDashboard() {
                 <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-50">
                   {(() => {
                     const q = surveySearch.toLowerCase();
-                    const published = availableSurveys.filter((s) => s.status !== "DELETED" && (s.title || "").toLowerCase().includes(q));
-                    const deleted = availableSurveys.filter((s) => s.status === "DELETED" && (s.title || "").toLowerCase().includes(q));
+                    const published = availableSurveys.filter(
+                      (s) =>
+                        s.status !== "DELETED" &&
+                        (s.title || "").toLowerCase().includes(q),
+                    );
+                    const deleted = availableSurveys.filter(
+                      (s) =>
+                        s.status === "DELETED" &&
+                        (s.title || "").toLowerCase().includes(q),
+                    );
                     const renderItem = (s) => (
                       <div
                         key={s.form_id || s.id}
@@ -453,12 +589,16 @@ export default function ResearcherDashboard() {
                             : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"
                         }`}
                         onClick={() => {
-                          setFilters((prev) => ({ ...prev, survey_id: s.form_id || s.id }));
+                          setFilters((prev) => ({
+                            ...prev,
+                            survey_id: s.form_id || s.id,
+                          }));
                           setSurveySearch("");
                           setIsSurveyOpen(false);
                         }}
                       >
-                        {s.title || s.name}{s.status === "DELETED" && " (Deleted)"}
+                        {s.title || s.name}
+                        {s.status === "DELETED" && " (Deleted)"}
                       </div>
                     );
                     return (
@@ -480,7 +620,9 @@ export default function ResearcherDashboard() {
                           </>
                         )}
                         {published.length === 0 && deleted.length === 0 && (
-                          <div className="px-4 py-3 text-sm text-slate-400">No surveys found</div>
+                          <div className="px-4 py-3 text-sm text-slate-400">
+                            No surveys found
+                          </div>
                         )}
                       </>
                     );
@@ -491,7 +633,7 @@ export default function ResearcherDashboard() {
           </div>
 
           {/* ── Groups Combobox ── */}
-          <div className="relative z-20">
+          <div className="relative z-10" ref={groupDropdownRef}>
             <label className="text-xs font-semibold text-slate-500 mb-1.5 flex justify-between items-center">
               Groups
               {filters.group_ids.length > 0 && (
@@ -575,18 +717,21 @@ export default function ResearcherDashboard() {
                 </div>
               )}
             </div>
-
             {/* 🟢 PILLS: Only show when dropdown is CLOSED for a cleaner look */}
             {!isGroupOpen && filters.group_ids.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-3 animate-in fade-in slide-in-from-top-1">
                 {filters.group_ids.map((gid) => {
-                  const g = allGroups.find((x) => (x.group_id || x.id) === gid);
+                  // Find the group in our fetched list, fallback to allGroups
+                  const g =
+                    availableGroups.find((x) => (x.group_id || x.id) === gid) ||
+                    allGroups.find((x) => (x.group_id || x.id) === gid);
                   return (
                     <span
                       key={gid}
                       className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-[11px] font-bold border border-blue-100 shadow-sm"
                     >
-                      {g?.name || `Group ${gid}`}
+                      {/* Render the actual mapped name! */}
+                      {g?.name || `Group ${gid.substring(0, 8)}`}
                       <button
                         onClick={() =>
                           setFilters((prev) => ({
@@ -713,9 +858,10 @@ export default function ResearcherDashboard() {
                 </span>
               </div>
               <div className="flex items-center gap-3">
+                {/* 🟢 MIN AGE INPUT */}
                 <input
                   type="number"
-                  min="0"
+                  min="18"
                   max="120"
                   placeholder="Min"
                   className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm text-center"
@@ -723,11 +869,16 @@ export default function ResearcherDashboard() {
                   onChange={(e) =>
                     setFilters((prev) => ({ ...prev, age_min: e.target.value }))
                   }
+                  onBlur={() => handleAgeBlur("min")}
+                  onKeyDown={(e) => e.key === "Enter" && handleAgeBlur("min")}
                 />
+
                 <span className="text-slate-300 font-bold">-</span>
+
+                {/* 🟢 MAX AGE INPUT */}
                 <input
                   type="number"
-                  min="0"
+                  min="18"
                   max="120"
                   placeholder="Max"
                   className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm text-center"
@@ -735,10 +886,199 @@ export default function ResearcherDashboard() {
                   onChange={(e) =>
                     setFilters((prev) => ({ ...prev, age_max: e.target.value }))
                   }
+                  onBlur={() => handleAgeBlur("max")}
+                  onKeyDown={(e) => e.key === "Enter" && handleAgeBlur("max")}
                 />
               </div>
             </div>
           </div>
+
+          {/* ── NEW: Expandable More Filters Section ── */}
+          {showMoreFilters && (
+            <div className="space-y-4 pt-4 border-t border-slate-100 mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Education Level */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                    Education level
+                  </label>
+                  <select
+                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
+                    value={filters.highest_education_level}
+                    onChange={(e) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        highest_education_level: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">All levels</option>
+                    <option value="High School">High School</option>
+                    <option value="Bachelors">Bachelors</option>
+                    <option value="Masters">Masters</option>
+                    <option value="PhD">PhD</option>
+                  </select>
+                </div>
+                {/* Marital status */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                    Marital status
+                  </label>
+                  <select
+                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
+                    value={filters.marital_status}
+                    onChange={(e) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        marital_status: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">All</option>
+                    <option value="Single">Single</option>
+                    <option value="Married">Married</option>
+                    <option value="Divorced">Divorced</option>
+                    <option value="Widowed">Widowed</option>
+                  </select>
+                </div>
+                {/* Living arrangement */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                    Living arrangement
+                  </label>
+                  <select
+                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
+                    value={filters.living_arrangement}
+                    onChange={(e) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        living_arrangement: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">All</option>
+                    <option value="Alone">Alone</option>
+                    <option value="With Partner">With Partner</option>
+                    <option value="With Family">With Family</option>
+                    <option value="With Roommates">With Roommates</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Dependents */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                    Dependents
+                  </label>
+                  <select
+                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
+                    value={filters.dependents}
+                    onChange={(e) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        dependents: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">All</option>
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                  </select>
+                </div>
+                {/* Pronouns */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                    Pronouns
+                  </label>
+                  <select
+                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
+                    value={filters.pronouns}
+                    onChange={(e) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        pronouns: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">All</option>
+                    <option value="He/Him">He/Him</option>
+                    <option value="She/Her">She/Her</option>
+                    <option value="They/Them">They/Them</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                {/* Occupation */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
+                    Occupation
+                  </label>
+                  <select
+                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
+                    value={filters.occupation_status}
+                    onChange={(e) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        occupation_status: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">All</option>
+                    <option value="Don't work">Don't work</option>
+                    <option value="Less than 10 hrs/week">
+                      Less than 10 hrs/week
+                    </option>
+                    <option value="Full-time">Full-time</option>
+                    <option value="Student">Student</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Toggle Button */}
+          <button
+            onClick={() => setShowMoreFilters(!showMoreFilters)}
+            className="flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors mt-2"
+          >
+            {showMoreFilters ? (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2.5}
+                    d="M5 15l7-7 7 7"
+                  />
+                </svg>
+                Less filters
+              </>
+            ) : (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2.5}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+                More filters
+              </>
+            )}
+          </button>
 
           {/* Apply Button */}
           <button
@@ -947,33 +1287,59 @@ export default function ResearcherDashboard() {
         {/* CONDITIONALLY RENDER TABLE OR CHARTS */}
         <div className="p-0">
           {viewMode === "table" ? (
-            <div className={`overflow-x-auto relative transition-opacity duration-200 ${filtering ? "opacity-50 pointer-events-none" : ""}`}>
+            <div
+              className={`overflow-x-auto relative transition-opacity duration-200 ${filtering ? "opacity-50 pointer-events-none" : ""}`}
+            >
               {filtering && (
                 <div className="absolute inset-0 flex items-center justify-center z-10">
-                  <span className="text-sm text-slate-500 font-medium bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200">Updating...</span>
+                  <span className="text-sm text-slate-500 font-medium bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200">
+                    Updating...
+                  </span>
                 </div>
               )}
               <table className="w-full text-left border-collapse whitespace-nowrap">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">
+                    {/* 1. Add the static Row Number header */}
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-12">
+                      #
+                    </th>
+
                     {queryData.columns
                       .filter((col) => !hiddenColumns.includes(col.id))
                       .map((col) => (
                         <th
                           key={col.id}
-                          className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest"
+                          className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest cursor-pointer hover:bg-slate-100 transition-colors select-none"
+                          onClick={() => handleSort(col.id)}
                         >
-                          {col.text || col.id}
+                          {/* 2. Make it clickable and show sort arrows */}
+                          <div className="flex items-center gap-1.5">
+                            {col.text || col.id}
+                            <span className="text-slate-300">
+                              {sortConfig.key === col.id
+                                ? sortConfig.direction === "asc"
+                                  ? "↑"
+                                  : "↓"
+                                : "↕"}
+                            </span>
+                          </div>
                         </th>
                       ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {queryData.data.map((row, rowIndex) => (
+                  {/* 1. We map over sortedData instead of queryData.data! */}
+                  {sortedData.map((row, rowIndex) => (
                     <tr
                       key={rowIndex}
                       className="hover:bg-blue-50/50 transition-colors"
                     >
+                      {/* 2. Add the Row Number cell */}
+                      <td className="px-6 py-4 text-xs font-bold text-slate-400">
+                        {rowIndex + 1}
+                      </td>
+
                       {queryData.columns
                         .filter((col) => !hiddenColumns.includes(col.id))
                         .map((col) => {
