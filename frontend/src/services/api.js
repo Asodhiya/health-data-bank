@@ -232,10 +232,10 @@ export const api = {
     }),
 
   // ── Intake (onboarding) ──
-  getIntakeForm: () => request('/participant/intake/form'),
+  getIntakeForm: () => request('/onboarding/form'),
 
   submitIntake: (payload) =>
-    request('/participant/intake', {
+    request('/onboarding', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

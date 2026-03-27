@@ -874,6 +874,11 @@ export default function ProfilePage({ role = 'participant' }) {
       try {
         const user = await api.me();
         if (cancelled) return;
+        const fmt = (iso) => {
+          if (!iso) return '';
+          const d = new Date(iso);
+          return isNaN(d) ? '' : d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+        };
         setProfile((prev) => ({
           ...prev,
           first_name: user.first_name || '',
@@ -881,12 +886,16 @@ export default function ProfilePage({ role = 'participant' }) {
           email: user.email || '',
           username: user.username || '',
           phone: user.phone || '',
+          address: user.address || '',
+          created_at: fmt(user.created_at),
+          last_login: fmt(user.last_login_at),
         }));
 
         // Load caretaker-specific data from real endpoints
         if (role === 'caretaker') {
           try {
-            const [groupData, participantData] = await Promise.all([
+            const [caretakerProfile, groupData, participantData] = await Promise.all([
+              api.caretakerGetProfile().catch(() => null),
               api.caretakerGetGroups().catch(() => []),
               api.caretakerListParticipants().catch(() => []),
             ]);
@@ -896,6 +905,20 @@ export default function ProfilePage({ role = 'participant' }) {
             const activeCount = participants.filter(p => p.status !== 'inactive').length;
             setProfile((prev) => ({
               ...prev,
+              ...(caretakerProfile ? {
+                title: caretakerProfile.title || '',
+                credentials: caretakerProfile.credentials || '',
+                organization: caretakerProfile.organization || '',
+                department: caretakerProfile.department || '',
+                specialty: caretakerProfile.specialty || '',
+                bio: caretakerProfile.bio || '',
+                workingHours: {
+                  start: caretakerProfile.working_hours_start || '09:00',
+                  end: caretakerProfile.working_hours_end || '17:00',
+                },
+                contactPreference: caretakerProfile.contact_preference || 'email',
+                availableDays: caretakerProfile.available_days || [],
+              } : {}),
               groupName: groups.length === 1 ? groups[0].name : `${groups.length} groups`,
               participantCount: participants.length,
               activeParticipants: activeCount,
