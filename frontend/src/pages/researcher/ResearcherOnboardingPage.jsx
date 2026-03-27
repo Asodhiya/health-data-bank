@@ -19,34 +19,23 @@ if (typeof document !== "undefined" && !document.getElementById("hdb-shake-style
   document.head.appendChild(style);
 }
 
-function ChipSelect({ options, value, onChange, multi = false }) {
-  const toggle = (opt) => {
-    if (multi) {
-      const arr = value || [];
-      onChange(arr.includes(opt) ? arr.filter((v) => v !== opt) : [...arr, opt]);
-    } else {
-      onChange(opt);
-    }
-  };
+function ChipSelect({ options, value, onChange }) {
   return (
     <div className="flex flex-wrap gap-2">
-      {options.map((opt) => {
-        const selected = multi ? (value || []).includes(opt) : value === opt;
-        return (
-          <button
-            key={opt}
-            type="button"
-            className={`px-3.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
-              selected
-                ? "bg-blue-50 text-blue-700 border-blue-200"
-                : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"
-            }`}
-            onClick={() => toggle(opt)}
-          >
-            {opt}
-          </button>
-        );
-      })}
+      {options.map((opt) => (
+        <button
+          key={opt}
+          type="button"
+          className={`px-3.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+            value === opt
+              ? "bg-blue-50 text-blue-700 border-blue-200"
+              : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"
+          }`}
+          onClick={() => onChange(opt)}
+        >
+          {opt}
+        </button>
+      ))}
     </div>
   );
 }
@@ -78,29 +67,30 @@ function Field({ id, label, required = false, missing = false, shake = false, ch
 
 const inputCls =
   "w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow placeholder-slate-400";
+const inputClsError =
+  "w-full px-3.5 py-2.5 bg-rose-50/50 border border-rose-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-400 focus:border-transparent transition-shadow placeholder-slate-400";
 
 const REQUIRED_FIELDS = [
-  { key: "credentials", label: "License / Credentials" },
-  { key: "availableDays", label: "Available Days" },
+  { key: "title", label: "Title" },
+  { key: "organization", label: "Organization" },
+  { key: "department", label: "Department" },
 ];
 
 function isFieldFilled(key, form) {
-  if (key === "availableDays") return (form.availableDays || []).length > 0;
   return typeof form[key] === "string" ? form[key].trim() !== "" : !!form[key];
 }
 
-export default function CaretakerOnboardingPage() {
+export default function ResearcherOnboardingPage() {
   const navigate = useNavigate();
   const { refetch } = useAuth();
 
   const [form, setForm] = useState({
+    title: "",
     credentials: "",
+    organization: "",
+    department: "",
     specialty: "",
     bio: "",
-    workingHoursStart: "09:00",
-    workingHoursEnd: "17:00",
-    contactPreference: "email",
-    availableDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
   });
 
   const [touched, setTouched] = useState(false);
@@ -138,14 +128,13 @@ export default function CaretakerOnboardingPage() {
 
     setSaving(true);
     try {
-      await api.caretakerUpdateProfile({
-        credentials: form.credentials,
+      await api.researcherUpdateProfile({
+        title: form.title,
+        credentials: form.credentials || null,
+        organization: form.organization,
+        department: form.department,
         specialty: form.specialty || null,
         bio: form.bio || null,
-        working_hours_start: form.workingHoursStart,
-        working_hours_end: form.workingHoursEnd,
-        contact_preference: form.contactPreference,
-        available_days: form.availableDays,
       });
       await refetch();
       setSuccess(true);
@@ -170,12 +159,12 @@ export default function CaretakerOnboardingPage() {
               </svg>
             </div>
             <h2 className="text-2xl font-bold text-slate-800 mb-2">You're all set!</h2>
-            <p className="text-slate-500 mb-1">Your caretaker profile has been saved.</p>
+            <p className="text-slate-500 mb-1">Your researcher profile has been saved.</p>
             <p className="text-sm text-slate-400 mb-8">
               You can update these details anytime from your Profile page.
             </p>
             <button
-              onClick={() => navigate("/caretaker", { replace: true })}
+              onClick={() => navigate("/researcher", { replace: true })}
               className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors shadow-sm"
             >
               Go to Dashboard
@@ -198,15 +187,14 @@ export default function CaretakerOnboardingPage() {
           <div className="text-center mb-6">
             <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-3">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="8.5" cy="7" r="4" />
-                <line x1="20" y1="8" x2="20" y2="14" />
-                <line x1="23" y1="11" x2="17" y2="11" />
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
               </svg>
             </div>
             <h2 className="text-xl font-bold text-slate-800 mb-1">Complete Your Profile</h2>
             <p className="text-sm text-slate-500">
-              Let participants know how to reach you and when you're available.
+              Help your team and participants know who you are.
             </p>
           </div>
 
@@ -262,32 +250,52 @@ export default function CaretakerOnboardingPage() {
             </div>
           )}
 
-          {/* ═══ Professional Info ═══ */}
-          <div className="border border-slate-100 rounded-xl p-5 mb-5">
+          {/* ═══ Academic / Professional Info ═══ */}
+          <div className="border border-slate-100 rounded-xl p-5 mb-6">
             <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-4">
-              Professional Information
+              Academic Information
             </p>
 
-            <Field
-              id="field-credentials"
-              label="License / Credentials"
-              required
-              missing={isMissing("credentials")}
-              shake={isShaking("credentials")}
-              hint="e.g. RN, MD, CSEP-CEP — displayed next to your name"
-            >
+            <Field id="field-title" label="Title" required missing={isMissing("title")} shake={isShaking("title")}>
+              <ChipSelect
+                options={["Dr.", "Prof.", "Mr.", "Ms.", "Mx."]}
+                value={form.title}
+                onChange={set("title")}
+              />
+            </Field>
+
+            <Field id="field-credentials" label="Credentials" hint="Displayed next to your name on participant-facing pages">
               <input
-                className={isMissing("credentials") ? "w-full px-3.5 py-2.5 bg-rose-50/50 border border-rose-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-400 focus:border-transparent transition-shadow placeholder-slate-400" : inputCls}
-                placeholder="e.g. RN, MD, CSEP-CEP"
+                className={inputCls}
+                placeholder="e.g. PhD, MSc, MD"
                 value={form.credentials}
                 onChange={setInput("credentials")}
               />
             </Field>
 
-            <Field id="field-specialty" label="Specialty / Focus Area">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field id="field-organization" label="Organization" required missing={isMissing("organization")} shake={isShaking("organization")}>
+                <input
+                  className={isMissing("organization") ? inputClsError : inputCls}
+                  placeholder="e.g. UPEI Faculty of Science"
+                  value={form.organization}
+                  onChange={setInput("organization")}
+                />
+              </Field>
+              <Field id="field-department" label="Department" required missing={isMissing("department")} shake={isShaking("department")}>
+                <input
+                  className={isMissing("department") ? inputClsError : inputCls}
+                  placeholder="e.g. Applied Human Sciences"
+                  value={form.department}
+                  onChange={setInput("department")}
+                />
+              </Field>
+            </div>
+
+            <Field id="field-specialty" label="Research Specialty / Focus Area">
               <input
                 className={inputCls}
-                placeholder="e.g. Mental Health, Sports Medicine, Chronic Disease"
+                placeholder="e.g. Community Health, Chronic Disease Management"
                 value={form.specialty}
                 onChange={setInput("specialty")}
               />
@@ -297,60 +305,12 @@ export default function CaretakerOnboardingPage() {
               <textarea
                 className={`${inputCls} resize-none`}
                 rows={3}
-                placeholder="Tell participants about your background and approach..."
+                placeholder="Tell participants and colleagues about your research background..."
                 value={form.bio}
                 onChange={setInput("bio")}
                 maxLength={500}
               />
               <p className="text-xs text-slate-400 mt-1 text-right">{form.bio.length}/500</p>
-            </Field>
-          </div>
-
-          {/* ═══ Availability ═══ */}
-          <div className="border border-slate-100 rounded-xl p-5 mb-6">
-            <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-4">
-              Availability &amp; Contact
-            </p>
-
-            <Field id="field-workingHours" label="Working Hours">
-              <div className="flex items-center gap-3">
-                <input
-                  type="time"
-                  value={form.workingHoursStart}
-                  onChange={setInput("workingHoursStart")}
-                  className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-shadow"
-                />
-                <span className="text-xs text-slate-400 font-medium">to</span>
-                <input
-                  type="time"
-                  value={form.workingHoursEnd}
-                  onChange={setInput("workingHoursEnd")}
-                  className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-shadow"
-                />
-              </div>
-            </Field>
-
-            <Field id="field-contactPreference" label="Preferred Contact Method">
-              <ChipSelect
-                options={["Email", "Phone", "Either"]}
-                value={form.contactPreference.charAt(0).toUpperCase() + form.contactPreference.slice(1)}
-                onChange={(v) => set("contactPreference")(v.toLowerCase())}
-              />
-            </Field>
-
-            <Field
-              id="field-availableDays"
-              label="Available Days"
-              required
-              missing={isMissing("availableDays")}
-              shake={isShaking("availableDays")}
-            >
-              <ChipSelect
-                options={["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
-                value={form.availableDays}
-                onChange={set("availableDays")}
-                multi
-              />
             </Field>
           </div>
 

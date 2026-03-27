@@ -3,7 +3,7 @@ Authentication Routes
 """
 from fastapi import APIRouter, HTTPException, status, Response, Depends, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import User, GroupMember, ParticipantProfile
+from app.db.models import User, GroupMember, ParticipantProfile, ResearcherProfile
 from sqlalchemy import select
 from datetime import datetime, timezone
 from app.db.session import get_db
@@ -113,6 +113,9 @@ async def register(
                 participant_id=participant.participant_id,
             ))
 
+    elif role.role_name == "researcher":
+        db.add(ResearcherProfile(user_id=new_user.user_id))
+
     await db.commit()
 
     await write_audit_log(
@@ -196,6 +199,8 @@ async def get_current_user(
         onboarding_completed = user.admin_profile.onboarding_completed if user.admin_profile else False
     elif any(r == "caretaker" for r in user_roles):
         onboarding_completed = user.caretaker_profile.onboarding_completed if user.caretaker_profile else False
+    elif any(r == "researcher" for r in user_roles):
+        onboarding_completed = user.researcher_profile.onboarding_completed if user.researcher_profile else False
 
     return {
         "user_id": str(user.user_id),

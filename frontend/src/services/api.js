@@ -301,6 +301,14 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  researcherGetProfile: () => request("/researcher/profile"),
+
+  researcherUpdateProfile: (payload) =>
+    request("/researcher/profile", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
   // Groups
   caretakerGetGroups: () => request("/caretaker/groups"),
 
