@@ -194,12 +194,19 @@ async def get_current_user(
     onboarding_completed = None
     if any(r == "admin" for r in user_roles):
         onboarding_completed = user.admin_profile.onboarding_completed if user.admin_profile else False
+    elif any(r == "caretaker" for r in user_roles):
+        onboarding_completed = user.caretaker_profile.onboarding_completed if user.caretaker_profile else False
 
     return {
         "user_id": str(user.user_id),
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
+        "username": user.username,
+        "phone": user.phone,
+        "address": user.Address,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         "Role": user_roles,
         "intake_completed": intake_completed,
         "onboarding_completed": onboarding_completed,

@@ -1,5 +1,5 @@
 """
-Onboarding routes — intake form discovery and submission.
+Onboarding routes — intake form discovery and submission, consent, background info.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,13 +8,29 @@ from sqlalchemy.orm import selectinload
 from datetime import datetime, date
 
 from app.db.session import get_db
-from app.core.dependency import check_current_user
+from app.core.dependency import check_current_user, require_permissions
+from app.core.permissions import ONBOARDING_READ, ONBOARDING_SUBMIT, ONBOARDING_EDIT
 from app.db.models import (
     User, SurveyForm, FormField, FormSubmission,
     ParticipantProfile, FieldElementMap, HealthDataPoint
 )
 from app.services.participant_survey_service import _get_participant, _build_answer_records, _apply_transform
-from app.schemas.onboarding_schema import IntakeSubmission
+from app.services.onboarding_service import (
+    get_active_consent_template,
+    get_active_background_template,
+    get_onboarding_status,
+    mark_background_read,
+    submit_consent,
+    complete_onboarding,
+    update_consent_template,
+    update_background_template,
+)
+from app.schemas.onboarding_schema import (
+    IntakeSubmission,
+    ConsentSubmitIn,
+    ConsentTemplateUpdateIn,
+    BackgroundInfoUpdateIn,
+)
 
 router = APIRouter()
 
@@ -149,3 +165,146 @@ async def submit_intake(
 
     await db.commit()
     return {"message": "Intake submitted successfully.", "submission_id": str(submission.submission_id)}
+
+
+# ── Consent & Background Info ──────────────────────────────────────────────────
+
+@router.get("/consent-form", dependencies=[Depends(require_permissions(ONBOARDING_READ))])
+async def get_consent_form(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Return the active consent form template."""
+    template = await get_active_consent_template(db)
+    if not template:
+        raise HTTPException(status_code=404, detail="No active consent form template found.")
+    return {
+        "template_id": str(template.template_id),
+        "version": template.version,
+        "title": template.title,
+        "subtitle": template.subtitle,
+        "items": template.items,
+        "is_active": template.is_active,
+        "created_at": template.created_at,
+    }
+
+
+@router.get("/background-info", dependencies=[Depends(require_permissions(ONBOARDING_READ))])
+async def get_background_info(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Return the active background info template."""
+    template = await get_active_background_template(db)
+    if not template:
+        raise HTTPException(status_code=404, detail="No active background info template found.")
+    return {
+        "template_id": str(template.template_id),
+        "version": template.version,
+        "title": template.title,
+        "subtitle": template.subtitle,
+        "sections": template.sections,
+        "is_active": template.is_active,
+        "created_at": template.created_at,
+    }
+
+
+@router.get("/status", dependencies=[Depends(require_permissions(ONBOARDING_READ))])
+async def get_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Return the current participant's onboarding status."""
+    status = await get_onboarding_status(current_user.user_id, db)
+    return {"onboarding_status": status}
+
+
+@router.post("/background-read", dependencies=[Depends(require_permissions(ONBOARDING_SUBMIT))])
+async def background_read(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Mark the background info as read (advances status from PENDING → BACKGROUND_READ)."""
+    try:
+        await mark_background_read(current_user.user_id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"message": "Background info marked as read."}
+
+
+@router.post("/consent", dependencies=[Depends(require_permissions(ONBOARDING_SUBMIT))])
+async def submit_consent_route(
+    payload: ConsentSubmitIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Submit consent form answers and signature (advances status → CONSENT_GIVEN)."""
+    participant = await _get_participant(current_user.user_id, db)
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant profile not found.")
+
+    template = await get_active_consent_template(db)
+    if not template:
+        raise HTTPException(status_code=404, detail="No active consent form template found.")
+
+    try:
+        consent = await submit_consent(
+            participant_id=participant.participant_id,
+            template_id=template.template_id,
+            answers=payload.answers,
+            signature=payload.signature,
+            db=db,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"message": "Consent submitted.", "consent_id": str(consent.consent_id)}
+
+
+@router.post("/complete", dependencies=[Depends(require_permissions(ONBOARDING_SUBMIT))])
+async def complete_onboarding_route(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Complete onboarding (advances status from CONSENT_GIVEN → COMPLETED)."""
+    try:
+        await complete_onboarding(current_user.user_id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"message": "Onboarding completed."}
+
+
+# ── Admin endpoints ────────────────────────────────────────────────────────────
+
+@router.put("/admin/consent-template", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
+async def update_consent_template_route(
+    payload: ConsentTemplateUpdateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Create a new version of the consent form template (deactivates previous)."""
+    template = await update_consent_template(
+        items=payload.items,
+        title=payload.title,
+        subtitle=payload.subtitle,
+        admin_user_id=current_user.user_id,
+        db=db,
+    )
+    return {"message": "Consent template updated.", "version": template.version, "template_id": str(template.template_id)}
+
+
+@router.put("/admin/background-template", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
+async def update_background_template_route(
+    payload: BackgroundInfoUpdateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Create a new version of the background info template (deactivates previous)."""
+    template = await update_background_template(
+        sections=payload.sections,
+        title=payload.title,
+        subtitle=payload.subtitle,
+        admin_user_id=current_user.user_id,
+        db=db,
+    )
+    return {"message": "Background template updated.", "version": template.version, "template_id": str(template.template_id)}

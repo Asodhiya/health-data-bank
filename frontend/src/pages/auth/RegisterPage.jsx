@@ -45,6 +45,7 @@ export default function RegisterPage() {
     username:         '',
     phone:            '',
     phoneDisplay:     '',
+    address:          '',
     password:         '',
     confirm_password: '',
   });
@@ -97,6 +98,10 @@ export default function RegisterPage() {
       setError('Phone number must be exactly 10 digits');
       return;
     }
+    if (!form.address.trim()) {
+      setError('Address is required');
+      return;
+    }
 
     setLoading(true);
     try {
@@ -106,6 +111,7 @@ export default function RegisterPage() {
         email:            form.email,
         username:         form.username,
         phone:            form.phone,
+        address:          form.address,
         password:         form.password,
         confirm_password: form.confirm_password,
       });
@@ -249,6 +255,23 @@ export default function RegisterPage() {
               {phoneHint.text}
             </p>
           )}
+        </div>
+
+        {/* Address */}
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </span>
+          <input
+            className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+            placeholder="Address"
+            value={form.address}
+            onChange={set('address')}
+            required
+          />
         </div>
 
         <hr className="border-slate-100 my-1" />

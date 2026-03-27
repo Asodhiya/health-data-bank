@@ -165,7 +165,8 @@ export default function CaretakerOnboardingPage() {
       department: form.department,
       specialty: form.specialty || null,
       bio: form.bio || null,
-      working_hours: { start: form.workingHoursStart, end: form.workingHoursEnd },
+      working_hours_start: form.workingHoursStart,
+      working_hours_end: form.workingHoursEnd,
       contact_preference: form.contactPreference,
       available_days: form.availableDays,
     };
