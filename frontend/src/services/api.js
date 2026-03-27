@@ -85,6 +85,11 @@ export const api = {
       method: "POST",
     }),
 
+  unpublishFormFromGroup: (formId, groupId) =>
+    request(`/form_management/${formId}/unpublish/${groupId}`, {
+      method: "POST",
+    }),
+
   getFormDeployments: (formId) =>
     request(`/form_management/${formId}/deployments`),
 
@@ -423,18 +428,27 @@ export const api = {
   getAvailableSurveys: () => request("/researcher/query/available-surveys"),
 
   getResearcherResults: (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
+    const sp = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((v) => sp.append(key, v));
+      } else {
+        sp.append(key, value);
+      }
+    });
+    const qs = sp.toString();
     return request(`/researcher/query/results${qs ? `?${qs}` : ""}`);
   },
 
-  downloadResearcherResults: async (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
+  // 3. Generate the CSV file download URL
+  // We don't use the standard request() here because we need to handle a file Blob, not JSON!
+  downloadResearcherResults: async (params = {}, excludeColumns = []) => {
+    const allParams = { ...params };
+    if (excludeColumns.length > 0) allParams.exclude_columns = excludeColumns.join(",");
+    const qs = new URLSearchParams(allParams).toString();
     const res = await fetch(
       `${API_BASE}/researcher/query/results/download${qs ? `?${qs}` : ""}`,
-      {
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-      },
+      { credentials: "include" },
     );
 
     if (!res.ok) throw new Error("Failed to download CSV");
@@ -447,6 +461,7 @@ export const api = {
     document.body.appendChild(a);
     a.click();
     a.remove();
+    window.URL.revokeObjectURL(url);
   },
 
   // ── Goal Templates (Researcher) ──

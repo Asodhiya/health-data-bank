@@ -51,6 +51,7 @@ class SurveyDetailOut(BaseModel):
     status: Optional[str] = None
     created_at: Optional[datetime] = None
     fields: List[FormFieldOut] = []
+    deployed_group_ids: List[UUID] = []
 
     class Config:
         from_attributes = True
@@ -63,7 +64,9 @@ class SurveyListItem(BaseModel):
     created_at: Optional[datetime] = None
     due_date: Optional[datetime] = None
     deployment_id: Optional[UUID] = None
-    fields: List[FormFieldOut] = []
+    field_count: int = 0
+    deployed_groups: List[str] = []
+    deployed_group_ids: List[UUID] = []
 
     class Config:
         from_attributes = True
