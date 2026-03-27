@@ -442,8 +442,10 @@ export const api = {
 
   // 3. Generate the CSV file download URL
   // We don't use the standard request() here because we need to handle a file Blob, not JSON!
-  downloadResearcherResults: async (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
+  downloadResearcherResults: async (params = {}, excludeColumns = []) => {
+    const allParams = { ...params };
+    if (excludeColumns.length > 0) allParams.exclude_columns = excludeColumns.join(",");
+    const qs = new URLSearchParams(allParams).toString();
     const res = await fetch(
       `${API_BASE}/researcher/query/results/download${qs ? `?${qs}` : ""}`,
       { credentials: "include" },
