@@ -365,14 +365,18 @@ export default function ResearcherDashboard() {
   };
 
   const applyFilters = () => {
+    // Survey selected but all groups deselected — nothing can match
+    if (filters.survey_id && availableGroups.length > 0 && filters.group_ids.length === 0) {
+      setQueryData({ columns: [], data: [] });
+      return;
+    }
+
     setFiltering(true);
     const activeFilters = {};
 
     Object.entries(filters).forEach(([key, value]) => {
       if (key === "group_ids") {
-        if (value.length > 0) {
-          activeFilters.group_id = value.join(","); // 👈 LOOK HERE
-        }
+        if (value.length > 0) activeFilters.group_ids = value;
       } else if (value !== "" && value !== "all_time") {
         activeFilters[key] = value;
       }

@@ -2,13 +2,12 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     User, FormSubmission, ParticipantProfile, SurveyForm,
-    HealthDataPoint, DataElement, UserRole, Role,
+    HealthDataPoint, DataElement, UserRole, Role, FormDeployment, Group, GroupMember,
 )
 from app.schemas.filter_data_schema import ParticipantFilter
 from datetime import date, timedelta
 import csv
 import io
-import asyncio
 from typing import Optional, Set
 from starlette.responses import StreamingResponse
 
@@ -21,25 +20,38 @@ def calculate_age(born):
 
 
 async def get_available_surveys(db: AsyncSession):
-    """Fetches published forms, plus deleted forms that have at least one submission."""
-    published_stmt = select(SurveyForm).where(SurveyForm.status == 'PUBLISHED')
-    deleted_with_submissions_stmt = (
+    """Fetches published forms that have at least one completed submission."""
+    published_stmt = (
         select(SurveyForm)
-        .where(SurveyForm.status == 'DELETED')
+        .where(SurveyForm.status == 'PUBLISHED')
         .where(
             select(func.count(FormSubmission.submission_id))
-            .where(FormSubmission.form_id == SurveyForm.form_id)
+            .where(
+                FormSubmission.form_id == SurveyForm.form_id,
+                FormSubmission.submitted_at.is_not(None),
+            )
             .correlate(SurveyForm)
             .scalar_subquery() > 0
         )
     )
 
-    published_result, deleted_result = await asyncio.gather(
-        db.execute(published_stmt),
-        db.execute(deleted_with_submissions_stmt),
-    )
+    published_result = await db.execute(published_stmt)
+    forms = published_result.scalars().all()
 
-    return published_result.scalars().all() + deleted_result.scalars().all()
+    if forms:
+        form_ids = [f.form_id for f in forms]
+        dep_result = await db.execute(
+            select(FormDeployment.form_id, Group.name)
+            .join(Group, Group.group_id == FormDeployment.group_id)
+            .where(FormDeployment.form_id.in_(form_ids))
+        )
+        group_map: dict = {}
+        for fid, gname in dep_result.all():
+            group_map.setdefault(fid, []).append(gname)
+        for form in forms:
+            form.deployed_groups = group_map.get(form.form_id, [])
+
+    return forms
 
 
 async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, filters: ParticipantFilter = None):
@@ -85,26 +97,39 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
             )
             .select_from(User)
             .join(ParticipantProfile, User.user_id == ParticipantProfile.user_id)
-            .join(HealthDataPoint, ParticipantProfile.participant_id == HealthDataPoint.participant_id)
+            .join(
+                FormSubmission,
+                and_(
+                    FormSubmission.participant_id == ParticipantProfile.participant_id,
+                    FormSubmission.form_id == survey_id,
+                    FormSubmission.submitted_at.is_not(None),
+                )
+            )
+            .join(
+                HealthDataPoint,
+                and_(
+                    HealthDataPoint.participant_id == ParticipantProfile.participant_id,
+                    HealthDataPoint.source_submission_id == FormSubmission.submission_id,
+                )
+            )
             .join(DataElement, HealthDataPoint.element_id == DataElement.element_id)
             .where(User.user_id.in_(participant_role_filter))
         )
     else:
+        has_submission = (
+            select(FormSubmission.participant_id)
+            .where(FormSubmission.submitted_at.is_not(None))
+            .scalar_subquery()
+        )
         stmt = (
             select(*demographic_columns)
             .select_from(User)
             .join(ParticipantProfile, User.user_id == ParticipantProfile.user_id)
             .where(User.user_id.in_(participant_role_filter))
+            .where(ParticipantProfile.participant_id.in_(has_submission))
         )
 
     conditions = []
-
-    if survey_id:
-        # Only include health data points that came from this survey's submissions
-        submission_ids = select(FormSubmission.submission_id).where(
-            FormSubmission.form_id == survey_id
-        )
-        conditions.append(HealthDataPoint.source_submission_id.in_(submission_ids))
 
     if filters:
         if filters.gender:
@@ -125,8 +150,14 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
             conditions.append(func.lower(ParticipantProfile.marital_status) == filters.marital_status.lower())
         if filters.status:
             conditions.append(User.status == (filters.status.lower() == 'active'))
-        if filters.group_id:
-            pass  # TODO: join GroupMembership when group support is added
+        if filters.group_ids:
+            conditions.append(
+                ParticipantProfile.participant_id.in_(
+                    select(GroupMember.participant_id).where(
+                        GroupMember.group_id.in_(filters.group_ids)
+                    )
+                )
+            )
         if filters.age_min:
             max_dob = date.today() - timedelta(days=filters.age_min * 365.25)
             conditions.append(ParticipantProfile.dob <= max_dob)

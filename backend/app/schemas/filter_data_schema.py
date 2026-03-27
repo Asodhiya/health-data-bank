@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from uuid import UUID
 from datetime import datetime
 
@@ -9,6 +9,7 @@ class AvailableSurvey(BaseModel):
     title: str
     description: Optional[str] = None
     status: str
+    deployed_groups: list[str] = []
 
     class Config:
         from_attributes = True
@@ -54,7 +55,7 @@ class ParticipantFilter(BaseModel):
     age_min: Optional[int] = None
     age_max: Optional[int] = None
     status: Optional[str] = None
-    group_id: Optional[UUID] = None
+    group_ids: List[UUID] = []
     search: Optional[str] = None
     survey_id: Optional[str] = None
 

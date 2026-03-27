@@ -428,7 +428,15 @@ export const api = {
   getAvailableSurveys: () => request("/researcher/query/available-surveys"),
 
   getResearcherResults: (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
+    const sp = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((v) => sp.append(key, v));
+      } else {
+        sp.append(key, value);
+      }
+    });
+    const qs = sp.toString();
     return request(`/researcher/query/results${qs ? `?${qs}` : ""}`);
   },
 

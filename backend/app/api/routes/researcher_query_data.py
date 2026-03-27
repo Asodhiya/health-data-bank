@@ -10,18 +10,30 @@ from app.services.filter_data_service import get_survey_results_pivoted, get_ava
 router = APIRouter()
 
 @router.get("/results", dependencies=[Depends(require_permissions(FORM_VIEW))])
-async def get_survey_results(survey_id: Optional[str] = Query(None, description="ID of the survey to fetch results for"),filters: ParticipantFilter = Depends(),db: AsyncSession = Depends(get_db)):
+async def get_survey_results(
+    survey_id: Optional[str] = Query(None, description="ID of the survey to fetch results for"),
+    group_ids: List[str] = Query(default=[]),
+    filters: ParticipantFilter = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
     """uses a survey_id to load in the submissions of the participants"""
+    if group_ids:
+        from uuid import UUID as _UUID
+        filters.group_ids = [_UUID(g) for g in group_ids]
     return await get_survey_results_pivoted(db, survey_id, filters)
 
 @router.get("/results/download", dependencies=[Depends(require_permissions(FORM_VIEW))])
 async def download_survey_results_csv(
     survey_id: Optional[str] = Query(None),
     exclude_columns: Optional[str] = Query(None, description="Comma-separated column IDs to exclude"),
+    group_ids: List[str] = Query(default=[]),
     filters: ParticipantFilter = Depends(),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Download survey results as a UTF-8 CSV file, respecting hidden columns."""
+    if group_ids:
+        from uuid import UUID as _UUID
+        filters.group_ids = [_UUID(g) for g in group_ids]
     excluded = set(exclude_columns.split(",")) if exclude_columns else set()
     return await export_survey_results_csv(db, survey_id, filters, excluded)
 

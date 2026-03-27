@@ -148,7 +148,10 @@ async def update_survey_form(form_id: UUID, form_data: SurveyCreate, db: AsyncSe
         raise HTTPException(status_code=400, detail="Published forms cannot be edited. Unpublish the form first.")
 
     sub_check = await db.execute(
-        select(FormSubmission.submission_id).where(FormSubmission.form_id == form_id).limit(1)
+        select(FormSubmission.submission_id).where(
+            FormSubmission.form_id == form_id,
+            FormSubmission.submitted_at.is_not(None),
+        ).limit(1)
     )
     if sub_check.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="This form has existing submissions and cannot be edited.")
@@ -202,7 +205,10 @@ async def delete_survey_form(form_id: UUID, db: AsyncSession):
         raise HTTPException(status_code=404, detail="Form not found.")
 
     sub_check = await db.execute(
-        select(FormSubmission.submission_id).where(FormSubmission.form_id == form_id).limit(1)
+        select(FormSubmission.submission_id).where(
+            FormSubmission.form_id == form_id,
+            FormSubmission.submitted_at.is_not(None),
+        ).limit(1)
     )
     has_submissions = sub_check.scalar_one_or_none() is not None
 
