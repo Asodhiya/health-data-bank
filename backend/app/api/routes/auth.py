@@ -104,10 +104,11 @@ async def register(
 
     if role.role_name == "participant" and invite.group_id:
         participant_profile = new_user.participant_profile
-        db.add(GroupMember(
-            group_id=invite.group_id,
-            participant_id=participant_profile.participant_id,
-        ))
+        if participant_profile:
+            db.add(GroupMember(
+                group_id=invite.group_id,
+                participant_id=participant_profile.participant_id,
+            ))
 
     await db.commit()
 
