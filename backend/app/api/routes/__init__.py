@@ -17,6 +17,7 @@ from app.api.routes import (
     goal_templates,
     Caretakers,
     onboarding,
+    researcher,
 )
 
 router = APIRouter()
@@ -34,4 +35,5 @@ router.include_router(stats.router, prefix="/stats", tags=["Stats"])
 router.include_router(data_elements.router, prefix="/data-elements", tags=["Data Elements"])
 router.include_router(goal_templates.router, prefix="/goal-templates", tags=["Goal Templates"])
 router.include_router(Caretakers.router, prefix="/caretaker", tags=["Caretaker"])
-router.include_router(onboarding.router, prefix="/participant/intake", tags=["Onboarding"])
+router.include_router(onboarding.router, prefix="/onboarding", tags=["Onboarding"])
+router.include_router(researcher.router, prefix="/researcher", tags=["Researcher"])

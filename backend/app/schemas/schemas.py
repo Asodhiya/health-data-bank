@@ -36,6 +36,7 @@ class UserSignup(BaseModel):
     password: str
     confirm_password: str
     phone: str
+    address: str
 
 class SurveyRequest(BaseModel):
     # If empty, sets default value to a dictionary

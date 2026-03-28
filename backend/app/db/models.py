@@ -234,7 +234,11 @@ class ParticipantProfile(Base):
     marital_status: Mapped[str | None] = mapped_column(Text)
     address: Mapped[str | None] = mapped_column(Text)
     program_enrolled_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
+    onboarding_status: Mapped[str | None] = mapped_column(Text, server_default=text("'PENDING'"))
     user = relationship("User", back_populates="participant_profile")
+    consents: Mapped[list["ParticipantConsent"]] = relationship(
+        "ParticipantConsent", back_populates="participant", cascade="all, delete-orphan"
+    )
 
 
 class CaretakerProfile(Base):
@@ -244,6 +248,15 @@ class CaretakerProfile(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
     title: Mapped[str | None] = mapped_column(Text)
     organization: Mapped[str | None] = mapped_column(Text)
+    credentials: Mapped[str | None] = mapped_column(Text)
+    department: Mapped[str | None] = mapped_column(Text)
+    specialty: Mapped[str | None] = mapped_column(Text)
+    bio: Mapped[str | None] = mapped_column(Text)
+    working_hours_start: Mapped[str | None] = mapped_column(Text)
+    working_hours_end: Mapped[str | None] = mapped_column(Text)
+    contact_preference: Mapped[str | None] = mapped_column(Text)
+    available_days: Mapped[list | None] = mapped_column(JSONB)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
     user = relationship("User", back_populates="caretaker_profile")
 
 
@@ -252,7 +265,13 @@ class ResearcherProfile(Base):
 
     researcher_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
+    title: Mapped[str | None] = mapped_column(Text)
+    credentials: Mapped[str | None] = mapped_column(Text)
+    organization: Mapped[str | None] = mapped_column(Text)
     department: Mapped[str | None] = mapped_column(Text)
+    specialty: Mapped[str | None] = mapped_column(Text)
+    bio: Mapped[str | None] = mapped_column(Text)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
     user = relationship("User", back_populates="researcher_profile")
 
 
@@ -261,6 +280,7 @@ class AdminProfile(Base):
 
     admin_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
+    title: Mapped[str | None] = mapped_column(Text)
     role_title: Mapped[str | None] = mapped_column(Text)
     department: Mapped[str | None] = mapped_column(Text)
     organization: Mapped[str | None] = mapped_column(Text)
@@ -537,6 +557,70 @@ class Notification(Base):
     source_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     read_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
+
+
+class ConsentFormTemplate(Base):
+    __tablename__ = "consent_form_template"
+
+    template_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    subtitle: Mapped[str | None] = mapped_column(Text)
+    items: Mapped[list] = mapped_column(JSONB, nullable=False)
+    is_active: Mapped[bool | None] = mapped_column(Boolean, server_default=text("TRUE"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+    consents: Mapped[list["ParticipantConsent"]] = relationship(
+        "ParticipantConsent", back_populates="template"
+    )
+
+
+class BackgroundInfoTemplate(Base):
+    __tablename__ = "background_info_template"
+
+    template_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    subtitle: Mapped[str | None] = mapped_column(Text)
+    sections: Mapped[list] = mapped_column(JSONB, nullable=False)
+    is_active: Mapped[bool | None] = mapped_column(Boolean, server_default=text("TRUE"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class ParticipantConsent(Base):
+    __tablename__ = "participant_consent"
+
+    consent_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    participant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("participant_profile.participant_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    template_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("consent_form_template.template_id"),
+        nullable=False,
+    )
+    answers: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    signature: Mapped[str] = mapped_column(Text, nullable=False)
+    consent_date: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    withdrawn_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+    participant: Mapped["ParticipantProfile"] = relationship("ParticipantProfile", back_populates="consents")
+    template: Mapped["ConsentFormTemplate"] = relationship("ConsentFormTemplate", back_populates="consents")
 
 
 class Reminder(Base):

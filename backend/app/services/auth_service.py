@@ -113,6 +113,7 @@ async def create_user_with_role(payload: UserSignup, role_name: str, db: AsyncSe
         first_name=payload.first_name,
         last_name=payload.last_name,
         phone=payload.phone,
+        Address=payload.address,
         status=True,
     )
 
