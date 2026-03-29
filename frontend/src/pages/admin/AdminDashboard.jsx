@@ -53,7 +53,8 @@ function getLogStyles(type) {
 
 export default function AdminDashboard() {
   const [showAllLogs, setShowAllLogs] = useState(false);
-  const [tableView, setTableView] = useState("caretakers");
+  const [tableView, setTableView] = useState("participants");
+  const [showAllUsers, setShowAllUsers] = useState(false);
   const navigate = useNavigate();
 
   const [logs, setLogs] = useState([]);
@@ -86,11 +87,15 @@ export default function AdminDashboard() {
       .finally(() => setBackupsLoading(false));
   }, []);
 
-  // Fetch groups + caretakers + users
+  // Fetch groups + caretakers + users (deduplicated)
   useEffect(() => {
     api.adminGetGroups().then(d => setGroups(Array.isArray(d) ? d : [])).catch(() => setGroups([]));
     api.adminGetCaretakers().then(d => setCaretakers(Array.isArray(d) ? d : [])).catch(() => setCaretakers([]));
-    api.adminListUsers().then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => setUsers([]));
+    api.adminListUsers().then(d => {
+      const arr = Array.isArray(d) ? d : [];
+      const seen = new Set();
+      setUsers(arr.filter(u => !seen.has(u.id) && seen.add(u.id)));
+    }).catch(() => setUsers([]));
   }, []);
 
   // ── Computed ──
@@ -98,18 +103,38 @@ export default function AdminDashboard() {
   const alertNeedleAngle = useMemo(() => -70 + (Math.min(failedLogins, 5) / 5) * 140, [failedLogins]);
   const alertDashOffset = useMemo(() => 125.6 * (1 - Math.min(failedLogins, 5) / 5), [failedLogins]);
 
+  // All role counts from the same users array — matches UserManagementPage
   const distributionData = useMemo(() => [
-    { name: "Groups", count: groups.length, color: "#3b82f6" },
-    { name: "Caretakers", count: caretakers.length, color: "#10b981" },
     { name: "Participants", count: users.filter(u => u.role === "participant").length, color: "#6366f1" },
+    { name: "Caretakers", count: users.filter(u => u.role === "caretaker").length, color: "#10b981" },
     { name: "Researchers", count: users.filter(u => u.role === "researcher").length, color: "#f59e0b" },
-  ], [groups, caretakers, users]);
+    { name: "Admins", count: users.filter(u => u.role === "admin").length, color: "#ef4444" },
+    { name: "Groups", count: groups.length, color: "#3b82f6" },
+  ], [groups, users]);
 
-  const totalUsers = users.length || (groups.length + caretakers.length);
+  const totalUsers = users.length;
 
   const roleBadge = (role) => {
     const s = { participant: "bg-blue-50 text-blue-600", caretaker: "bg-emerald-50 text-emerald-600", researcher: "bg-indigo-50 text-indigo-600", admin: "bg-rose-50 text-rose-600" };
     return s[role] || "bg-slate-50 text-slate-600";
+  };
+
+  // ── Users table: unified across all roles ──
+  const tableRoleKey = tableView === "admins" ? "admin" : tableView === "caretakers" ? "caretaker" : tableView === "researchers" ? "researcher" : "participant";
+
+  const tableRows = useMemo(() => {
+    return users.filter(u => u.role === tableRoleKey);
+  }, [tableRoleKey, users]);
+
+  const visibleRows = showAllUsers ? tableRows : tableRows.slice(0, 10);
+  const hasMoreRows = tableRows.length > 10;
+
+  // Column config per role
+  const col3Label = tableRoleKey === "caretaker" ? "Organization" : tableRoleKey === "participant" ? "Group" : "Role";
+  const getCol3 = (u) => {
+    if (tableRoleKey === "caretaker") return u.organization || "—";
+    if (tableRoleKey === "participant") return u.group || "—";
+    return tableRoleKey.charAt(0).toUpperCase() + tableRoleKey.slice(1);
   };
 
   return (
@@ -253,11 +278,11 @@ export default function AdminDashboard() {
               <h2 className="text-lg font-bold text-slate-800 group-hover:text-blue-700 transition-colors">Platform Overview</h2>
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-300 group-hover:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
             </div>
-            <p className="text-sm text-slate-500 mt-1">Groups & user allocation — click to manage users</p>
+            <p className="text-sm text-slate-500 mt-1">User distribution & groups — click to manage</p>
           </div>
           <div className="text-right">
             <p className="text-2xl font-extrabold text-blue-600">{totalUsers}</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Known Resources</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Total Users</p>
           </div>
         </div>
         <div className="h-64 w-full">
@@ -267,92 +292,66 @@ export default function AdminDashboard() {
               <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: "#64748b", fontSize: 12, fontWeight: 600 }} />
               <Tooltip cursor={{ fill: "transparent" }} contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)" }} />
               <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={20} className="cursor-pointer"
-                onClick={(data) => navigate("/users")}>
+                onClick={() => navigate("/users")}>
                 {distributionData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        {/* USERS TABLE — switchable by role */}
+        {/* USERS TABLE — switchable by role, 10-row cap */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mt-6">
           <div className="p-6 border-b border-slate-50 flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-bold text-slate-800">Users</h2>
-              <select value={tableView} onChange={e => setTableView(e.target.value)}
+              <select value={tableView} onChange={e => { setTableView(e.target.value); setShowAllUsers(false); }}
                 className="px-3 py-1.5 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-200">
                 <option value="participants">Participants</option>
                 <option value="caretakers">Caretakers</option>
                 <option value="researchers">Researchers</option>
+                <option value="admins">Admins</option>
               </select>
+              <span className="text-xs text-slate-400">{tableRows.length} total</span>
             </div>
             <button onClick={() => navigate("/users")} className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">Manage All Users →</button>
           </div>
 
-          {tableView === "caretakers" && (
+          <div className={showAllUsers && hasMoreRows ? "max-h-[32rem] overflow-auto" : ""}>
             <table className="w-full text-left border-collapse">
               <thead><tr className="bg-slate-50/50 text-[10px] uppercase tracking-widest text-slate-400 font-bold">
-                <th className="px-6 py-4">Full Name</th><th className="px-6 py-4">Email</th><th className="px-6 py-4">Organization</th><th className="px-6 py-4">Role</th>
+                <th className="px-6 py-4">Full Name</th>
+                <th className="px-6 py-4">Email</th>
+                <th className="px-6 py-4">{col3Label}</th>
+                <th className="px-6 py-4">Status</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-50">
-                {caretakers.length === 0 ? (
-                  <tr><td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-400">No caretakers registered yet. Send an invite from User Management.</td></tr>
-                ) : caretakers.map(c => (
-                  <tr key={c.caretaker_id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-6 py-4 text-sm font-bold text-slate-700">{c.title ? `${c.title} ` : ""}{c.name}</td>
-                    <td className="px-6 py-4 text-sm text-slate-500">{c.email || "—"}</td>
-                    <td className="px-6 py-4 text-sm text-slate-500">{c.organization || "—"}</td>
-                    <td className="px-6 py-4"><span className={`${roleBadge("caretaker")} px-2 py-1 rounded-md text-[10px] font-bold uppercase`}>Caretaker</span></td>
+                {tableRows.length === 0 ? (
+                  <tr><td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-400">No {tableView} registered yet. Send an invite from User Management.</td></tr>
+                ) : visibleRows.map(u => (
+                  <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-6 py-4 text-sm font-bold text-slate-700">
+                      {[u.first_name, u.last_name].filter(Boolean).join(" ") || "—"}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-500">{u.email || "—"}</td>
+                    <td className="px-6 py-4 text-sm text-slate-500">{getCol3(u)}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${u.status ? roleBadge(tableRoleKey) : "bg-slate-50 text-slate-400"}`}>
+                        {u.status ? "Active" : "Inactive"}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {hasMoreRows && (
+            <div className="px-6 py-3 border-t border-slate-100 text-center">
+              <button onClick={() => setShowAllUsers(!showAllUsers)} className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+                {showAllUsers ? "Show less" : `View all ${tableRows.length} ${tableView} →`}
+              </button>
+            </div>
           )}
-
-          {tableView === "participants" && (() => {
-            const participants = users.filter(u => u.role === "participant");
-            return (
-              <table className="w-full text-left border-collapse">
-                <thead><tr className="bg-slate-50/50 text-[10px] uppercase tracking-widest text-slate-400 font-bold">
-                  <th className="px-6 py-4">Full Name</th><th className="px-6 py-4">Email</th><th className="px-6 py-4">Group</th><th className="px-6 py-4">Status</th>
-                </tr></thead>
-                <tbody className="divide-y divide-slate-50">
-                  {participants.length === 0 ? (
-                    <tr><td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-400">No participants registered yet.</td></tr>
-                  ) : participants.map(u => (
-                    <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-6 py-4 text-sm font-bold text-slate-700">{[u.first_name, u.last_name].filter(Boolean).join(" ") || "—"}</td>
-                      <td className="px-6 py-4 text-sm text-slate-500">{u.email}</td>
-                      <td className="px-6 py-4 text-sm text-slate-500">{u.group || "—"}</td>
-                      <td className="px-6 py-4"><span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${u.status ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"}`}>{u.status ? "Active" : "Inactive"}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            );
-          })()}
-
-          {tableView === "researchers" && (() => {
-            const researchers = users.filter(u => u.role === "researcher");
-            return (
-              <table className="w-full text-left border-collapse">
-                <thead><tr className="bg-slate-50/50 text-[10px] uppercase tracking-widest text-slate-400 font-bold">
-                  <th className="px-6 py-4">Full Name</th><th className="px-6 py-4">Email</th><th className="px-6 py-4">Status</th>
-                </tr></thead>
-                <tbody className="divide-y divide-slate-50">
-                  {researchers.length === 0 ? (
-                    <tr><td colSpan={3} className="px-6 py-8 text-center text-sm text-slate-400">No researchers registered yet.</td></tr>
-                  ) : researchers.map(u => (
-                    <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-6 py-4 text-sm font-bold text-slate-700">{[u.first_name, u.last_name].filter(Boolean).join(" ") || "—"}</td>
-                      <td className="px-6 py-4 text-sm text-slate-500">{u.email}</td>
-                      <td className="px-6 py-4"><span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${u.status ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"}`}>{u.status ? "Active" : "Inactive"}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            );
-          })()}
         </div>
       </div>
 

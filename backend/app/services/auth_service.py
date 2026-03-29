@@ -17,6 +17,7 @@ LOCKOUT_DURATION_MINUTES = 15
 
 async def authenticate_user(identifier: str, password: str, db: AsyncSession):
     """Checks email or username and password if in db or not"""
+    identifier = identifier.strip()
     res = await db.execute(
         select(User).where(
             (User.email == identifier) | (User.username == identifier)
