@@ -232,10 +232,10 @@ export const api = {
     }),
 
   // ── Intake (onboarding) ──
-  getIntakeForm: () => request('/participant/intake/form'),
+  getIntakeForm: () => request('/onboarding/form'),
 
   submitIntake: (payload) =>
-    request('/participant/intake', {
+    request('/onboarding', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
@@ -297,6 +297,14 @@ export const api = {
 
   caretakerUpdateProfile: (payload) =>
     request("/caretaker/profile", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  researcherGetProfile: () => request("/researcher/profile"),
+
+  researcherUpdateProfile: (payload) =>
+    request("/researcher/profile", {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),

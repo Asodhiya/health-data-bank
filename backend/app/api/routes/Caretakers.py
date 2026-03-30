@@ -20,10 +20,57 @@ from app.schemas.caretaker_response_schema import (
     ReportGenerateRequest, ReportResponse, ReportListItem,
     SubmissionListItem, SubmissionDetailItem, SubmissionAnswerItem,
     NotificationItem,
+    CaretakerProfileUpdate, CaretakerProfileOut,
 )
 from app.db.queries.Queries import CaretakersQuery
+from app.db.models import CaretakerProfile
+from sqlalchemy import select
 
 router = APIRouter()
+
+
+# ── Profile ───────────────────────────────────────────────────────────────────
+
+@router.get("/profile", response_model=CaretakerProfileOut)
+async def get_caretaker_profile(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    result = await db.execute(
+        select(CaretakerProfile).where(CaretakerProfile.user_id == current_user.user_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        profile = CaretakerProfile(user_id=current_user.user_id)
+        db.add(profile)
+        await db.commit()
+        await db.refresh(profile)
+    return profile
+
+
+@router.patch("/profile", response_model=CaretakerProfileOut)
+async def update_caretaker_profile(
+    payload: CaretakerProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    result = await db.execute(
+        select(CaretakerProfile).where(CaretakerProfile.user_id == current_user.user_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        profile = CaretakerProfile(user_id=current_user.user_id)
+        db.add(profile)
+
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(profile, field, value)
+
+    if not profile.onboarding_completed:
+        profile.onboarding_completed = True
+
+    await db.commit()
+    await db.refresh(profile)
+    return profile
 
 
 # ── Groups ────────────────────────────────────────────────────────────────────

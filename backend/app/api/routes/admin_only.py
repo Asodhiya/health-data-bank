@@ -20,7 +20,7 @@ router = APIRouter()
 
 # ── Existing role/permission endpoints ──────────────────────────────────────
 
-@router.post("/add_roles")
+@router.post("/add_roles", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def add_roles(Payload: Role_schema, db: AsyncSession = Depends(get_db)):
     role = await addroles(Payload, db)
     return role
@@ -32,19 +32,19 @@ async def view_roles(db: AsyncSession = Depends(get_db)):
     return roles
 
 
-@router.post("/post_permission")
+@router.post("/post_permission", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def post_permission(Payload: Permissions_schema, db: AsyncSession = Depends(get_db)):
     user_role = await add_permissions(Payload, db)
     return user_role
 
 
-@router.post("/linkrole")
+@router.post("/linkrole", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def give_role(Payload: Role_user_link, db: AsyncSession = Depends(get_db)):
     userrole = await link_user_roles(Payload, db)
     return userrole
 
 
-@router.post("/linkpermission")
+@router.post("/linkpermission", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def role_permission(Payload: Link_role_permission_schema, db: AsyncSession = Depends(get_db)):
     role_perm = await link_role_permisson(Payload, db)
     return role_perm
@@ -52,14 +52,13 @@ async def role_permission(Payload: Link_role_permission_schema, db: AsyncSession
 
 # ── Audit / Activity Log endpoint ────────────────────────────────────────────
 
-@router.get("/audit-logs")
+@router.get("/audit-logs", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def get_audit_logs(
     limit: int = Query(default=20, ge=1, le=100, description="Number of records to return"),
     offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     action: Optional[str] = Query(default=None, description="Filter by action e.g. LOGIN_FAILED"),
     db: AsyncSession = Depends(get_db),
-    # Uncomment once 'audit:read' permission is seeded in the DB:
-    # _: None = Depends(require_permissions("audit:read")),
+    # TODO: replace ROLE_READ_ALL with require_permissions("audit:read") once that permission is seeded in the DB
 ):
     """
     Return paginated audit log entries, newest first.

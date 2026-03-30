@@ -41,6 +41,7 @@ import SystemSettingsPage from "./pages/admin/SystemSettingsPage";
 import AdminOnboardingPage from "./pages/admin/AdminOnboardingPage";
 
 // --- Researcher pages ---
+import ResearcherOnboardingPage from "./pages/researcher/ResearcherOnboardingPage";
 import DataElementManager from "./pages/researcher/DataElementMangaer";
 import Groups from "./pages/researcher/Group_Chorts";
 import GoalTemplates from "./pages/researcher/GoalTemplates";
@@ -136,6 +137,11 @@ function App() {
             />
             <Route path="/caretaker/reports" element={<ReportsPage />} />
           </Route>
+        </Route>
+
+        {/* ── Researcher onboarding (separate wrapper to avoid redirect loop) ── */}
+        <Route element={<ResearcherRoute allowOnboarding />}>
+          <Route path="/researcher/onboarding" element={<ResearcherOnboardingPage />} />
         </Route>
 
         {/* ── Researcher ── */}
