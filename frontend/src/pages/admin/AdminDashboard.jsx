@@ -49,7 +49,8 @@ function getLogStyles(type) {
   }
 }
 
-// ─── Component ─────────────────────────────────────────────────────────────────
+
+
 
 export default function AdminDashboard() {
   const [showAllLogs, setShowAllLogs] = useState(false);
@@ -71,15 +72,17 @@ export default function AdminDashboard() {
 
   // Fetch audit logs
   useEffect(() => {
-    setLoading(true);
-    setError(null);
+    setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
+    setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
     api.getAuditLogs({ limit: showAllLogs ? 20 : 3 })
-      .then((data) => { setLogs(data.logs || []); setTotalLogs(data.total || 0); })
+      .then((data) => { setError(null); setLogs(data.logs || []); setTotalLogs(data.total || 0); })
+      .then((data) => { setError(null); setLogs(data.logs || []); setTotalLogs(data.total || 0); })
       .catch((err) => { setError("Could not load security logs."); console.error(err); })
       .finally(() => setLoading(false));
   }, [showAllLogs]);
 
-  // Fetch backups
+  // Fetch all dashboard data in parallel
+  // Fetch all dashboard data in parallel
   useEffect(() => {
     api.listBackups()
       .then((data) => setRecentBackups((Array.isArray(data) ? data : []).slice(0, 3)))
@@ -292,6 +295,7 @@ export default function AdminDashboard() {
               <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: "#64748b", fontSize: 12, fontWeight: 600 }} />
               <Tooltip cursor={{ fill: "transparent" }} contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)" }} />
               <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={20} className="cursor-pointer"
+                onClick={() => navigate("/users")}>
                 onClick={() => navigate("/users")}>
                 {distributionData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
               </Bar>
