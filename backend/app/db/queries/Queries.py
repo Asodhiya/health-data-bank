@@ -1346,17 +1346,6 @@ class CaretakersQuery:
         self.db.add(feedback)
         await self.db.flush()
 
-        notification = Notification(
-            user_id=row.user_id,
-            type="feedback",
-            title="New feedback from your caretaker",
-            message=message[:200],
-            source_type="caretaker_feedback",
-            source_id=feedback.feedback_id,
-        )
-        self.db.add(notification)
-        await self.db.flush()
-
         return feedback
 
     async def list_feedback(self, participant_id: uuid.UUID) -> list[CaretakerFeedback]:
