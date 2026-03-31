@@ -411,6 +411,11 @@ class HealthGoal(Base):
     template_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("goal_templates.template_id"))
     element_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("data_elements.element_id"))
     target_value: Mapped[float | None] = mapped_column(Numeric)
+    goal_mode: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'daily'"))
+    progress_mode: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'incremental'"))
+    direction: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'at_least'"))
+    window: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'daily'"))
+    baseline_value: Mapped[float | None] = mapped_column(Numeric)
     status: Mapped[str | None] = mapped_column(Text, server_default=text("'active'"))
     start_date: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
     end_date: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
@@ -427,6 +432,18 @@ class CaretakerFeedback(Base):
     submission_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("form_submissions.submission_id"))
     message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CaretakerNote(Base):
+    __tablename__ = "caretaker_notes"
+
+    note_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    caretaker_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("caretaker_profile.caretaker_id", ondelete="CASCADE"), nullable=False)
+    participant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("participant_profile.participant_id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    tag: Mapped[str | None] = mapped_column(Text)
 
 
 
@@ -552,6 +569,8 @@ class Notification(Base):
     type: Mapped[str | None] = mapped_column(Text)
     title: Mapped[str | None] = mapped_column(Text)
     message: Mapped[str | None] = mapped_column(Text)
+    link: Mapped[str | None] = mapped_column(Text)
+    role_target: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str | None] = mapped_column(Text, server_default=text("'unread'"))
     source_type: Mapped[str | None] = mapped_column(Text)
     source_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True))

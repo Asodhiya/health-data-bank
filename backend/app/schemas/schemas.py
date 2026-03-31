@@ -3,8 +3,8 @@ Auth Schemas
 """
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, EmailStr,Field
-from typing import Optional,Dict,Any
+from pydantic import BaseModel, EmailStr, Field, model_validator
+from typing import Optional, Dict, Any, Literal
 
 
 class RegisterRequest(BaseModel):
@@ -104,6 +104,12 @@ class GoalTemplateUpdate(BaseModel):
     default_target: Optional[float] = None
     is_active: Optional[bool] = None
 
+
+GoalMode = Literal["daily", "long_term"]
+ProgressMode = Literal["incremental", "absolute"]
+GoalDirection = Literal["at_least", "at_most"]
+GoalWindow = Literal["daily", "weekly", "monthly", "none"]
+
 class HealthGoalPayload(BaseModel):
     template_id: UUID
     target_value: float = Field(..., gt=0, le=10000)
@@ -115,11 +121,33 @@ class HealthGoalUpdate(BaseModel):
     status: Optional[str] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
+    goal_mode: Optional[GoalMode] = None
+    progress_mode: Optional[ProgressMode] = None
+    direction: Optional[GoalDirection] = None
+    window: Optional[GoalWindow] = None
+    baseline_value: Optional[float] = None
 
 class GoalProgressLog(BaseModel):
-    value: float = Field(..., gt=0, le=10000)
+    # Legacy field kept for backward compatibility with existing frontend calls.
+    value: Optional[float | str | bool] = None
+    value_number: Optional[float] = Field(None, gt=0, le=10000)
+    value_text: Optional[str] = None
+    value_bool: Optional[bool] = None
     notes: Optional[str] = None
     observed_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_payload(self):
+        if (
+            self.value is None
+            and self.value_number is None
+            and self.value_text is None
+            and self.value_bool is None
+        ):
+            raise ValueError(
+                "Provide one of: value, value_number, value_text, or value_bool."
+            )
+        return self
 
 
 # ── Data Visualization ────────────────────────────────────────────────────────

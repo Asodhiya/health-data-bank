@@ -3,9 +3,9 @@ Authentication Routes
 """
 from fastapi import APIRouter, HTTPException, status, Response, Depends, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import User, GroupMember, ParticipantProfile, ResearcherProfile
-from sqlalchemy import select
-from datetime import datetime, timezone
+from app.db.models import User, GroupMember, ParticipantProfile, ResearcherProfile, Role, UserRole, AuditLog
+from sqlalchemy import select, func
+from datetime import datetime, timezone, timedelta
 from app.db.session import get_db
 from app.core.security import PasswordHash, create_access_token, generate_reset_token, hash_reset_token, reset_token_expiry
 from app.schemas.schemas import UserSignup
@@ -19,6 +19,7 @@ from app.core.security import InviteTokenGenerator
 from app.schemas.schemas import SignupInviteRequest
 from app.db.queries.Queries import RoleQuery, UserQuery, InviteQuery
 from app.services.audit_service import write_audit_log
+from app.services.notification_service import create_notifications_bulk, create_notification, notification_exists_recent
 
 
 router = APIRouter()
@@ -57,6 +58,42 @@ async def login(
             entity_type="user",
             details={"identifier_attempted": data.identifier},
         )
+
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+        failed_count = await db.scalar(
+            select(func.count(AuditLog.audit_id))
+            .where(AuditLog.action == "LOGIN_FAILED")
+            .where(AuditLog.created_at >= one_hour_ago)
+        )
+        if (failed_count or 0) >= 5:
+            admin_rows = await db.execute(
+                select(User.user_id)
+                .join(UserRole, UserRole.user_id == User.user_id)
+                .join(Role, Role.role_id == UserRole.role_id)
+                .where(Role.role_name == "admin")
+            )
+            admin_ids = [row[0] for row in admin_rows.all()]
+            for admin_id in admin_ids:
+                exists = await notification_exists_recent(
+                    db,
+                    user_id=admin_id,
+                    notification_type="flag",
+                    source_type="login_failed_spike",
+                    source_id=None,
+                    within_hours=1,
+                )
+                if not exists:
+                    await create_notification(
+                        db=db,
+                        user_id=admin_id,
+                        notification_type="flag",
+                        title="Login failure spike detected",
+                        message=f"{failed_count} failed login attempts were recorded in the last hour.",
+                        link="/audit-logs",
+                        role_target="admin",
+                        source_type="login_failed_spike",
+                        source_id=None,
+                    )
         raise  # re-raise the original 401
 
     # Successful login
@@ -121,6 +158,26 @@ async def register(
         entity_id=new_user.user_id,
         details={"email": new_user.email, "role": role.role_name},
     )
+
+    admin_rows = await db.execute(
+        select(User.user_id)
+        .join(UserRole, UserRole.user_id == User.user_id)
+        .join(Role, Role.role_id == UserRole.role_id)
+        .where(Role.role_name == "admin")
+    )
+    admin_ids = [row[0] for row in admin_rows.all() if row[0] != new_user.user_id]
+    if admin_ids:
+        await create_notifications_bulk(
+            db=db,
+            user_ids=admin_ids,
+            notification_type="invite",
+            title="New user registered",
+            message=f"{new_user.first_name} {new_user.last_name} joined as {role.role_name}.",
+            link="/users",
+            role_target="admin",
+            source_type="registration",
+            source_id=new_user.user_id,
+        )
 
     return new_user
 

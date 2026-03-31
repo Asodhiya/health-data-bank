@@ -86,6 +86,7 @@ class UserListItem(BaseModel):
     phone: Optional[str] = None
     role: Optional[str] = None
     status: bool
+    locked_until: Optional[datetime] = None
     joined_at: Optional[datetime] = None
     group_id: Optional[UUID] = None
     group: Optional[str] = None
@@ -107,6 +108,14 @@ class AdminUserUpdate(BaseModel):
 
 class UserStatusUpdate(BaseModel):
     status: str  # "active" | "inactive"
+
+
+class UserDeleteRequest(BaseModel):
+    mode: str = "anonymize"  # "anonymize" | "delete" | "permanent"
+
+
+class MoveParticipantRequest(BaseModel):
+    group_id: UUID
 
 
 # ── Invite Management schemas ────────────────────────────────────────────────

@@ -63,6 +63,26 @@ const AlertIco = () => (
   />
 );
 
+const normalizeDatatype = (rawType) => {
+  const normalized = String(rawType || "number").trim().toLowerCase();
+  if (normalized === "string") return "text";
+  if (normalized === "bool") return "boolean";
+  if (
+    normalized === "int" ||
+    normalized === "integer" ||
+    normalized === "float" ||
+    normalized === "double" ||
+    normalized === "decimal" ||
+    normalized === "numeric"
+  ) {
+    return "number";
+  }
+  if (normalized !== "text" && normalized !== "number" && normalized !== "boolean") {
+    return "number";
+  }
+  return normalized;
+};
+
 export default function HealthGoals() {
   const [activeGoals, setActiveGoals] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -127,10 +147,12 @@ export default function HealthGoals() {
         finalValue = Number(customValue);
       }
 
-      await api.logGoalProgress(goalId, {
-        value: finalValue,
-        observed_at: new Date().toISOString(),
-      });
+      const payload = { observed_at: new Date().toISOString() };
+      if (typeof finalValue === "string") payload.value_text = finalValue;
+      else if (typeof finalValue === "boolean") payload.value_bool = finalValue;
+      else payload.value_number = Number(finalValue);
+
+      await api.logGoalProgress(goalId, payload);
 
       // Clear the input field for this specific goal
       setLogInputs((prev) => ({ ...prev, [goalId]: "" }));
@@ -230,7 +252,12 @@ export default function HealthGoals() {
               "Description not provided.";
 
             // 🟢 Determine Datatype from the Element (defaults to number if missing)
-            const datatype = goal.element?.datatype || "number";
+            const datatype = normalizeDatatype(goal.element?.datatype);
+            const progressMode = goal.progress_mode || "incremental";
+            const goalMode = goal.goal_mode || "daily";
+            const direction = goal.direction || "at_least";
+            const windowMode =
+              goal.completion_context?.window || goal.window || "daily";
 
             const target = goal.target_value ?? goal.default_target ?? 1;
             const current = goal.current_value ?? 0;
@@ -239,10 +266,21 @@ export default function HealthGoals() {
 
             // Text goals don't use percentages, they just save entries
             const isTextGoal = datatype === "text";
+            const numericCurrent =
+              typeof current === "number" ? current : Number(current);
+            const safeCurrent = Number.isFinite(numericCurrent)
+              ? numericCurrent
+              : 0;
             const progressPct = isTextGoal
               ? 100
-              : Math.min(Math.round((current / target) * 100), 100);
-            const isCompleted = isTextGoal ? false : current >= target;
+              : direction === "at_most"
+                ? safeCurrent > 0 && target > 0
+                  ? Math.min(Math.round((target / safeCurrent) * 100), 100)
+                  : 0
+                : target > 0
+                  ? Math.min(Math.round((safeCurrent / target) * 100), 100)
+                  : 0;
+            const isCompleted = Boolean(goal.is_completed);
 
             return (
               <div
@@ -277,7 +315,8 @@ export default function HealthGoals() {
                       {name}
                     </h3>
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Daily Goal
+                      {goalMode === "long_term" ? "Long-Term" : "Daily"} Goal •{" "}
+                      {windowMode}
                     </span>
                   </div>
                 </div>
@@ -297,9 +336,9 @@ export default function HealthGoals() {
                         <span
                           className={`text-sm font-bold ${isCompleted ? "text-emerald-500" : "text-slate-800"}`}
                         >
-                          {current}{" "}
+                          {safeCurrent}{" "}
                           <span className="text-slate-400 font-medium">
-                            / {target}
+                            {direction === "at_most" ? "≤" : "/"} {target}
                             {unitText}
                           </span>
                         </span>
@@ -365,7 +404,43 @@ export default function HealthGoals() {
                     )}
 
                     {/* UI for Large Numbers (e.g. 2000ml) */}
-                    {datatype === "number" && target > 10 && (
+                    {datatype === "number" && progressMode === "absolute" && (
+                      <>
+                        <input
+                          type="number"
+                          placeholder={`Current value`}
+                          value={logInputs[activeGoalId] || ""}
+                          onChange={(e) =>
+                            setLogInputs({
+                              ...logInputs,
+                              [activeGoalId]: e.target.value,
+                            })
+                          }
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button
+                          onClick={() =>
+                            handleLogProgress(
+                              activeGoalId,
+                              logInputs[activeGoalId],
+                            )
+                          }
+                          disabled={
+                            actionLoading === `log_${activeGoalId}` ||
+                            !logInputs[activeGoalId]
+                          }
+                          className="px-5 py-2.5 rounded-xl text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50"
+                        >
+                          {actionLoading === `log_${activeGoalId}`
+                            ? "..."
+                            : "Set Value"}
+                        </button>
+                      </>
+                    )}
+
+                    {datatype === "number" &&
+                      progressMode !== "absolute" &&
+                      target > 10 && (
                       <>
                         <input
                           type="number"
@@ -401,7 +476,9 @@ export default function HealthGoals() {
 
                     {/* UI for Small Numbers (e.g. 5 veggies) or Booleans */}
                     {(datatype === "boolean" ||
-                      (datatype === "number" && target <= 10)) && (
+                      (datatype === "number" &&
+                        progressMode !== "absolute" &&
+                        target <= 10)) && (
                       <button
                         onClick={() => handleLogProgress(activeGoalId, 1)}
                         disabled={actionLoading === `log_${activeGoalId}`}
@@ -475,7 +552,7 @@ export default function HealthGoals() {
                 template.description ||
                 (template.element && template.element.description) ||
                 "Description not provided.";
-              const datatype = template.element?.datatype || "number";
+              const datatype = normalizeDatatype(template.element?.datatype);
               const target = template.default_target ?? 1;
               const unit = (template.element && template.element.unit) || "";
               const unitText = unit ? ` ${unit}` : "";

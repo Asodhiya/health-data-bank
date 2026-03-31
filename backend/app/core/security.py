@@ -73,7 +73,7 @@ class InviteTokenGenerator:
 
     def __post_init__(self):
         self.target_role = self.target_role.lower()
-        self.expires_at = datetime.utcnow() + timedelta(hours=self.expires_in_hours)
+        self.expires_at = datetime.now(timezone.utc) + timedelta(hours=self.expires_in_hours)
 
     def build_model(self, role_id) -> SignupInvite:
         return SignupInvite(

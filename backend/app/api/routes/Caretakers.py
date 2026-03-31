@@ -8,25 +8,40 @@ from app.db.session import get_db
 from app.db.models import User
 from app.core.dependency import require_permissions
 from app.core.permissions import (
-    GROUP_READ, GROUP_WRITE, GROUP_DELETE,
+    GROUP_READ,
     CARETAKER_READ,
 )
 from app.schemas.caretaker_response_schema import (
-    GroupItem, GroupUpdateRequest,
+    GroupItem,
     GroupMemberAddRequest, GroupMemberItem,
     GroupDataElementItem,
     ParticipantListItem, ParticipantDetail, ParticipantActivityCounts,
     FeedbackCreate, FeedbackItem,
+    NoteCreateRequest, NoteItem, NoteUpdateRequest,
     ReportGenerateRequest, ReportResponse, ReportListItem,
     SubmissionListItem, SubmissionDetailItem, SubmissionAnswerItem,
-    NotificationItem,
     CaretakerProfileUpdate, CaretakerProfileOut,
 )
+from app.schemas.notification_schema import NotificationItem
 from app.db.queries.Queries import CaretakersQuery
-from app.db.models import CaretakerProfile
-from sqlalchemy import select
+from app.db.models import CaretakerProfile, ParticipantProfile, CaretakerNote
+from sqlalchemy import select, update, delete
+from app.services.notification_service import (
+    list_notifications_for_user,
+    mark_notification_read_for_user,
+    create_notification,
+)
 
 router = APIRouter()
+
+
+async def _get_caretaker_id_or_404(db: AsyncSession, user_id: UUID) -> UUID:
+    caretaker_id = await db.scalar(
+        select(CaretakerProfile.caretaker_id).where(CaretakerProfile.user_id == user_id)
+    )
+    if not caretaker_id:
+        raise HTTPException(status_code=404, detail="Caretaker profile not found")
+    return caretaker_id
 
 
 # ── Profile ───────────────────────────────────────────────────────────────────
@@ -108,25 +123,6 @@ async def get_group(
 
 
 
-# @router.patch("/groups/{group_id}", response_model=GroupItem)
-# async def update_group(
-#     group_id: UUID,
-#     body: GroupUpdateRequest,
-#     db: AsyncSession = Depends(get_db),
-#     current_user: User = Depends(require_permissions(GROUP_WRITE)),
-# ):
-#     pass
-
-
-# @router.delete("/groups/{group_id}", status_code=204)
-# async def delete_group(
-#     group_id: UUID,
-#     db: AsyncSession = Depends(get_db),
-#     current_user: User = Depends(require_permissions(GROUP_DELETE)),
-# ):
-#     pass
-
-
 @router.get("/groups/{group_id}/members", response_model=list[GroupMemberItem])
 async def list_group_members(
     group_id: UUID,
@@ -163,17 +159,6 @@ async def list_group_elements(
     ]
 
 
-# @router.delete("/groups/{group_id}/members/{participant_id}", status_code=204)
-# async def remove_group_member(
-#     group_id: UUID,
-#     participant_id: UUID,
-#     db: AsyncSession = Depends(get_db),
-#     current_user: User = Depends(require_permissions(GROUP_WRITE)),
-# ):
-#     pass
-
-
-
 # ── Participants ──────────────────────────────────────────────────────────────
 
 @router.get("/participants", response_model=list[ParticipantListItem])
@@ -187,7 +172,7 @@ async def list_participants(
     survey_progress: Optional[Literal["not_started", "in_progress", "completed"]] = Query(default=None),
     submission_date_from: Optional[date] = Query(default=None),
     submission_date_to: Optional[date] = Query(default=None),
-    sort_by: Optional[Literal["name", "age", "status", "gender", "surveys", "last_active", "enrolled", "submission_date"]] = Query(default=None),
+    sort_by: Optional[Literal["name", "age", "status", "gender", "surveys", "goals", "last_active", "enrolled", "submission_date"]] = Query(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
@@ -213,7 +198,7 @@ async def list_participants(
             status=row.status,
             group_id=row.group_id,
             survey_progress=row.survey_progress,
-            goal_progress="not_started",
+            goal_progress=row.goal_progress,
             last_login_at=row.last_login_at,
             last_submission_at=row.last_submission_at,
         )
@@ -284,6 +269,63 @@ async def create_feedback(
         message=body.message,
         submission_id=submission_id,
     )
+
+    participant = await db.scalar(
+        select(ParticipantProfile).where(ParticipantProfile.participant_id == participant_id)
+    )
+    if participant:
+        await create_notification(
+            db=db,
+            user_id=participant.user_id,
+            notification_type="flag",
+            title="New caretaker feedback",
+            message="Your caretaker left feedback on a recent submission.",
+            link="/participant/messages",
+            role_target="participant",
+            source_type="feedback",
+            source_id=feedback.feedback_id,
+        )
+
+    return FeedbackItem(
+        feedback_id=feedback.feedback_id,
+        caretaker_id=feedback.caretaker_id,
+        participant_id=feedback.participant_id,
+        submission_id=feedback.submission_id,
+        message=feedback.message,
+        created_at=feedback.created_at,
+    )
+
+
+@router.post("/participants/{participant_id}/feedback", response_model=FeedbackItem, status_code=201)
+async def create_general_feedback(
+    participant_id: UUID,
+    body: FeedbackCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    feedback = await CaretakersQuery(db).create_feedback(
+        caretaker_user_id=current_user.user_id,
+        participant_id=participant_id,
+        message=body.message,
+        submission_id=None,
+    )
+
+    participant = await db.scalar(
+        select(ParticipantProfile).where(ParticipantProfile.participant_id == participant_id)
+    )
+    if participant:
+        await create_notification(
+            db=db,
+            user_id=participant.user_id,
+            notification_type="flag",
+            title="New caretaker feedback",
+            message="Your caretaker sent you feedback.",
+            link="/participant/messages",
+            role_target="participant",
+            source_type="feedback",
+            source_id=feedback.feedback_id,
+        )
+
     return FeedbackItem(
         feedback_id=feedback.feedback_id,
         caretaker_id=feedback.caretaker_id,
@@ -312,6 +354,125 @@ async def list_feedback(
         )
         for row in rows
     ]
+
+
+# ── Notes ─────────────────────────────────────────────────────────────────────
+
+@router.get("/participants/{participant_id}/notes", response_model=list[NoteItem])
+async def list_notes(
+    participant_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
+    rows = (
+        await db.execute(
+            select(CaretakerNote)
+            .where(
+                CaretakerNote.participant_id == participant_id,
+                CaretakerNote.caretaker_id == caretaker_id,
+            )
+            .order_by(CaretakerNote.created_at.desc())
+        )
+    ).scalars().all()
+    return [
+        NoteItem(
+            note_id=row.note_id,
+            participant_id=row.participant_id,
+            text=row.text,
+            tag=row.tag,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/participants/{participant_id}/notes", response_model=NoteItem, status_code=201)
+async def create_note(
+    participant_id: UUID,
+    body: NoteCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
+    participant_exists = await db.scalar(
+        select(ParticipantProfile.participant_id).where(ParticipantProfile.participant_id == participant_id)
+    )
+    if not participant_exists:
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    note = CaretakerNote(
+        caretaker_id=caretaker_id,
+        participant_id=participant_id,
+        text=body.text.strip(),
+        tag=body.tag,
+    )
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+    return NoteItem(
+        note_id=note.note_id,
+        participant_id=note.participant_id,
+        text=note.text,
+        tag=note.tag,
+        created_at=note.created_at,
+    )
+
+
+@router.patch("/notes/{note_id}", response_model=NoteItem)
+async def update_note(
+    note_id: UUID,
+    body: NoteUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
+    note = await db.scalar(
+        select(CaretakerNote).where(
+            CaretakerNote.note_id == note_id,
+            CaretakerNote.caretaker_id == caretaker_id,
+        )
+    )
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    data = body.model_dump(exclude_none=True)
+    if "text" in data:
+        data["text"] = data["text"].strip()
+    if data:
+        await db.execute(
+            update(CaretakerNote)
+            .where(CaretakerNote.note_id == note_id)
+            .values(**data)
+        )
+        await db.commit()
+        note = await db.scalar(select(CaretakerNote).where(CaretakerNote.note_id == note_id))
+
+    return NoteItem(
+        note_id=note.note_id,
+        participant_id=note.participant_id,
+        text=note.text,
+        tag=note.tag,
+        created_at=note.created_at,
+    )
+
+
+@router.delete("/notes/{note_id}", status_code=204)
+async def delete_note(
+    note_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
+    result = await db.execute(
+        delete(CaretakerNote).where(
+            CaretakerNote.note_id == note_id,
+            CaretakerNote.caretaker_id == caretaker_id,
+        )
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Note not found")
+    await db.commit()
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────
@@ -466,12 +627,15 @@ async def list_notifications(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    rows = await CaretakersQuery(db).list_notifications(current_user.user_id)
+    rows = await list_notifications_for_user(db, current_user.user_id)
     return [
         NotificationItem(
             notification_id=n.notification_id,
+            type=n.type,
             title=n.title,
             message=n.message,
+            link=n.link,
+            role_target=n.role_target,
             created_at=n.created_at,
             is_read=(n.status == "read"),
         )
@@ -485,11 +649,14 @@ async def mark_notification_read(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    n = await CaretakersQuery(db).mark_notification_read(notification_id, current_user.user_id)
+    n = await mark_notification_read_for_user(db, notification_id, current_user.user_id)
     return NotificationItem(
         notification_id=n.notification_id,
+        type=n.type,
         title=n.title,
         message=n.message,
+        link=n.link,
+        role_target=n.role_target,
         created_at=n.created_at,
         is_read=(n.status == "read"),
     )
