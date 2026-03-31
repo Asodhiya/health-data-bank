@@ -19,7 +19,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      await api.login(identifier, password);
+      await api.login(identifier.trim(), password);
       const me = await refetch(); 
       const role = me?.Role?.[0] ?? null;
       if (role) {
@@ -52,7 +52,16 @@ export default function LoginPage() {
       )}
 
       {/* Form */}
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <form
+        onSubmit={handleSubmit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !loading) {
+            e.preventDefault();
+            handleSubmit(e);
+          }
+        }}
+        className="flex flex-col gap-4"
+      >
         {/* Email field */}
         <div className="relative">
           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">

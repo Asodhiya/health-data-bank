@@ -1,8 +1,7 @@
-from pydantic import BaseModel, Field, model_validator
-from typing import List, Optional, Any, Dict,Literal
-from datetime import datetime,date
+from pydantic import BaseModel, Field, model_validator, ConfigDict
+from typing import List, Optional, Any, Dict, Literal
+from datetime import datetime, date
 from uuid import UUID
-from datetime import date
 
 class DashboardStats(BaseModel):
     total_assigned_participants: int = 0
@@ -260,3 +259,36 @@ class FeedbackItem(BaseModel):
     submission_id: Optional[UUID] = None
     message: str
     created_at: datetime
+
+
+# ── Caretaker Profile schemas ─────────────────────────────────────────────────
+
+class CaretakerProfileUpdate(BaseModel):
+    title: Optional[str] = None
+    credentials: Optional[str] = None
+    organization: Optional[str] = None
+    department: Optional[str] = None
+    specialty: Optional[str] = None
+    bio: Optional[str] = None
+    working_hours_start: Optional[str] = None
+    working_hours_end: Optional[str] = None
+    contact_preference: Optional[str] = None
+    available_days: Optional[List[str]] = None
+
+
+class CaretakerProfileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    caretaker_id: UUID
+    user_id: UUID
+    title: Optional[str] = None
+    credentials: Optional[str] = None
+    organization: Optional[str] = None
+    department: Optional[str] = None
+    specialty: Optional[str] = None
+    bio: Optional[str] = None
+    working_hours_start: Optional[str] = None
+    working_hours_end: Optional[str] = None
+    contact_preference: Optional[str] = None
+    available_days: Optional[List[str]] = None
+    onboarding_completed: bool

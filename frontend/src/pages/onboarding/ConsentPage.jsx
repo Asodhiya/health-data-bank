@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { sanitizeText, sanitizeEmail, trimPayload } from '../../utils/sanitize';
 
@@ -65,11 +65,16 @@ function YesNoToggle({ value, onChange }) {
 
 export default function ConsentPage() {
   const navigate = useNavigate();
-  const [answers, setAnswers] = useState({});
-  const [signature, setSignature] = useState('');
+  const [answers, setAnswers] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('consent_answers') || '{}'); } catch { return {}; }
+  });
+  const [signature, setSignature] = useState(() => sessionStorage.getItem('consent_signature') || '');
   //const [wantResults, setWantResults] = useState(false);
   //const [resultEmail, setResultEmail] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => { sessionStorage.setItem('consent_answers', JSON.stringify(answers)); }, [answers]);
+  useEffect(() => { sessionStorage.setItem('consent_signature', signature); }, [signature]);
 
   const setAnswer = (id, val) => setAnswers({ ...answers, [id]: val });
 
@@ -105,6 +110,8 @@ export default function ConsentPage() {
     // });
     // await api.submitConsent(payload);
 
+    sessionStorage.removeItem('consent_answers');
+    sessionStorage.removeItem('consent_signature');
     navigate('/onboarding/intake');
   };
 

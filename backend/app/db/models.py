@@ -248,6 +248,15 @@ class CaretakerProfile(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
     title: Mapped[str | None] = mapped_column(Text)
     organization: Mapped[str | None] = mapped_column(Text)
+    credentials: Mapped[str | None] = mapped_column(Text)
+    department: Mapped[str | None] = mapped_column(Text)
+    specialty: Mapped[str | None] = mapped_column(Text)
+    bio: Mapped[str | None] = mapped_column(Text)
+    working_hours_start: Mapped[str | None] = mapped_column(Text)
+    working_hours_end: Mapped[str | None] = mapped_column(Text)
+    contact_preference: Mapped[str | None] = mapped_column(Text)
+    available_days: Mapped[list | None] = mapped_column(JSONB)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
     user = relationship("User", back_populates="caretaker_profile")
 
 
@@ -256,7 +265,13 @@ class ResearcherProfile(Base):
 
     researcher_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
+    title: Mapped[str | None] = mapped_column(Text)
+    credentials: Mapped[str | None] = mapped_column(Text)
+    organization: Mapped[str | None] = mapped_column(Text)
     department: Mapped[str | None] = mapped_column(Text)
+    specialty: Mapped[str | None] = mapped_column(Text)
+    bio: Mapped[str | None] = mapped_column(Text)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
     user = relationship("User", back_populates="researcher_profile")
 
 
@@ -265,6 +280,7 @@ class AdminProfile(Base):
 
     admin_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), unique=True)
+    title: Mapped[str | None] = mapped_column(Text)
     role_title: Mapped[str | None] = mapped_column(Text)
     department: Mapped[str | None] = mapped_column(Text)
     organization: Mapped[str | None] = mapped_column(Text)

@@ -264,15 +264,20 @@ function AutoBackupPanel() {
   const [notifyOnFail, setNotifyOnFail] = useState(true);
   const [autoScope, setAutoScope] = useState("full");
 
+  // Auto-detect user's timezone, allow manual override
+  const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [timezone, setTimezone] = useState(detectedTz);
+
   const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2500); };
 
+  const tzShort = timezone.replace(/_/g, " ");
   const nextBackupLabel = () => {
-    if (frequency === "daily") return `Tomorrow at ${time} UTC`;
+    if (frequency === "daily") return `Tomorrow at ${time} (${tzShort})`;
     if (frequency === "monthly") {
       const s = dayOfMonth === "1" ? "st" : dayOfMonth === "2" ? "nd" : dayOfMonth === "3" ? "rd" : "th";
-      return `${dayOfMonth}${s} of next month at ${time} UTC`;
+      return `${dayOfMonth}${s} of next month at ${time} (${tzShort})`;
     }
-    return `${day.charAt(0).toUpperCase() + day.slice(1)} at ${time} UTC`;
+    return `${day.charAt(0).toUpperCase() + day.slice(1)} at ${time} (${tzShort})`;
   };
 
   const selClass = (val, current) => val === current
@@ -302,7 +307,7 @@ function AutoBackupPanel() {
             </svg>
             <span><span className="font-semibold">Coming soon.</span> Automatic backup scheduling requires a backend scheduler. These settings are saved locally for now and will activate once the scheduler is deployed.</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Frequency</label>
               <select value={frequency} onChange={(e) => setFrequency(e.target.value)} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all">
@@ -326,8 +331,17 @@ function AutoBackupPanel() {
               </div>
             )}
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Time (UTC)</label>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Time</label>
               <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Timezone</label>
+              <select value={timezone} onChange={(e) => setTimezone(e.target.value)}
+                className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all">
+                {Intl.supportedValuesOf("timeZone").map((tz) => (
+                  <option key={tz} value={tz}>{tz.replace(/_/g, " ")}{tz === detectedTz ? " (detected)" : ""}</option>
+                ))}
+              </select>
             </div>
           </div>
 

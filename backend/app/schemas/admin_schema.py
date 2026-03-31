@@ -54,6 +54,7 @@ class RestoreResponse(BaseModel):
 # ── Admin Profile schemas ────────────────────────────────────────────────────
 
 class AdminProfileUpdate(BaseModel):
+    title: Optional[str] = None
     role_title: Optional[str] = None
     department: Optional[str] = None
     organization: Optional[str] = None
@@ -63,6 +64,7 @@ class AdminProfileUpdate(BaseModel):
 
 class AdminProfileOut(BaseModel):
     admin_id: UUID
+    title: Optional[str] = None
     role_title: Optional[str] = None
     department: Optional[str] = None
     organization: Optional[str] = None
@@ -136,3 +138,4 @@ class BackupListItem(BaseModel):
 
     class Config:
         from_attributes = True
+

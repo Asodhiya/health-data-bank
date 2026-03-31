@@ -17,6 +17,7 @@ LOCKOUT_DURATION_MINUTES = 15
 
 async def authenticate_user(identifier: str, password: str, db: AsyncSession):
     """Checks email or username and password if in db or not"""
+    identifier = identifier.strip()
     res = await db.execute(
         select(User).where(
             (User.email == identifier) | (User.username == identifier)
@@ -113,6 +114,7 @@ async def create_user_with_role(payload: UserSignup, role_name: str, db: AsyncSe
         first_name=payload.first_name,
         last_name=payload.last_name,
         phone=payload.phone,
+        Address=payload.address,
         status=True,
     )
 

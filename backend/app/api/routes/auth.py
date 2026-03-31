@@ -3,7 +3,7 @@ Authentication Routes
 """
 from fastapi import APIRouter, HTTPException, status, Response, Depends, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import User, GroupMember, ParticipantProfile
+from app.db.models import User, GroupMember, ParticipantProfile, ResearcherProfile
 from sqlalchemy import select
 from datetime import datetime, timezone
 from app.db.session import get_db
@@ -102,15 +102,12 @@ async def register(
 
     invite.used = True
 
-    if invite.group_id and role.role_name == "participant":
-        participant_result = await db.execute(
-            select(ParticipantProfile).where(ParticipantProfile.user_id == new_user.user_id)
-        )
-        participant = participant_result.scalar_one_or_none()
-        if participant:
+    if role.role_name == "participant" and invite.group_id:
+        participant_profile = new_user.participant_profile
+        if participant_profile:
             db.add(GroupMember(
                 group_id=invite.group_id,
-                participant_id=participant.participant_id,
+                participant_id=participant_profile.participant_id,
             ))
 
     await db.commit()
@@ -194,12 +191,21 @@ async def get_current_user(
     onboarding_completed = None
     if any(r == "admin" for r in user_roles):
         onboarding_completed = user.admin_profile.onboarding_completed if user.admin_profile else False
+    elif any(r == "caretaker" for r in user_roles):
+        onboarding_completed = user.caretaker_profile.onboarding_completed if user.caretaker_profile else False
+    elif any(r == "researcher" for r in user_roles):
+        onboarding_completed = user.researcher_profile.onboarding_completed if user.researcher_profile else False
 
     return {
         "user_id": str(user.user_id),
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
+        "username": user.username,
+        "phone": user.phone,
+        "address": user.Address,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         "Role": user_roles,
         "intake_completed": intake_completed,
         "onboarding_completed": onboarding_completed,

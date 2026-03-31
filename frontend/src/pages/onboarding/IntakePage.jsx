@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { sanitizeText, sanitizeNumber } from '../../utils/sanitize';
+import { sanitizeText } from '../../utils/sanitize';
 import { api } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -85,21 +85,7 @@ export default function IntakePage() {
   const [q1Other, setQ1Other] = useState('');
   const [q2, setQ2] = useState('');
   const [q2Specify, setQ2Specify] = useState('');
-  const [q3, setQ3] = useState([]);
-  const [q3Other, setQ3Other] = useState('');
   const [q4, setQ4] = useState('');
-  const [q5, setQ5] = useState([]);
-  const [q6, setQ6] = useState([]);
-  const [q6Other, setQ6Other] = useState('');
-  const [q7, setQ7] = useState([]);
-  const [q7Other, setQ7Other] = useState('');
-  const [q8, setQ8] = useState([]);
-  const [q8Other, setQ8Other] = useState('');
-  const [q9, setQ9] = useState('');
-  const [q10, setQ10] = useState('');
-  const [q11, setQ11] = useState('');
-  const [q12, setQ12] = useState('');
-  const [q13, setQ13] = useState('');
 
   const [error, setError] = useState('');
 
@@ -109,15 +95,6 @@ export default function IntakePage() {
   */
   const onText = (setter, maxLen = 200) => (e) => {
     setter(sanitizeText(e.target.value, maxLen));
-  };
-
-  /*
-    Helper: wrap number onChange with sanitizeNumber.
-    Rejects invalid or out-of-range values silently.
-  */
-  const onNumber = (setter, min, max) => (e) => {
-    const result = sanitizeNumber(e.target.value, min, max);
-    if (result !== null) setter(result);
   };
 
   /*
@@ -140,14 +117,7 @@ export default function IntakePage() {
     if (q1 === 'Other' && !q1Other.trim()) return false;
     if (!q2) return false;
     if (q2 === 'Yes' && !q2Specify.trim()) return false;
-    if (q3.length === 0) return false;
-    if (q3.includes('Other') && !q3Other.trim()) return false;
-    if (!q4 || q5.length === 0 || q6.length === 0) return false;
-    if (q6.includes('Other drugs') && !q6Other.trim()) return false;
-    if (q7.length === 0 || q8.length === 0) return false;
-    if (q7.includes('Other') && !q7Other.trim()) return false;
-    if (q8.includes('Other') && !q8Other.trim()) return false;
-    if (!q9 || !q10 || !q11 || !q12 || !q13) return false;
+    if (!q4) return false;
     return true;
   };
 
@@ -173,20 +143,10 @@ export default function IntakePage() {
     };
 
     const answers = [
-      { field_id: fm[1],  value: program },
-      { field_id: fm[2],  value: yearOfStudy },
-      { field_id: fm[3],  value: international },
-      { field_id: fm[4],  value: international === 'Yes' ? country || null : null },
-      { field_id: fm[5],  value: q3.includes('Other') ? [...q3.filter(v => v !== 'Other'), q3Other] : q3 },
-      { field_id: fm[6],  value: q5 },
-      { field_id: fm[7],  value: q6.includes('Other drugs') ? [...q6.filter(v => v !== 'Other drugs'), q6Other] : q6 },
-      { field_id: fm[8],  value: q7.includes('Other') ? [...q7.filter(v => v !== 'Other'), q7Other] : q7 },
-      { field_id: fm[9],  value: q8.includes('Other') ? [...q8.filter(v => v !== 'Other'), q8Other] : q8 },
-      { field_id: fm[10], value: q9 },
-      { field_id: fm[11], value: Number(q10) },
-      { field_id: fm[12], value: Number(q11) },
-      { field_id: fm[13], value: q12 },
-      { field_id: fm[14], value: q13 },
+      { field_id: fm[1], value: program },
+      { field_id: fm[2], value: yearOfStudy },
+      { field_id: fm[3], value: international },
+      { field_id: fm[4], value: international === 'Yes' ? country || null : null },
     ].filter(a => a.field_id && a.value !== null && a.value !== undefined && a.value !== '');
 
     try {
@@ -393,92 +353,8 @@ export default function IntakePage() {
       </Q>
 
       {/* Q3 */}
-      <Q num={3} label="What access to transportation do you have? (Select all that apply)">
-        <ChipSelect options={['Bus', 'Walking', 'Car', 'Bike', 'Other']} value={q3} onChange={setQ3} multi />
-        {q3.includes('Other') && (
-          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify..." maxLength={200} value={q3Other} onChange={onText(setQ3Other, 200)} />
-        )}
-      </Q>
-
-      {/* Q4 */}
-      <Q num={4} label="Do you work?">
+      <Q num={3} label="Do you work?">
         <ChipSelect options={["Don't work", 'Less than 10 hrs/week', '10–20 hrs/week', 'Over 20 hrs/week']} value={q4} onChange={setQ4} />
-      </Q>
-
-      {/* Q5 */}
-      <Q num={5} label="What causes stress in your life? (Select all that apply)">
-        <ChipSelect options={['School', 'Work', 'Social life', 'Home life']} value={q5} onChange={setQ5} multi />
-      </Q>
-
-      {/* Q6 — "Other drugs" reveals text input */}
-      <Q num={6} label="In the past month, which of these substances have you consumed? (Select all that apply)">
-        <ChipSelect options={['Alcohol', 'THC / Cannabis', 'Cigarettes / Tobacco / Vaping', 'Other drugs', 'None']} value={q6} onChange={setQ6} multi />
-        {q6.includes('Other drugs') && (
-          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify which substance(s)..." maxLength={200} value={q6Other} onChange={onText(setQ6Other, 200)} />
-        )}
-      </Q>
-
-      {/* Q7 */}
-      <Q num={7} label="Do you have any barriers to eating the foods that you want to? (Select all that apply)">
-        <ChipSelect options={['Income', 'Transportation', 'Lack of variety/choice', 'Lack of storage', 'Lack of kitchen access', 'Lack of food skills', 'Loneliness', 'Health conditions', 'None', 'Other']} value={q7} onChange={setQ7} multi />
-        {q7.includes('Other') && (
-          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify..." maxLength={200} value={q7Other} onChange={onText(setQ7Other, 200)} />
-        )}
-      </Q>
-
-      {/* Q8 */}
-      <Q num={8} label="Where do you eat most of your meals? (Select all that apply)">
-        <ChipSelect options={['At home', 'On campus (cafeteria)', 'On campus (brought from home)', 'Restaurants', 'Other']} value={q8} onChange={setQ8} multi />
-        {q8.includes('Other') && (
-          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify..." maxLength={200} value={q8Other} onChange={onText(setQ8Other, 200)} />
-        )}
-      </Q>
-
-      {/* Q9 */}
-      <Q num={9} label="Do you eat alone or with others for the majority of your meals?">
-        <ChipSelect options={['Alone', 'With others', 'Mix of both']} value={q9} onChange={setQ9} />
-      </Q>
-
-      {/* Q10 — Days per week: 0–7 only */}
-      <Q num={10} label="In a typical week, how many days do you perform moderate (brisk walking) to vigorous (running) aerobic activity?">
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min="0"
-            max="7"
-            className={`${inputClass} w-20 text-center`}
-            placeholder="0"
-            value={q10}
-            onChange={onNumber(setQ10, 0, 7)}
-          />
-          <span className="text-sm text-slate-500">days per week</span>
-        </div>
-      </Q>
-
-      {/* Q11 — Minutes: 0–1440 (max 24 hrs in a day) */}
-      <Q num={11} label="On average, for those days, how many minutes of moderate-to-vigorous aerobic activity do you do?">
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min="0"
-            max="1440"
-            className={`${inputClass} w-20 text-center`}
-            placeholder="0"
-            value={q11}
-            onChange={onNumber(setQ11, 0, 1440)}
-          />
-          <span className="text-sm text-slate-500">minutes</span>
-        </div>
-      </Q>
-
-      {/* Q12 */}
-      <Q num={12} label="Which category would you be most interested in focusing on during this program?">
-        <ChipSelect options={['Cardio / Endurance', 'Functional Strength / Resistance', 'Both']} value={q12} onChange={setQ12} />
-      </Q>
-
-      {/* Q13 */}
-      <Q num={13} label="On a typical day, how many hours do you spend sitting (school, work, commuting)?">
-        <ChipSelect options={['< 1 hour', '1–3 hours', '3–5 hours', '> 5 hours']} value={q13} onChange={setQ13} />
       </Q>
 
       <hr className="border-slate-100 my-5" />

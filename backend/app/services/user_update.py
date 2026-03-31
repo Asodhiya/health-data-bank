@@ -30,10 +30,10 @@ async def update_user(Payload:UpdatePersonalInfoPayload,user:User ,db: AsyncSess
             values["email"] = data["email"]
 
         if "phone_number" in data and data["phone_number"] is not None:
-            values["phone_number"] = data["phone_number"]
+            values["phone"] = data["phone_number"]
 
         if "address" in data and data["address"] is not None:
-            values["address"] = data["address"]
+            values["Address"] = data["address"]
 
         
         old_password = data.get("old_password")
