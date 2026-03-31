@@ -240,6 +240,22 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  markBackgroundRead: () =>
+    request('/onboarding/background-read', {
+      method: 'POST',
+    }),
+
+  submitConsent: (payload) =>
+    request('/onboarding/consent', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  completeOnboarding: () =>
+    request('/onboarding/complete', {
+      method: 'POST',
+    }),
+
   // ── Survey Fill (participant) ──
   getDeployedForms: () => request("/participant/surveys/assigned"),
 

@@ -151,6 +151,7 @@ export default function IntakePage() {
 
     try {
       await api.submitIntake({ profile, answers });
+      await api.completeOnboarding();
       await refetch(); // refresh auth context so intake_completed becomes true
       navigate('/participant');
     } catch (err) {
