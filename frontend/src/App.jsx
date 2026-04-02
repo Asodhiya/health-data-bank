@@ -35,6 +35,7 @@ import Messages from "./pages/participant/Message";
 
 // ── Admin pages ──
 import UserManagementPage from "./pages/admin/UserManagementPage";
+import UserDetailPage from "./pages/admin/UserDetailPage";
 import AuditLogPage from "./pages/admin/AuditLogPage";
 import BackupRestorePage from "./pages/admin/BackupRestorePage";
 import SystemSettingsPage from "./pages/admin/SystemSettingsPage";
@@ -93,6 +94,7 @@ function App() {
             />
             <Route path="/surveys" element={<SurveyBuilderPage />} />
             <Route path="/users" element={<UserManagementPage />} />
+            <Route path="/admin/users/:id" element={<UserDetailPage />} />
             <Route path="/audit-logs" element={<AuditLogPage />} /> 
             <Route path="/settings" element={<SystemSettingsPage />} />
             <Route path="/backup" element={<BackupRestorePage />} />
