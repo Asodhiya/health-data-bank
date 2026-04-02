@@ -42,7 +42,7 @@ import AdminOnboardingPage from "./pages/admin/AdminOnboardingPage";
 
 // --- Researcher pages ---
 import ResearcherOnboardingPage from "./pages/researcher/ResearcherOnboardingPage";
-import DataElementManager from "./pages/researcher/DataElementMangaer";
+import DataElementManager from "./pages/researcher/DataElementManager";
 import Groups from "./pages/researcher/Group_Chorts";
 import GoalTemplates from "./pages/researcher/GoalTemplates";
 
