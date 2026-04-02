@@ -8,19 +8,25 @@ async function request(endpoint, options = {}) {
   });
 
   const data = await res.json();
-
+ 
   if (!res.ok) {
-    throw new Error(data.detail || "Something went wrong");
+    const msg =
+      typeof data.detail === "string"
+        ? data.detail
+        : Array.isArray(data.detail)
+          ? data.detail.map((d) => d.msg).join(", ")
+          : "Something went wrong";
+    throw new Error(msg);
   }
-
+ 
   return data;
 }
 
 export const api = {
-  login: (email, password) =>
+  login: (identifier, password) =>
     request("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identifier, password }),
     }),
 
   logout: () => request("/auth/logout", { method: "POST" }),
@@ -75,7 +81,12 @@ export const api = {
     }),
 
   unpublishForm: (formId) =>
-    request(`/form_management/${formId}/unpublish`, {
+    request(`/form_management/${formId}/unpublish-all`, {
+      method: "POST",
+    }),
+
+  unpublishFormFromGroup: (formId, groupId) =>
+    request(`/form_management/${formId}/unpublish/${groupId}`, {
       method: "POST",
     }),
 
@@ -89,11 +100,128 @@ export const api = {
     return request(`/admin_only/audit-logs?${params.toString()}`);
   },
 
+  // ── Admin: Backup & Restore ──
+
+  downloadBackup: async () => {
+    const res = await fetch(`${API_BASE}/admin_only/backup`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Failed to create backup");
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?(.+?)"?$/);
+    const filename = match
+      ? match[1]
+      : `backup_${new Date().toISOString().split("T")[0]}.json`;
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  restoreBackup: async (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/admin_only/restore`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Restore failed");
+    return data;
+  },
+
+  // TODO (backend): Add GET /admin_only/backups endpoint
+  listBackups: () => request("/admin_only/backups"),
+
+  // TODO (backend): Add DELETE /admin_only/backups/{backup_id} endpoint
+  deleteBackup: (backupId) =>
+    request(`/admin_only/backups/${backupId}`, { method: "DELETE" }),
+
+  // ── Admin: Groups (REAL — backed by /admin_only/groups) ──
+
+  adminGetGroups: () => request("/admin_only/groups"),
+
+  adminCreateGroup: (payload) =>
+    request("/admin_only/groups", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  adminDeleteGroup: (groupId) =>
+    request(`/admin_only/groups/${groupId}`, { method: "DELETE" }),
+
+  // ── Admin: Caretakers (REAL — backed by /admin_only/caretakers) ──
+
+  adminGetCaretakers: () => request("/admin_only/caretakers"),
+
+  adminAssignCaretaker: (userId, groupId) =>
+    request("/admin_only/assign-caretaker", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId, group_id: groupId }),
+    }),
+
+  adminUnassignCaretaker: (groupId) =>
+    request(`/admin_only/assign-caretaker/${groupId}`, { method: "DELETE" }),
+
+  adminUpdateGroup: (groupId, payload) =>
+    request(`/admin_only/groups/${groupId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  // ── Admin: Invites ──
+  // TODO (backend): Add GET /admin_only/invites and DELETE /admin_only/invites/{id}
+  adminListInvites: () => request("/admin_only/invites"),
+
+  adminRevokeInvite: (inviteId) =>
+    request(`/admin_only/invites/${inviteId}`, { method: "DELETE" }),
+
+  // ── Admin: User Management ──
+  // TODO (backend): Add CRUD endpoints for user management
+  adminListUsers: () => request("/admin_only/users"),
+
+  adminUpdateUser: (userId, payload) =>
+    request(`/admin_only/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  adminUpdateUserStatus: (userId, status) =>
+    request(`/admin_only/users/${userId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+
+  adminDeleteUser: (userId, mode) =>
+    request(`/admin_only/users/${userId}`, {
+      method: "DELETE",
+      body: JSON.stringify({ mode }),
+    }),
+
+  // Admin Profile (requires backend changes)
+  adminGetProfile: () => request("/admin_only/profile"),
+  adminGetSystemStats: () => request("/admin_only/system-stats"),
+
+  adminUpdateProfile: (payload) =>
+    request("/admin_only/profile", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
   // ── Auth: Invite ──
-  sendInvite: (email, target_role) =>
+  sendInvite: (email, target_role, group_id) =>
     request("/auth/signup_invite", {
       method: "POST",
-      body: JSON.stringify({ email, target_role }),
+      body: JSON.stringify({ email, target_role, ...(group_id ? { group_id } : {}) }),
     }),
 
   validateInvite: (token) => request(`/auth/validate-invite?token=${token}`),
@@ -102,6 +230,31 @@ export const api = {
     request(`/auth/register?token=${token}`, {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+
+  // ── Intake (onboarding) ──
+  getIntakeForm: () => request('/onboarding/form'),
+
+  submitIntake: (payload) =>
+    request('/onboarding', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  markBackgroundRead: () =>
+    request('/onboarding/background-read', {
+      method: 'POST',
+    }),
+
+  submitConsent: (payload) =>
+    request('/onboarding/consent', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  completeOnboarding: () =>
+    request('/onboarding/complete', {
+      method: 'POST',
     }),
 
   // ── Survey Fill (participant) ──
@@ -125,8 +278,7 @@ export const api = {
       body: JSON.stringify(answers),
     }),
 
-  // ── Data Elements (researcher) added by Nima──
-  // ── Data Elements (Standardization Hub) ──
+  // ── Data Elements (researcher) ──
 
   listElements: () =>
     request(`/data-elements/elements?t=${new Date().getTime()}`),
@@ -143,22 +295,47 @@ export const api = {
   getFieldMapping: (field_id) =>
     request(`/data-elements/fields/${field_id}/map`),
 
-  // Map: field_id in path, element_id and transform_rule in body
   mapField: (field_id, payload) =>
     request(`/data-elements/fields/${field_id}/map`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
-  // Unmap: field_id in path, element_id in query string (?element_id=...)
   unmapField: (field_id, element_id) =>
     request(`/data-elements/fields/${field_id}/map?element_id=${element_id}`, {
       method: "DELETE",
     }),
 
-  // ── Caretaker ──
-  // Backend stubs: backend/app/api/routes/Caretakers.py
-  // All calls fall back to mock data on the frontend when backend returns 404.
+  // ── Caretaker ──────────────────────────────────────────────────────────────
+  // Backend routes: backend/app/api/routes/Caretakers.py
+
+  // Profile (requires backend changes — see pending backend backlog)
+  caretakerGetProfile: () => request("/caretaker/profile"),
+
+  caretakerUpdateProfile: (payload) =>
+    request("/caretaker/profile", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  researcherGetProfile: () => request("/researcher/profile"),
+
+  researcherUpdateProfile: (payload) =>
+    request("/researcher/profile", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  // Groups
+  caretakerGetGroups: () => request("/caretaker/groups"),
+
+  caretakerGetGroup: (groupId) => request(`/caretaker/groups/${groupId}`),
+
+  caretakerGetGroupMembers: (groupId) =>
+    request(`/caretaker/groups/${groupId}/members`),
+
+  caretakerGetGroupElements: (groupId) =>
+    request(`/caretaker/groups/${groupId}/elements`),
 
   // Participants
   caretakerListParticipants: (params = {}) => {
@@ -166,22 +343,38 @@ export const api = {
     return request(`/caretaker/participants${qs ? `?${qs}` : ""}`);
   },
 
-  caretakerGetParticipant: (participantId) =>
-    request(`/caretaker/participants/${participantId}`),
+  caretakerGetParticipant: (participantId, groupId) =>
+    request(`/caretaker/participants/${participantId}?group_id=${groupId}`),
 
-  // Groups
-  caretakerGetGroups: () => request("/caretaker/groups"),
-
-  // Submissions (read-only for caretaker)
-  caretakerListSubmissions: (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
-    return request(`/caretaker/submissions${qs ? `?${qs}` : ""}`);
+  caretakerGetActivityCounts: (groupId) => {
+    const qs = groupId ? `?group_id=${groupId}` : "";
+    return request(`/caretaker/participants/activity-counts${qs}`);
   },
 
-  caretakerGetSubmission: (submissionId) =>
-    request(`/caretaker/submissions/${submissionId}`),
+  // Submissions
+  caretakerListSubmissions: (participantId, params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/caretaker/participants/${participantId}/submissions${qs ? `?${qs}` : ""}`);
+  },
+
+  caretakerGetSubmissionDetail: (participantId, submissionId) =>
+    request(`/caretaker/participants/${participantId}/submissions/${submissionId}`),
+
+  // Feedback
+  caretakerListFeedback: (participantId) =>
+    request(`/caretaker/participants/${participantId}/feedback`),
+
+  caretakerCreateFeedback: (participantId, submissionId, message) =>
+    request(`/caretaker/participants/${participantId}/submissions/${submissionId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
 
   // Health Goals (read-only for caretaker)
+  caretakerGetGoals: (participantId) =>
+    request(`/caretaker/participants/${participantId}/goals`),
+
+  // Alias for backward compatibility
   caretakerGetParticipantGoals: (participantId) =>
     request(`/caretaker/participants/${participantId}/goals`),
 
@@ -193,7 +386,7 @@ export const api = {
     );
   },
 
-  // Notes & Feedback
+  // Notes (no backend endpoint — kept for future use)
   caretakerListNotes: (participantId) =>
     request(`/caretaker/participants/${participantId}/notes`),
 
@@ -214,16 +407,18 @@ export const api = {
 
   // Reports
   caretakerGenerateGroupReport: (groupId, payload) =>
-    request(`/caretaker/reports/group?group_id=${groupId}`, {
+    request(`/caretaker/reports/group/generate?group_id=${groupId}`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
-  caretakerGenerateComparisonReport: (participantId, payload) =>
-    request(`/caretaker/reports/comparison?participant_id=${participantId}`, {
+  caretakerGenerateComparisonReport: (participantId, queryParams = {}, payload = {}) => {
+    const params = new URLSearchParams({ participant_id: participantId, ...queryParams });
+    return request(`/caretaker/reports/comparison?${params.toString()}`, {
       method: "POST",
       body: JSON.stringify(payload),
-    }),
+    });
+  },
 
   caretakerGenerateParticipantReport: (participantId, payload) =>
     request(`/caretaker/reports/participant?participant_id=${participantId}`, {
@@ -233,6 +428,9 @@ export const api = {
 
   caretakerGetReport: (reportId) => request(`/caretaker/reports/${reportId}`),
 
+  caretakerListReports: () => request("/caretaker/reports"),
+
+  // Invites (no backend endpoint yet)
   caretakerListInvites: () => request("/caretaker/invites"),
 
   caretakerRevokeInvite: (inviteId) =>
@@ -252,30 +450,34 @@ export const api = {
 
   // ── Researcher Analytics ──
 
-  // 1. Get the list of published surveys for the dropdown
   getAvailableSurveys: () => request("/researcher/query/available-surveys"),
 
-  // 2. Fetch the actual data and columns (accepts optional filters like survey_id)
   getResearcherResults: (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
+    const sp = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((v) => sp.append(key, v));
+      } else {
+        sp.append(key, value);
+      }
+    });
+    const qs = sp.toString();
     return request(`/researcher/query/results${qs ? `?${qs}` : ""}`);
   },
 
   // 3. Generate the CSV file download URL
   // We don't use the standard request() here because we need to handle a file Blob, not JSON!
-  downloadResearcherResults: async (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
+  downloadResearcherResults: async (params = {}, excludeColumns = []) => {
+    const allParams = { ...params };
+    if (excludeColumns.length > 0) allParams.exclude_columns = excludeColumns.join(",");
+    const qs = new URLSearchParams(allParams).toString();
     const res = await fetch(
       `${API_BASE}/researcher/query/results/download${qs ? `?${qs}` : ""}`,
-      {
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-      },
+      { credentials: "include" },
     );
 
     if (!res.ok) throw new Error("Failed to download CSV");
 
-    // Convert response to a blob and trigger browser download
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -284,6 +486,7 @@ export const api = {
     document.body.appendChild(a);
     a.click();
     a.remove();
+    window.URL.revokeObjectURL(url);
   },
 
   // ── Goal Templates (Researcher) ──
@@ -305,4 +508,45 @@ export const api = {
     request(`/goal-templates/${templateId}`, {
       method: "DELETE",
     }),
+
+  // ── Participant: Surveys ──
+  getAssignedSurveys: () => request("/participant/surveys/assigned"),
+
+  // ── Participant: Health Goals ──
+
+  browseGoalTemplates: () => request("/participant/goal-templates"),
+
+  listParticipantGoals: () => request("/participant/goals"),
+
+  getParticipantGoal: (goalId) => request(`/participant/goals/${goalId}`),
+
+  addGoalFromTemplate: (templateId, targetValue = null) => {
+    const url = `/participant/goals/add/${templateId}${targetValue ? `?target_value=${targetValue}` : ""}`;
+    return request(url, { method: "POST" });
+  },
+
+  updateParticipantGoal: (goalId, payload) =>
+    request(`/participant/goals/${goalId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteParticipantGoal: (goalId) =>
+    request(`/participant/goals/${goalId}`, { method: "DELETE" }),
+
+  logGoalProgress: (goalId, payload) =>
+    request(`/participant/goals/${goalId}/log`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // ── Participant Stats (for Charts) ──
+
+  getMyStats: () => request("/stats/stats_me"),
+
+  getAvailableElements: () => request("/stats/me/available-elements"),
+
+  getMyElementsData: () => request("/stats/me/elements"),
+
+  getMyVsGroupStats: () => request("/stats/me/vs-group"),
 };

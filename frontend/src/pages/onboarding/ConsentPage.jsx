@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { sanitizeText, sanitizeEmail, trimPayload } from '../../utils/sanitize';
+import { api } from '../../services/api';
 
 /*
   All 13 consent items from Appendix B.
@@ -65,11 +66,17 @@ function YesNoToggle({ value, onChange }) {
 
 export default function ConsentPage() {
   const navigate = useNavigate();
-  const [answers, setAnswers] = useState({});
-  const [signature, setSignature] = useState('');
+  const [answers, setAnswers] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('consent_answers') || '{}'); } catch { return {}; }
+  });
+  const [signature, setSignature] = useState(() => sessionStorage.getItem('consent_signature') || '');
   //const [wantResults, setWantResults] = useState(false);
   //const [resultEmail, setResultEmail] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => { sessionStorage.setItem('consent_answers', JSON.stringify(answers)); }, [answers]);
+  useEffect(() => { sessionStorage.setItem('consent_signature', signature); }, [signature]);
 
   const setAnswer = (id, val) => setAnswers({ ...answers, [id]: val });
 
@@ -79,7 +86,7 @@ export default function ConsentPage() {
   const allRequiredYes = requiredItems.every((c) => answers[c.id] === 'yes');
   const canSubmit = allAnswered && allRequiredYes && signature.trim().length > 0;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!allAnswered) {
       setError('Please answer all consent items before proceeding.');
       return;
@@ -93,19 +100,21 @@ export default function ConsentPage() {
       return;
     }
     setError('');
-
-    // TODO: Send consent data to backend API
-    // trimPayload trims all strings right before sending
-    // const payload = trimPayload({
-    //   answers,
-    //   signature: signature,
-    //   consent_date: new Date().toISOString(),
-    //   want_results: wantResults,
-    //   result_email: wantResults ? resultEmail : null,
-    // });
-    // await api.submitConsent(payload);
-
-    navigate('/onboarding/intake');
+    setIsSubmitting(true);
+    try {
+      const payload = trimPayload({
+        answers,
+        signature,
+      });
+      await api.submitConsent(payload);
+      sessionStorage.removeItem('consent_answers');
+      sessionStorage.removeItem('consent_signature');
+      navigate('/onboarding/intake');
+    } catch (err) {
+      setError(err.message || 'Failed to submit consent. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -268,14 +277,14 @@ export default function ConsentPage() {
         <button
           type="button"
           className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-colors ${
-            canSubmit
+            canSubmit && !isSubmitting
               ? 'bg-blue-600 hover:bg-blue-700 text-white'
               : 'bg-slate-100 text-slate-400 cursor-not-allowed'
           }`}
-          disabled={!canSubmit}
+          disabled={!canSubmit || isSubmitting}
           onClick={handleSubmit}
         >
-          Sign &amp; Continue to Intake Form
+          {isSubmitting ? 'Submitting...' : 'Sign & Continue to Intake Form'}
         </button>
       </div>
     </>

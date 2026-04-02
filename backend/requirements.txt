@@ -12,3 +12,5 @@ sqlalchemy[asyncio]
 asyncpg
 alembic
 python-multipart
+psutil
+apscheduler

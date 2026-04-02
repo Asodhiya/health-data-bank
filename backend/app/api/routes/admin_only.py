@@ -1,18 +1,18 @@
 from fastapi import APIRouter, Depends, Query, UploadFile, File
 from fastapi.responses import Response
 from app.schemas.schemas import Role_schema, Permissions_schema, Role_user_link, Link_role_permission_schema
-from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResponse, UnassignCaretakerResponse, CaretakerItem, DeleteGroupResponse, RestoreResponse
+from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResponse, UnassignCaretakerResponse, CaretakerItem, DeleteGroupResponse, RestoreResponse, AdminProfileUpdate, AdminProfileOut, UserListItem, AdminUserUpdate, UserStatusUpdate, InviteListItem, BackupListItem
 from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem
 from app.services.role_service import addroles, viewroles, add_permissions, link_user_roles, link_role_permisson
-from app.services.admin_service import assign_caretaker_to_group, unassign_caretaker_from_group, create_group, delete_group, list_groups, list_caretakers, backup_database, restore_database
+from app.services.admin_service import assign_caretaker_to_group, unassign_caretaker_from_group, create_group, delete_group, list_groups, list_caretakers, backup_database, restore_database, list_users, update_user, update_user_status, delete_user, list_invites, revoke_invite, list_backups, delete_backup
 from typing import List
 from app.db.session import get_db
-from app.db.models import Role, AuditLog, User
+from app.db.models import Role, AuditLog, User, AdminProfile
+from app.core.dependency import require_permissions, check_current_user
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
-from app.core.dependency import require_permissions
 from typing import Optional
-from app.core.permissions import ROLE_READ_ALL, GROUP_READ, GROUP_WRITE, GROUP_DELETE, CARETAKER_READ, CARETAKER_ASSIGN, BACKUP_CREATE
+from app.core.permissions import ROLE_READ_ALL, GROUP_READ, GROUP_WRITE, GROUP_DELETE, CARETAKER_READ, CARETAKER_ASSIGN, BACKUP_CREATE, USER_READ, USER_WRITE, USER_DELETE
 from uuid import UUID
 
 router = APIRouter()
@@ -20,7 +20,7 @@ router = APIRouter()
 
 # ── Existing role/permission endpoints ──────────────────────────────────────
 
-@router.post("/add_roles")
+@router.post("/add_roles", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def add_roles(Payload: Role_schema, db: AsyncSession = Depends(get_db)):
     role = await addroles(Payload, db)
     return role
@@ -32,19 +32,19 @@ async def view_roles(db: AsyncSession = Depends(get_db)):
     return roles
 
 
-@router.post("/post_permission")
+@router.post("/post_permission", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def post_permission(Payload: Permissions_schema, db: AsyncSession = Depends(get_db)):
     user_role = await add_permissions(Payload, db)
     return user_role
 
 
-@router.post("/linkrole")
+@router.post("/linkrole", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def give_role(Payload: Role_user_link, db: AsyncSession = Depends(get_db)):
     userrole = await link_user_roles(Payload, db)
     return userrole
 
 
-@router.post("/linkpermission")
+@router.post("/linkpermission", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def role_permission(Payload: Link_role_permission_schema, db: AsyncSession = Depends(get_db)):
     role_perm = await link_role_permisson(Payload, db)
     return role_perm
@@ -52,14 +52,13 @@ async def role_permission(Payload: Link_role_permission_schema, db: AsyncSession
 
 # ── Audit / Activity Log endpoint ────────────────────────────────────────────
 
-@router.get("/audit-logs")
+@router.get("/audit-logs", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def get_audit_logs(
     limit: int = Query(default=20, ge=1, le=100, description="Number of records to return"),
     offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     action: Optional[str] = Query(default=None, description="Filter by action e.g. LOGIN_FAILED"),
     db: AsyncSession = Depends(get_db),
-    # Uncomment once 'audit:read' permission is seeded in the DB:
-    # _: None = Depends(require_permissions("audit:read")),
+    # TODO: replace ROLE_READ_ALL with require_permissions("audit:read") once that permission is seeded in the DB
 ):
     """
     Return paginated audit log entries, newest first.
@@ -190,3 +189,137 @@ async def restore_endpoint(
     """Upload a backup JSON file to wipe and restore the database."""
     raw_content = await file.read()
     return await restore_database(raw_content, db)
+
+
+# ── Admin Profile ────────────────────────────────────────────────────────────
+
+@router.get("/profile", response_model=AdminProfileOut)
+async def get_admin_profile(
+    user: User = Depends(check_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(AdminProfile).where(AdminProfile.user_id == user.user_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        profile = AdminProfile(user_id=user.user_id)
+        db.add(profile)
+        await db.commit()
+        await db.refresh(profile)
+    return profile
+
+
+@router.patch("/profile", response_model=AdminProfileOut)
+async def update_admin_profile(
+    payload: AdminProfileUpdate,
+    user: User = Depends(check_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(AdminProfile).where(AdminProfile.user_id == user.user_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        profile = AdminProfile(user_id=user.user_id)
+        db.add(profile)
+
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(profile, field, value)
+
+    if not profile.onboarding_completed:
+        profile.onboarding_completed = True
+
+    await db.commit()
+    await db.refresh(profile)
+    return profile
+
+
+# ── User Management ──────────────────────────────────────────────────────────
+
+@router.get("/users", response_model=list[UserListItem], dependencies=[Depends(require_permissions(USER_READ))])
+async def get_users(db: AsyncSession = Depends(get_db)):
+    return await list_users(db)
+
+
+@router.patch("/users/{user_id}", dependencies=[Depends(require_permissions(USER_WRITE))])
+async def patch_user(
+    user_id: UUID,
+    payload: AdminUserUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    return await update_user(user_id, payload, db)
+
+
+@router.patch("/users/{user_id}/status", dependencies=[Depends(require_permissions(USER_WRITE))])
+async def patch_user_status(
+    user_id: UUID,
+    payload: UserStatusUpdate,
+    actor: User = Depends(check_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await update_user_status(user_id, payload.status, actor.user_id, db)
+
+
+@router.delete("/users/{user_id}", dependencies=[Depends(require_permissions(USER_DELETE))])
+async def remove_user(
+    user_id: UUID,
+    mode: str = "anonymize",
+    actor: User = Depends(check_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await delete_user(user_id, mode, actor.user_id, db)
+
+
+# ── Invite Management ────────────────────────────────────────────────────────
+
+@router.get("/invites", response_model=list[InviteListItem], dependencies=[Depends(require_permissions(USER_READ))])
+async def get_invites(db: AsyncSession = Depends(get_db)):
+    return await list_invites(db)
+
+
+@router.delete("/invites/{invite_id}", dependencies=[Depends(require_permissions(USER_WRITE))])
+async def delete_invite(invite_id: UUID, db: AsyncSession = Depends(get_db)):
+    return await revoke_invite(invite_id, db)
+
+
+# ── Backup History ───────────────────────────────────────────────────────────
+
+@router.get("/backups", response_model=list[BackupListItem], dependencies=[Depends(require_permissions(BACKUP_CREATE))])
+async def get_backups(db: AsyncSession = Depends(get_db)):
+    return await list_backups(db)
+
+
+@router.delete("/backups/{backup_id}", dependencies=[Depends(require_permissions(BACKUP_CREATE))])
+async def remove_backup(backup_id: UUID, db: AsyncSession = Depends(get_db)):
+    return await delete_backup(backup_id, db)
+
+
+@router.get("/system-stats", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
+async def get_system_stats():
+    """Return live server metrics for admin dashboard gauges."""
+    import psutil, time, platform
+
+    boot_time = psutil.boot_time()
+    uptime_seconds = time.time() - boot_time
+    days, remainder = divmod(int(uptime_seconds), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, _ = divmod(remainder, 60)
+
+    cpu_percent = psutil.cpu_percent(interval=0.5)
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+
+    return {
+        "cpu_percent": cpu_percent,
+        "memory_percent": memory.percent,
+        "memory_used_gb": round(memory.used / (1024 ** 3), 2),
+        "memory_total_gb": round(memory.total / (1024 ** 3), 2),
+        "disk_percent": disk.percent,
+        "disk_used_gb": round(disk.used / (1024 ** 3), 2),
+        "disk_total_gb": round(disk.total / (1024 ** 3), 2),
+        "uptime_seconds": int(uptime_seconds),
+        "uptime_formatted": f"{days}d {hours}h {minutes}m",
+        "platform": platform.system(),
+        "python_version": platform.python_version(),
+    }

@@ -1,6 +1,6 @@
 import { Link, useOutletContext } from "react-router-dom";
 import { useEffect, useState } from "react";
-import api from "../../utils/axiosInstance";
+import { api } from "../../services/api";
 import {
   BarChart,
   Bar,
@@ -9,27 +9,17 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Cell,
 } from "recharts";
 
-// 🎨 CUSTOM CHART HOVER EFFECT
-const CustomTooltip = ({ active, payload, label }) => {
-  // "active" means the mouse is hovering. "payload" holds our data!
+const CustomTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
-    // payload[0].payload gives us access to {name, score, focus}
-    const data = payload[0].payload;
-
     return (
-      <div className="bg-white p-4 rounded-xl shadow-lg border border-slate-100 outline-none">
-        <p className="font-bold text-slate-800 mb-1">{label}</p>
-        <div className="flex items-center gap-2 mb-1">
-          <span className="w-3 h-3 rounded-full bg-blue-500"></span>
-          <p className="text-sm font-medium text-slate-700">
-            Score: <span className="text-blue-600">{data.score}%</span>
-          </p>
-        </div>
-        <p className="text-xs text-slate-500 bg-slate-50 inline-block px-2 py-1 rounded-md mt-1 border border-slate-100">
-          Focus: {data.focus}
+      <div className="bg-white p-2 shadow-md rounded-lg border border-slate-100">
+        <p className="text-[10px] font-bold text-slate-400 uppercase">
+          {payload[0].payload.name}
         </p>
+        <p className="text-sm font-bold text-slate-800">{payload[0].value}</p>
       </div>
     );
   }
@@ -41,7 +31,50 @@ export default function ParticipantDashboard() {
 
   const { user } = useOutletContext();
 
-  console.log(user);
+  const [surveys, setSurveys] = useState([]);
+  const [goals, setGoals] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setLoading(true);
+        // We fetch everything in parallel for speed
+        const [surveyData, goalData, statsData] = await Promise.all([
+          api.getAssignedSurveys(),
+          api.listParticipantGoals(),
+          api.getMyStats(), // 🟢 Fetching real chart data
+        ]);
+
+        setSurveys(surveyData || []);
+        setGoals(goalData || []);
+        setStats(statsData);
+
+        console.log("📊 Stats Data Loaded:", statsData);
+      } catch (err) {
+        console.error("Dashboard Sync Error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
+
+  // Detect if the user is on a mobile screen (under 640px wide)
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    // Check initial size
+    setIsMobile(window.innerWidth < 640);
+
+    // Update if they rotate their phone or resize the window
+    const handleResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener("resize", handleResize);
+
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // Current Date:
   const todayFormatted = new Date().toLocaleDateString("en-US", {
@@ -60,58 +93,19 @@ export default function ParticipantDashboard() {
 
   const greetings = getGreeting();
 
-  // survey list from backend, Empty List
-  const [surveys, setSurveys] = useState([]);
-  const [loadingSurveys, setLoadingSurveys] = useState(true);
-
-  // ⚠️ DELETE THIS LATER: Fake data just to see the UI while DB is empty
-  const dummySurveys = [
-    {
-      id: 1,
-      title: "Nutrition Log",
-      description: "Record your meals and water intake for the day.",
-      icon: "🥗",
-    },
-    {
-      id: 2,
-      title: "Sleep Tracker",
-      description: "Log your sleep hours and resting quality.",
-      icon: "😴",
-    },
-    {
-      id: 3,
-      title: "Mood Check-in",
-      description: "A quick check-in on your stress and mental wellbeing.",
-      icon: "🧠",
-    },
-  ];
-
-  // ⚠️ DELETE THIS LATER: Fake data for the Recharts BarChart
-  const healthScoreData = [
-    { name: "Week 1", score: 85, focus: "Nutrition" },
-    { name: "Week 2", score: 92, focus: "Sleep" },
-    { name: "Week 3", score: 78, focus: "Activity" },
-    { name: "Week 4", score: 88, focus: "Mood" },
-  ];
-
-  // 🔄 SWITCH: Change this to `surveys` when real data is added to the DB.
-  const displaySurveys = dummySurveys;
-
-  useEffect(() => {
-    api
-      .get("/participant/surveys/assigned")
-      .then((response) => {
-        console.log("📋 Raw Survey Data:", response.data);
-
-        setSurveys(response.data);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch surveys:", err);
-      })
-      .finally(() => {
-        setLoadingSurveys(false);
-      });
-  }, []);
+  const chartData = stats
+    ? [
+        { name: "Active Surveys", score: stats.active_forms, color: "#3b82f6" },
+        { name: "Forms Filled", score: stats.forms_filled, color: "#10b981" },
+        { name: "Active Goals", score: stats.active_goals, color: "#f59e0b" },
+        {
+          name: "Goals Remaining",
+          score: stats.goal_remaining,
+          color: "#ef4444",
+        },
+        { name: "Goals Met", score: stats.goals_met, color: "#8b5cf6" },
+      ]
+    : [];
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 p-2 md:p-0">
@@ -174,28 +168,25 @@ export default function ParticipantDashboard() {
         {/* Weekly Progress Chart (Takes up 2 columns on large screens) */}
         <div className="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
           <h2 className="text-lg font-bold text-slate-800 mb-6">
-            Monthly Health Score
+            Progress Bar
           </h2>
 
           <div className="space-y-5">
             {/* Week 1 Bar */}
             <div className="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
               <h2 className="text-lg font-bold text-slate-800 mb-2">
-                Monthly Health Score
+                Daily Acitivity Overview
               </h2>
               <p className="text-sm text-slate-500 mb-6">
-                Your overall wellness average for the past 4 weeks.
+                Tracking your survey completions and goal progress.
               </p>
-
-              {/* THE RECHARTS COMPONENT */}
-              {/* THE RECHARTS COMPONENT OR EMPTY STATE */}
               <div className="h-64 w-full">
-                {healthScoreData && healthScoreData.length > 0 ? (
+                {chartData && chartData.length > 0 ? (
                   /* THE ACTUAL CHART */
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={healthScoreData}
-                      margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                      data={chartData}
+                      margin={{ top: 20, right: 10, left: 10, bottom: 0 }} // Added top margin for labels
                     >
                       <CartesianGrid
                         strokeDasharray="3 3"
@@ -204,28 +195,35 @@ export default function ParticipantDashboard() {
                       />
                       <XAxis
                         dataKey="name"
+                        // If mobile, hide text (false). If desktop, show text with standard styling.
+                        tick={
+                          isMobile ? false : { fontSize: 12, fill: "#64748b" }
+                        }
+                        // Shrink the bottom gap on mobile so the chart looks perfectly centered
+                        height={isMobile ? 10 : 30}
                         axisLine={false}
                         tickLine={false}
-                        tick={{ fill: "#64748b", fontSize: 12 }}
-                        dy={10}
                       />
-                      <YAxis
-                        domain={[0, 100]}
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: "#94a3b8", fontSize: 12 }}
-                      />
+                      {/* 🟢 YAxis is hidden, but still exists so the bars have a coordinate system */}
+                      <YAxis hide={true} domain={[0, "dataMax + 1"]} />
+
                       <Tooltip
                         cursor={{ fill: "#f8fafc" }}
                         content={<CustomTooltip />}
                       />
+
                       <Bar
                         dataKey="score"
-                        fill="#3b82f6"
                         radius={[6, 6, 0, 0]}
                         barSize={40}
-                        animationDuration={1500}
-                      />
+                        animationDuration={1000}
+                        // We'll use a simple background here; if it doesn't show, it's fine!
+                        background={{ fill: "#f1f5f9", radius: 6 }}
+                      >
+                        {chartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
@@ -245,38 +243,73 @@ export default function ParticipantDashboard() {
           </div>
         </div>
 
-        {/* Quick Stats: Current Streak (Takes 1 column) */}
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col justify-center items-center text-center">
-          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-4">
-            {/* Flame Icon */}
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-8 w-8 text-amber-500"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fillRule="evenodd"
-                d="M12.395 2.553a1 1 0 00-1.45-.385c-.345.23-.614.558-.822.88-.214.33-.403.713-.57 1.116-.334.804-.614 1.768-.84 2.734a31.365 31.365 0 00-.613 3.58 2.64 2.64 0 01-.945-1.067c-.328-.68-.398-1.534-.398-2.654A1 1 0 005.05 6.05 6.981 6.981 0 003 11a7 7 0 1011.95-4.95c-.592-.591-.98-.985-1.348-1.467-.363-.476-.724-1.063-1.207-2.03zM12.12 15.12A3 3 0 017 13s.879.5 2.5.5c0-1 .5-4 1.25-4.5.5 1 .786 1.293 1.371 1.879A2.99 2.99 0 0113 13a2.99 2.99 0 01-.879 2.121z"
-                clipRule="evenodd"
-              />
-            </svg>
+        {/* Daily Success: The Game-Changer Card */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col justify-between h-full">
+          <div className="text-center">
+            <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4 mx-auto shadow-inner border border-blue-100/50">
+              <span className="text-3xl">🎯</span>
+            </div>
+            <h2 className="text-lg font-bold text-slate-800 tracking-tight">
+              Daily Success
+            </h2>
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mt-1">
+              Today's Completion
+            </p>
           </div>
-          <h2 className="text-lg font-bold text-slate-800">Current Streak</h2>
-          <div className="flex items-baseline justify-center gap-1 mt-2">
-            <span className="text-5xl font-extrabold text-slate-800">12</span>
-            <span className="text-slate-500 font-medium">days</span>
+
+          <div className="my-8 text-center relative">
+            {/* Large Percentage Display */}
+            <span className="text-6xl font-black text-slate-800 tracking-tighter">
+              {stats
+                ? Math.round(
+                    ((stats.forms_filled + (stats.goals_met || 0)) /
+                      (stats.active_forms + stats.active_goals || 1)) *
+                      100,
+                  )
+                : 0}
+              <span className="text-2xl text-blue-500 ml-1">%</span>
+            </span>
           </div>
-          <p className="text-sm text-slate-500 mt-4 px-2">
-            You're doing great! Keep logging your daily surveys to maintain your
-            health streak.
-          </p>
+
+          <div className="space-y-4 pt-6 border-t border-slate-50">
+            {/* Remaining Tasks Badge */}
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium text-slate-500">
+                Tasks Left
+              </span>
+              <span className="bg-rose-50 text-rose-600 px-2.5 py-1 rounded-lg text-xs font-bold border border-rose-100">
+                {stats
+                  ? stats.active_forms -
+                    stats.forms_filled +
+                    (stats.active_goals - (stats.goals_met || 0))
+                  : 0}
+              </span>
+            </div>
+
+            {/* Dynamic Progress Bar */}
+            <div className="space-y-2">
+              <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden shadow-inner">
+                <div
+                  className="bg-gradient-to-r from-blue-500 to-blue-600 h-full transition-all duration-1000 ease-out rounded-full shadow-sm"
+                  style={{
+                    width: `${stats ? Math.round(((stats.forms_filled + (stats.goals_met || 0)) / (stats.active_forms + stats.active_goals || 1)) * 100) : 0}%`,
+                  }}
+                ></div>
+              </div>
+
+              {/* Dynamic Sub-text */}
+              <p className="text-[11px] text-center text-slate-400 font-medium italic">
+                {stats?.forms_filled + stats?.goals_met === 0
+                  ? "Click 'Start Entry' below to begin!"
+                  : "Keep going, you're doing great!"}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
       {/* STEP 3: SURVEY TEMPLATES CAROUSEL */}
       <div className="bg-blue-600 rounded-2xl p-6 md:p-8 shadow-sm relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -translate-y-1/2 translate-x-1/4 pointer-events-none"></div>
-
         {/* Section Header & Arrow Buttons */}
         <div className="flex justify-between items-end mb-6 relative z-10">
           <div>
@@ -324,54 +357,48 @@ export default function ParticipantDashboard() {
             </button>
           </div>
         </div>
-
         {/* Horizontal Scroll Container */}
         <div className="flex gap-5 overflow-x-auto pb-4 snap-x relative z-10 custom-scrollbar">
-          {/* Card 1: Nutrition */}
-          {/* Horizontal Scroll Container */}
-          <div className="flex gap-5 overflow-x-auto pb-4 snap-x relative z-10 custom-scrollbar">
-            {/* PASTE STARTING HERE 👇 */}
-            {loadingSurveys ? (
-              <p className="text-white animate-pulse">
-                Checking for assigned surveys... 🔍
-              </p>
-            ) : displaySurveys.length > 0 ? (
-              displaySurveys.map((survey) => (
-                <div
-                  key={survey.id}
-                  className="min-w-[260px] bg-slate-50 rounded-xl p-5 shadow-sm snap-start flex flex-col border border-slate-100"
-                >
-                  <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mb-4 text-xl">
-                    {survey.icon || "📋"}
-                  </div>
-                  <h3 className="text-lg font-bold text-slate-800">
-                    {survey.title}
-                  </h3>
-                  <p className="text-sm text-slate-500 mt-1 mb-6 flex-1">
-                    {survey.description}
-                  </p>
-                  <Link
-                    to="/participant/survey"
-                    className="w-full text-center bg-blue-100 hover:bg-blue-200 text-blue-700 py-2 rounded-lg font-medium transition-colors"
-                  >
-                    Start Survey
-                  </Link>
+          {loading ? (
+            <p className="text-white animate-pulse">
+              Checking for assigned surveys... 🔍
+            </p>
+          ) : surveys && surveys.length > 0 ? ( // 👈 Use 'surveys' here
+            surveys.map((survey) => (
+              <div
+                key={survey.form_id}
+                className="min-w-[260px] bg-white rounded-xl p-5 shadow-sm snap-start flex flex-col border border-slate-100"
+              >
+                <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mb-4 text-xl">
+                  {/* If backend doesn't have icons, use a default */}
+                  {survey.icon || "📋"}
                 </div>
-              ))
-            ) : (
-              <div className="min-w-[260px] w-full bg-white/10 rounded-xl p-8 text-center border border-white/20 backdrop-blur-sm">
-                <span className="text-4xl mb-3 block">🎉</span>
-                <h3 className="text-xl font-bold text-white">
-                  You're all caught up!
+                <h3 className="text-lg font-bold text-slate-800">
+                  {survey.title}
                 </h3>
-                <p className="text-blue-100 mt-2">
-                  No surveys assigned today. Enjoy your day off!
+                <p className="text-sm text-slate-500 mt-1 mb-6 flex-1 line-clamp-2">
+                  {survey.description || "Daily health tracking survey."}
                 </p>
+                <Link
+                  to={`/participant/surveys/${survey.form_id}`}
+                  className="w-full text-center bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold transition-colors shadow-sm block"
+                >
+                  Start Entry
+                </Link>
               </div>
-            )}
-          </div>{" "}
-          {/* Make sure this closing div is still here! */}
-        </div>
+            ))
+          ) : (
+            <div className="min-w-[260px] w-full bg-white/10 rounded-xl p-8 text-center border border-white/20 backdrop-blur-sm">
+              <span className="text-4xl mb-3 block">🎉</span>
+              <h3 className="text-xl font-bold text-white">
+                You're all caught up!
+              </h3>
+              <p className="text-blue-100 mt-2">
+                No surveys assigned today. Enjoy your day off!
+              </p>
+            </div>
+          )}
+        </div>{" "}
       </div>
     </div>
   );

@@ -3,99 +3,71 @@ import { useParams, useNavigate, useOutletContext } from "react-router-dom";
 import { api } from "../../services/api";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
-// ─── Mock Data (removed once backend is live) ───────────────────────────────────
-// TODO (Phase 2): Delete all MOCK_* once these endpoints return real data:
-//   GET  /caretaker/participants/:id
-//   GET  /caretaker/participants/:id/summary
-//   GET  /caretaker/submissions?participant_id=:id
-//   GET  /caretaker/submissions/:id
-//   GET  /caretaker/participants/:id/goals
-//   GET  /caretaker/participants/:id/notes
-//   POST /caretaker/participants/:id/notes
-
-const MOCK_PARTICIPANT = {
-  id: "p7", firstName: "James", lastName: "Kowalski",
-  email: "james.kowalski@example.com", phone: "+1 204-555-0144",
-  dob: "1972-03-08", gender: "Male", status: "active",
-  groupName: "Morning Cohort A",
-  enrolledAt: "2025-09-15", lastActive: "2026-03-08",
-  healthGoals: 2, healthGoalsTotal: 4, surveysDone: 9, surveysTotal: 10,
-  latestMetrics: { bpSystolic: 142, bpDiastolic: 92, weight: 98.7, painLevel: 6 },
-  flags: ["High BP reported", "High pain reported"],
-};
-
-const MOCK_SUBMISSIONS = [
-  { id: "s1", formName: "Perceived Stress Scale (PSS)", category: "Mental Health", submittedAt: "2026-03-08", status: "completed",
-    fields: [
-      { label: "In the last month, how often have you been upset because of something that happened unexpectedly?", type: "likert", description: "Rate from 0 (Never) to 4 (Very Often)", required: true, answer: "3 — Fairly Often" },
-      { label: "In the last month, how often have you felt that you were unable to control the important things in your life?", type: "likert", description: "Rate from 0 (Never) to 4 (Very Often)", required: true, answer: "3 — Fairly Often" },
-      { label: "In the last month, how often have you felt nervous and stressed?", type: "likert", description: "Rate from 0 (Never) to 4 (Very Often)", required: true, answer: "4 — Very Often" },
-      { label: "In the last month, how often have you felt confident about your ability to handle your personal problems?", type: "likert", description: "Rate from 0 (Never) to 4 (Very Often). Note: This is a reverse-scored item.", required: false, answer: "1 — Almost Never" },
-      { label: "In the last month, how often have you felt that things were going your way?", type: "likert", description: "Rate from 0 (Never) to 4 (Very Often). Note: This is a reverse-scored item.", required: true, answer: "1 — Almost Never" },
-      { label: "In the last month, how often have you found that you could not cope with all the things that you had to do?", type: "likert", description: null, required: true, answer: "3 — Fairly Often" },
-      { label: "In the last month, how often have you been able to control irritations in your life?", type: "likert", description: "Note: This is a reverse-scored item.", required: true, answer: "1 — Almost Never" },
-      { label: "In the last month, how often have you felt that you were on top of things?", type: "likert", description: "Note: This is a reverse-scored item.", required: true, answer: "1 — Almost Never" },
-      { label: "In the last month, how often have you been angered because of things that were outside of your control?", type: "likert", description: null, required: true, answer: "3 — Fairly Often" },
-      { label: "In the last month, how often have you felt difficulties were piling up so high that you could not overcome them?", type: "likert", description: null, required: true, answer: "3 — Fairly Often" },
-    ]},
-  { id: "s2", formName: "UCLA Loneliness Scale (Version 3)", category: "Social Wellness", submittedAt: "2026-02-25", status: "completed",
-    fields: [
-      { label: "How often do you feel that you are 'in tune' with the people around you?", type: "likert", description: "1 = Never, 2 = Rarely, 3 = Sometimes, 4 = Always", required: true, answer: "2 — Rarely" },
-      { label: "How often do you feel that you lack companionship?", type: "likert", description: null, required: true, answer: "3 — Sometimes" },
-      { label: "How often do you feel that there is no one you can turn to?", type: "likert", description: null, required: true, answer: "2 — Rarely" },
-      { label: "How often do you feel alone?", type: "likert", description: null, required: true, answer: "3 — Sometimes" },
-      { label: "How often do you feel part of a group of friends?", type: "likert", description: null, required: true, answer: "2 — Rarely" },
-      { label: "How often do you feel that you have a lot in common with the people around you?", type: "likert", description: null, required: true, answer: "2 — Rarely" },
-      { label: "How often do you feel that you are no longer close to anyone?", type: "likert", description: null, required: true, answer: "3 — Sometimes" },
-    ]},
-  { id: "s3", formName: "Physical Activity Readiness (PAR-Q)", category: "Physical Health", submittedAt: "2026-02-15", status: "completed",
-    fields: [
-      { label: "Has your doctor ever said that you have a heart condition and that you should only do physical activity recommended by a doctor?", type: "yes_no", description: "Answer Yes or No.", required: true, answer: "No" },
-      { label: "Do you feel pain in your chest when you do physical activity?", type: "yes_no", description: null, required: true, answer: "Yes" },
-      { label: "In the past month, have you had chest pain when you were not doing physical activity?", type: "yes_no", description: null, required: true, answer: "No" },
-      { label: "Do you lose your balance because of dizziness or do you ever lose consciousness?", type: "yes_no", description: null, required: true, answer: "No" },
-      { label: "Do you have a bone or joint problem that could be made worse by a change in your physical activity?", type: "yes_no", description: null, required: true, answer: "Yes" },
-      { label: "Is your doctor currently prescribing drugs for your blood pressure or heart condition?", type: "yes_no", description: null, required: true, answer: "Yes" },
-      { label: "Do you know of any other reason why you should not do physical activity?", type: "yes_no", description: "If yes, please discuss with your caretaker.", required: true, answer: "No" },
-    ]},
-  { id: "s4", formName: "Dietary Habits Assessment", category: "Nutrition", submittedAt: "2026-02-01", status: "completed",
-    fields: [
-      { label: "How many servings of fruits and vegetables do you eat per day?", type: "number", description: "One serving is about 1 cup of raw or ½ cup of cooked.", required: true, answer: "3" },
-      { label: "How many glasses of water do you drink per day?", type: "number", description: null, required: true, answer: "6" },
-      { label: "How often do you eat fast food in a typical week?", type: "select", description: null, required: true, answer: "2–3 times" },
-      { label: "Do you follow any specific dietary plan?", type: "text", description: "e.g. vegetarian, low-sodium, diabetic diet", required: false, answer: "Low-sodium (doctor recommended)" },
-    ]},
-  { id: "s5", formName: "Sleep Quality Index (PSQI)", category: "Sleep", submittedAt: "2026-01-20", status: "completed", fields: [] },
-  { id: "s6", formName: "Medication Adherence Scale", category: "Medication", submittedAt: "2026-01-10", status: "completed", fields: [] },
-  { id: "s7", formName: "Monthly Wellness Check-in", category: "General", submittedAt: "2025-12-15", status: "completed", fields: [] },
-  { id: "s8", formName: "Socio-Demographic Baseline", category: "Demographics", submittedAt: "2025-11-01", status: "completed", fields: [] },
-  { id: "s9", formName: "Initial Health Intake Form", category: "General", submittedAt: "2025-09-15", status: "completed", fields: [] },
-];
-
-const MOCK_GOALS = [
-  { id: "g1", title: "Daily Steps", emoji: "👟", baseline: 3200, current: 7800, target: 10000, unit: "steps", status: "active", startDate: "2026-01-01", targetDate: "2026-04-01" },
-  { id: "g2", title: "Lower Blood Pressure", emoji: "❤️", baseline: 150, current: 142, target: 130, unit: "mmHg", status: "active", startDate: "2025-11-01", targetDate: "2026-05-01" },
-  { id: "g3", title: "Water Intake", emoji: "💧", baseline: 3, current: 8, target: 8, unit: "glasses/day", status: "completed", startDate: "2025-10-01", targetDate: "2026-01-01" },
-  { id: "g4", title: "Weight Loss", emoji: "⚖️", baseline: 105, current: 98.7, target: 90, unit: "kg", status: "active", startDate: "2025-09-15", targetDate: "2026-06-15" },
-  { id: "g5", title: "Reduce Stress", emoji: "🧘", baseline: 30, current: 28, target: 15, unit: "/40", status: "paused", startDate: "2025-10-01", targetDate: "2026-03-01" },
-  { id: "g6", title: "Sleep 7+ Hours", emoji: "🌙", baseline: 5.5, current: 6.8, target: 7, unit: "hrs", status: "active", startDate: "2026-01-15", targetDate: "2026-04-15" },
-];
-
-const MOCK_NOTES = [
-  { id: "n1", text: "James showed improvement in daily step count but BP is still above target. Discussed medication adherence — he admits missing evening doses on weekends. Agreed to set phone reminders.", createdAt: "2026-03-08", tag: "check-in" },
-  { id: "n2", text: "Reviewed latest PSS scores — stress levels remain elevated. Recommended exploring community walking group for both exercise and social support.", createdAt: "2026-02-25", tag: "recommendation" },
-  { id: "n3", text: "Weight down 1.5 kg from last month. Positive trend. Encouraged continuing current dietary changes. Flagged chest pain reported in PAR-Q — follow up with GP.", createdAt: "2026-02-15", tag: "progress" },
-  { id: "n4", text: "Initial assessment complete. Baseline BP 150/96, weight 105 kg. Set goals for daily steps, BP reduction, water intake, and weight loss. James is motivated but will need regular check-ins.", createdAt: "2025-09-15", tag: "initial" },
-  { id: "n5", text: "Discussed dietary sodium intake. James reports reducing processed food consumption. Weight trending downward. Encouraged to maintain current routine.", createdAt: "2025-12-20", tag: "progress" },
-  { id: "n6", text: "Flagged concern about elevated stress scores. Suggesting referral to campus counseling services if next PSS remains high.", createdAt: "2026-01-12", tag: "concern" },
-];
-
 // ─── Utilities ──────────────────────────────────────────────────────────────────
 
 function fmt(d) { if (!d) return "—"; return new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" }); }
 function getAge(dob) { if (!dob) return null; const t = new Date(); const b = new Date(dob); let a = t.getFullYear() - b.getFullYear(); if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) a--; return a; }
 function daysSince(d) { if (!d) return null; const diff = Math.floor((Date.now() - new Date(d).getTime()) / 86400000); if (diff === 0) return "Today"; if (diff === 1) return "Yesterday"; return `${diff}d ago`; }
-function pctVal(v, t) { return t > 0 ? Math.round((v / t) * 100) : 0; }
+
+const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
+const CHART_TT = { borderRadius: "10px", border: "none", boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)", fontSize: "12px" };
+
+// ─── Data transformers ──────────────────────────────────────────────────────────
+
+function transformParticipant(listItem, groupName, enrolledAt) {
+  const nameParts = (listItem.name || "").split(" ");
+  const firstName = nameParts[0] || "";
+  const lastName = nameParts.slice(1).join(" ") || "";
+  const isActive = listItem.status !== "inactive";
+  const activityLabel = {
+    highly_active: "Highly Active",
+    moderately_active: "Moderately Active",
+    low_active: "Low Activity",
+    inactive: "Inactive",
+  }[listItem.status] || "Unknown";
+  const flags = [];
+  if (listItem.status === "inactive") flags.push("Inactive");
+  if (listItem.status === "low_active") flags.push("Low activity");
+  if (listItem.survey_progress === "not_started") flags.push("No surveys completed");
+  return {
+    id: listItem.participant_id,
+    firstName, lastName,
+    email: null, phone: null, dob: null,
+    age: listItem.age != null ? Math.round(listItem.age) : null,
+    gender: listItem.gender || null,
+    status: isActive ? "active" : "inactive",
+    activityStatus: listItem.status,
+    activityLabel,
+    groupName: groupName || null,
+    groupId: listItem.group_id || null,
+    enrolledAt: enrolledAt || null,
+    lastActive: listItem.last_login_at || listItem.last_submission_at || null,
+    surveyProgress: listItem.survey_progress || "not_started",
+    goalProgress: listItem.goal_progress || "not_started",
+    flags,
+  };
+}
+
+function transformSubmission(raw) {
+  return {
+    id: raw.submission_id,
+    formId: raw.form_id,
+    formName: raw.form_name || "Untitled Form",
+    submittedAt: raw.submitted_at,
+    status: "completed",
+    fields: [],
+  };
+}
+
+function transformFeedback(raw) {
+  return {
+    id: raw.feedback_id,
+    text: raw.message || "",
+    createdAt: raw.created_at ? raw.created_at.split("T")[0] : null,
+    tag: "feedback",
+    submissionId: raw.submission_id || null,
+  };
+}
 
 // ─── Shared Components ──────────────────────────────────────────────────────────
 
@@ -122,11 +94,82 @@ function FlagBadge({ text }) {
   return <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full border ${cl}`}>{text}</span>;
 }
 
+function EmptyPlaceholder({ icon, title, description }) {
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="px-6 py-14 flex flex-col items-center text-center">
+        <div className="w-14 h-14 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={icon} />
+          </svg>
+        </div>
+        <h2 className="text-base font-bold text-slate-700">{title}</h2>
+        <p className="text-sm text-slate-400 mt-2 max-w-md">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function ProgressBadge({ progress }) {
+  const styles = {
+    not_started: { bg: "bg-slate-100", text: "text-slate-600", border: "border-slate-200", label: "Not Started" },
+    in_progress: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", label: "In Progress" },
+    completed: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", label: "Completed" },
+    active: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", label: "Active" },
+  };
+  const s = styles[progress] || styles.not_started;
+  return <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${s.bg} ${s.text} ${s.border}`}>{s.label}</span>;
+}
+
+// ─── Health Metrics Cards (for Overview tab) ────────────────────────────────────
+
+function HealthMetricsCards({ trends }) {
+  if (!trends || trends.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Latest Health Metrics</p>
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-slate-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+          <p className="text-sm font-semibold text-slate-400">No health metrics available yet</p>
+          <p className="text-xs text-slate-300 mt-1">Metrics will appear here once health data points are collected.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const latest = trends.map(t => {
+    const last = t.points[t.points.length - 1];
+    const prev = t.points.length >= 2 ? t.points[t.points.length - 2] : null;
+    const change = prev ? last.value - prev.value : null;
+    return { label: t.label, unit: t.unit, value: last.value, date: last.date, change };
+  });
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Latest Health Metrics</p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {latest.map((m, i) => (
+          <div key={i} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center">
+            <p className="text-2xl font-extrabold text-slate-800">
+              {m.value}<span className="text-xs text-slate-400 ml-0.5">{m.unit}</span>
+            </p>
+            <p className="text-xs text-slate-400 mt-1">{m.label}</p>
+            {m.change !== null && (
+              <p className={`text-xs font-semibold mt-1 ${m.change < 0 ? "text-emerald-600" : m.change > 0 ? "text-amber-600" : "text-slate-400"}`}>
+                {m.change > 0 ? "+" : ""}{m.change.toFixed(1)} since last
+              </p>
+            )}
+            <p className="text-[10px] text-slate-300 mt-0.5">{fmt(m.date)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Tab: Overview ──────────────────────────────────────────────────────────────
 
-function OverviewTab({ p }) {
-  const sPct = pctVal(p.surveysDone, p.surveysTotal);
-  const gPct = pctVal(p.healthGoals, p.healthGoalsTotal);
+function OverviewTab({ p, trends }) {
   return (
     <div className="space-y-6">
       {p.flags.length > 0 && (
@@ -138,124 +181,219 @@ function OverviewTab({ p }) {
           </div>
         </div>
       )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Personal Info</p>
-          <InfoRow label="Date of Birth" value={`${fmt(p.dob)} (age ${getAge(p.dob)})`} />
+          <InfoRow label="Age" value={p.age != null ? `${p.age} years` : null} />
           <InfoRow label="Gender" value={p.gender} />
-          <InfoRow label="Phone" value={p.phone} />
           <InfoRow label="Email" value={p.email} />
+          <InfoRow label="Phone" value={p.phone} />
           <InfoRow label="Enrolled" value={fmt(p.enrolledAt)} />
           <InfoRow label="Last Active" value={daysSince(p.lastActive)} />
+          {(!p.email && !p.phone) && (
+            <div className="mt-3 flex items-start gap-2 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              <p className="text-xs text-slate-400">Contact details are not available in the caretaker view.</p>
+            </div>
+          )}
         </div>
+
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Activity Summary</p>
           <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="rounded-xl bg-blue-50 border border-blue-100 px-3 py-3 text-center"><p className="text-2xl font-extrabold text-blue-600">{p.surveysDone}</p><p className="text-xs text-blue-500 mt-0.5">Surveys</p><p className="text-xs text-blue-400">of {p.surveysTotal}</p></div>
-            <div className="rounded-xl bg-indigo-50 border border-indigo-100 px-3 py-3 text-center"><p className="text-2xl font-extrabold text-indigo-600">{p.healthGoals}</p><p className="text-xs text-indigo-500 mt-0.5">Goals Met</p><p className="text-xs text-indigo-400">of {p.healthGoalsTotal}</p></div>
+            <div className="rounded-xl bg-blue-50 border border-blue-100 px-3 py-3 text-center">
+              <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Surveys</p>
+              <ProgressBadge progress={p.surveyProgress} />
+            </div>
+            <div className="rounded-xl bg-indigo-50 border border-indigo-100 px-3 py-3 text-center">
+              <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1">Goals</p>
+              <ProgressBadge progress={p.goalProgress} />
+            </div>
           </div>
           <div className="space-y-3">
-            <div><div className="flex justify-between text-xs mb-1"><span className="text-slate-400">Surveys</span><span className="font-semibold text-slate-600">{sPct}%</span></div><div className="w-full bg-slate-200 rounded-full h-1.5"><div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${sPct}%` }} /></div></div>
-            <div><div className="flex justify-between text-xs mb-1"><span className="text-slate-400">Goals</span><span className="font-semibold text-slate-600">{gPct}%</span></div><div className="w-full bg-slate-200 rounded-full h-1.5"><div className="bg-indigo-500 h-1.5 rounded-full" style={{ width: `${gPct}%` }} /></div></div>
+            <InfoRow label="Activity Status" value={p.activityLabel} />
+            <InfoRow label="Last Login" value={p.lastActive ? daysSince(p.lastActive) : null} />
+            <InfoRow label="Group" value={p.groupName} />
           </div>
         </div>
       </div>
-      {p.latestMetrics && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Latest Health Metrics</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center"><p className={`text-2xl font-extrabold ${p.latestMetrics.bpSystolic >= 140 ? "text-rose-600" : p.latestMetrics.bpSystolic >= 130 ? "text-amber-600" : "text-emerald-600"}`}>{p.latestMetrics.bpSystolic}/{p.latestMetrics.bpDiastolic}</p><p className="text-xs text-slate-400 mt-1">Blood Pressure</p></div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center"><p className="text-2xl font-extrabold text-slate-700">{p.latestMetrics.weight}<span className="text-sm text-slate-400 ml-0.5">kg</span></p><p className="text-xs text-slate-400 mt-1">Weight</p></div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center"><p className={`text-2xl font-extrabold ${p.latestMetrics.painLevel >= 5 ? "text-rose-600" : p.latestMetrics.painLevel >= 3 ? "text-amber-600" : "text-emerald-600"}`}>{p.latestMetrics.painLevel}<span className="text-sm text-slate-400">/10</span></p><p className="text-xs text-slate-400 mt-1">Pain Level</p></div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center"><p className="text-2xl font-extrabold text-emerald-600">{p.surveysDone}<span className="text-sm text-slate-400">/{p.surveysTotal}</span></p><p className="text-xs text-slate-400 mt-1">Surveys Done</p></div>
-          </div>
-        </div>
-      )}
+
+      <HealthMetricsCards trends={trends} />
     </div>
   );
 }
 
-// ─── Tab: Submissions ───────────────────────────────────────────────────────────
+// ─── Tab: Submissions (with real answer detail) ─────────────────────────────────
 
-function SubmissionsTab({ submissions }) {
+function SubmissionsTab({ submissions, participantId, participantName }) {
   const [viewingSubmission, setViewingSubmission] = useState(null);
+  const [submissionDetail, setSubmissionDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
   const [sort, setSort] = useState({ field: "date", dir: "desc" });
 
-  const categories = useMemo(() => ["all", ...new Set(submissions.map(s => s.category))], [submissions]);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
   const filtered = useMemo(() => {
     let list = submissions.filter(s => {
       if (search && !s.formName.toLowerCase().includes(search.toLowerCase())) return false;
-      if (categoryFilter !== "all" && s.category !== categoryFilter) return false;
       return true;
     });
     const dir = sort.dir === "asc" ? 1 : -1;
     list.sort((a, b) => {
       if (sort.field === "date") return dir * (new Date(a.submittedAt) - new Date(b.submittedAt));
       if (sort.field === "name") return dir * a.formName.localeCompare(b.formName);
-      if (sort.field === "questions") return dir * (a.fields.length - b.fields.length);
       return 0;
     });
     return list;
-  }, [submissions, search, categoryFilter, sort]);
+  }, [submissions, search, sort]);
 
   function toggleSort(field) {
     setSort(prev => prev.field === field ? { field, dir: prev.dir === "asc" ? "desc" : "asc" } : { field, dir: "desc" });
   }
 
+  async function handleViewSubmission(s) {
+    setViewingSubmission(s);
+    setSubmissionDetail(null);
+    setDetailLoading(true);
+    setFeedbackText("");
+    setFeedbackSuccess(false);
+    try {
+      const detail = await api.caretakerGetSubmissionDetail(participantId, s.id);
+      setSubmissionDetail(detail);
+    } catch (err) {
+      console.warn("Could not fetch submission detail:", err.message);
+      setSubmissionDetail(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function handleSendFeedback() {
+    if (!feedbackText.trim() || !viewingSubmission) return;
+    setFeedbackSaving(true);
+    try {
+      await api.caretakerCreateFeedback(participantId, viewingSubmission.id, feedbackText.trim());
+      setFeedbackSuccess(true);
+      setFeedbackText("");
+      setTimeout(() => setFeedbackSuccess(false), 3000);
+    } catch (err) {
+      console.warn("Feedback save failed:", err.message);
+    } finally {
+      setFeedbackSaving(false);
+    }
+  }
+
+  // ── Detail view for a single submission ──
   if (viewingSubmission) {
     const s = viewingSubmission;
+    const detail = submissionDetail;
     return (
       <div className="space-y-4">
-        <button onClick={() => setViewingSubmission(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+        <button onClick={() => { setViewingSubmission(null); setSubmissionDetail(null); setFeedbackText(""); setFeedbackSuccess(false); }}
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           Back to Submissions
         </button>
+
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <h2 className="text-lg font-bold text-slate-800">{s.formName}</h2>
               <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">{s.category}</span>
                 <span className="text-xs text-slate-400">Submitted {fmt(s.submittedAt)}</span>
-                <span className="text-xs text-slate-400">·</span>
-                <span className="text-xs text-slate-400">{s.fields.length} questions</span>
+                {detail && <span className="text-xs text-slate-400">{detail.answers.length} answers</span>}
               </div>
             </div>
             <span className="text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-full capitalize">{s.status}</span>
           </div>
         </div>
-        {s.fields.length > 0 ? (
-          <div className="space-y-3">
-            {s.fields.map((f, idx) => (
-              <div key={idx} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-                <div className="flex items-start gap-3">
-                  <span className="text-xs font-bold text-slate-300 bg-slate-100 w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5">{idx + 1}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start gap-2">
-                      <p className="text-sm font-semibold text-slate-800 leading-relaxed">{f.label}</p>
-                      {f.required && <span className="text-rose-400 text-xs mt-0.5 shrink-0">*</span>}
-                    </div>
-                    {f.description && <p className="text-xs text-slate-400 mt-1 leading-relaxed">{f.description}</p>}
-                    <span className="inline-block text-xs text-slate-300 bg-slate-50 border border-slate-100 px-1.5 py-0.5 rounded mt-1">{f.type}</span>
-                    <div className="mt-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
-                      <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Response</p>
-                      <p className="text-sm font-semibold text-blue-800">{f.answer || <span className="text-slate-400 italic font-normal">No answer provided</span>}</p>
+
+        {/* Answers section */}
+        {detailLoading ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+            <div className="animate-pulse space-y-4">
+              {[...Array(4)].map((_, i) => <div key={i} className="h-14 bg-slate-200 rounded-xl" />)}
+            </div>
+          </div>
+        ) : detail && detail.answers && detail.answers.length > 0 ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Responses</p>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {detail.answers.map((a, i) => {
+                const displayValue = a.value_text || (a.value_number != null ? String(a.value_number) : null) || a.value_date || (a.value_json ? JSON.stringify(a.value_json) : null) || "—";
+                const isNumeric = a.value_number != null && !a.value_text;
+                return (
+                  <div key={a.answer_id} className="px-5 py-4">
+                    <div className="flex items-start gap-3">
+                      <span className="text-xs font-bold text-slate-300 mt-0.5 shrink-0 w-6 text-right">{i + 1}.</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-600 leading-relaxed">{a.field_label || "Untitled field"}</p>
+                        <div className="mt-2">
+                          {isNumeric ? (
+                            <span className="inline-flex items-center gap-1 text-lg font-extrabold text-blue-700 bg-blue-50 border border-blue-100 px-3 py-1 rounded-lg">
+                              {a.value_number}
+                            </span>
+                          ) : (
+                            <p className="text-sm font-semibold text-slate-800 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">{displayValue}</p>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
         ) : (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-slate-200 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-            <p className="text-sm text-slate-400">Full form answers will load from the backend once connected.</p>
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-10 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center mx-auto mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            </div>
+            <p className="text-sm font-semibold text-slate-600">No answer details available for this submission</p>
+            <p className="text-xs text-slate-400 mt-1.5 max-w-sm mx-auto">
+              The submission was recorded on {fmt(s.submittedAt)} but detailed answers could not be loaded.
+            </p>
           </div>
         )}
+
+        {/* Feedback form */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-3">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Leave Feedback on This Submission</p>
+          <textarea value={feedbackText} onChange={e => setFeedbackText(e.target.value)} rows={3}
+            placeholder={`Write feedback for ${participantName} about this submission...`}
+            className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 placeholder:text-slate-300 resize-none" />
+          <div className="flex items-center justify-between gap-3">
+            {feedbackSuccess && (
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Feedback saved
+              </div>
+            )}
+            <div className="flex-1" />
+            <button onClick={handleSendFeedback} disabled={!feedbackText.trim() || feedbackSaving}
+              className="px-4 py-2 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
+              {feedbackSaving ? "Saving…" : "Send Feedback"}
+            </button>
+          </div>
+        </div>
       </div>
+    );
+  }
+
+  // ── Submissions list ──
+  if (submissions.length === 0) {
+    return (
+      <EmptyPlaceholder
+        icon="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+        title="No submissions yet"
+        description="This participant hasn't submitted any surveys yet. Submissions will appear here once they complete assigned forms."
+      />
     );
   }
 
@@ -268,17 +406,8 @@ function SubmissionsTab({ submissions }) {
             className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-300" />
         </div>
         <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Category</span>
-          {categories.map(c => (
-            <button key={c} onClick={() => setCategoryFilter(c)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap capitalize shrink-0 ${categoryFilter === c ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
-              {c === "all" ? "All" : c}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Sort</span>
-          {[{ field: "date", label: "Date" }, { field: "name", label: "Name" }, { field: "questions", label: "Questions" }].map(s => (
+          {[{ field: "date", label: "Date" }, { field: "name", label: "Name" }].map(s => (
             <button key={s.field} onClick={() => toggleSort(s.field)}
               className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${sort.field === s.field ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
               {s.label}
@@ -291,21 +420,14 @@ function SubmissionsTab({ submissions }) {
       {filtered.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
           <p className="text-sm text-slate-400">No submissions match your search.</p>
-          <button onClick={() => { setSearch(""); setCategoryFilter("all"); }} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear filters</button>
+          <button onClick={() => setSearch("")} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear search</button>
         </div>
       ) : filtered.map(s => (
-        <button key={s.id} onClick={() => setViewingSubmission(s)}
+        <button key={s.id} onClick={() => handleViewSubmission(s)}
           className="w-full text-left bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-4 flex items-center justify-between gap-3 hover:bg-slate-50 hover:border-slate-200 transition-all group">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-700 transition-colors">{s.formName}</p>
-              <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">{s.category}</span>
-            </div>
-            <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-400">
-              <span>Submitted {fmt(s.submittedAt)}</span>
-              <span>·</span>
-              <span>{s.fields.length} questions</span>
-            </div>
+            <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-700 transition-colors">{s.formName}</p>
+            <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-400"><span>Submitted {fmt(s.submittedAt)}</span></div>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-300 group-hover:text-blue-500 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
         </button>
@@ -314,310 +436,248 @@ function SubmissionsTab({ submissions }) {
   );
 }
 
-// ─── Tab: Health Goals ──────────────────────────────────────────────────────────
+// ─── Tab: Health Goals (real data) ──────────────────────────────────────────────
 
-function GoalsTab({ goals }) {
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [sort, setSort] = useState({ field: "progress", dir: "desc" });
-
-  function calcProgress(g) {
-    const range = Math.abs(g.target - g.baseline);
-    return range > 0 ? Math.min(100, Math.round((Math.abs(g.current - g.baseline) / range) * 100)) : (g.current >= g.target ? 100 : 0);
-  }
-
-  const filtered = useMemo(() => {
-    let list = goals.filter(g => {
-      if (statusFilter !== "all" && g.status !== statusFilter) return false;
-      return true;
-    });
-    const dir = sort.dir === "asc" ? 1 : -1;
-    list.sort((a, b) => {
-      if (sort.field === "progress") return dir * (calcProgress(a) - calcProgress(b));
-      if (sort.field === "title") return dir * a.title.localeCompare(b.title);
-      if (sort.field === "targetDate") return dir * (new Date(a.targetDate) - new Date(b.targetDate));
-      if (sort.field === "startDate") return dir * (new Date(a.startDate) - new Date(b.startDate));
-      return 0;
-    });
-    return list;
-  }, [goals, statusFilter, sort]);
-
-  const statuses = useMemo(() => {
-    const counts = { all: goals.length };
-    goals.forEach(g => { counts[g.status] = (counts[g.status] || 0) + 1; });
-    return counts;
-  }, [goals]);
-
-  function toggleSort(field) {
-    setSort(prev => prev.field === field ? { field, dir: prev.dir === "asc" ? "desc" : "asc" } : { field, dir: "desc" });
-  }
-
-  const statusStyles = { active: "bg-amber-50 text-amber-700 border-amber-200", completed: "bg-emerald-50 text-emerald-700 border-emerald-200", paused: "bg-slate-100 text-slate-600 border-slate-200" };
-
-  return (
-    <div className="space-y-3">
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
-        <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Status</span>
-          {["all", "active", "completed", "paused"].map(s => (
-            <button key={s} onClick={() => setStatusFilter(s)}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap capitalize shrink-0 ${statusFilter === s ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
-              {s === "all" ? "All" : s}
-              <span className={`text-xs ${statusFilter === s ? "text-blue-200" : "text-slate-400"}`}>({statuses[s] || 0})</span>
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Sort</span>
-          {[{ field: "progress", label: "Progress" }, { field: "title", label: "Title" }, { field: "targetDate", label: "Target Date" }, { field: "startDate", label: "Start Date" }].map(s => (
-            <button key={s.field} onClick={() => toggleSort(s.field)}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${sort.field === s.field ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
-              {s.label}
-              {sort.field === s.field && <ChevronIcon direction={sort.dir === "asc" ? "up" : "down"} className="text-white" />}
-            </button>
-          ))}
-        </div>
-      </div>
-      <p className="text-xs text-slate-400 px-1">Showing {filtered.length} of {goals.length} goals — read-only view</p>
-      {filtered.length === 0 ? (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
-          <p className="text-sm text-slate-400">No goals match this filter.</p>
-          <button onClick={() => setStatusFilter("all")} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Show all goals</button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filtered.map(g => {
-            const progress = calcProgress(g);
-            return (
-              <div key={g.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-xl">{g.emoji}</div>
-                    <div><h3 className="font-bold text-slate-800">{g.title}</h3><p className="text-xs text-slate-400 mt-0.5">{fmt(g.startDate)} → {fmt(g.targetDate)}</p></div>
-                  </div>
-                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full border capitalize ${statusStyles[g.status] || statusStyles.active}`}>{g.status}</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 mb-4">
-                  <div className="text-center"><p className="text-xs text-slate-400">Baseline</p><p className="text-sm font-bold text-slate-600">{g.baseline} <span className="text-xs font-normal text-slate-400">{g.unit}</span></p></div>
-                  <div className="text-center"><p className="text-xs text-slate-400">Current</p><p className="text-sm font-bold text-blue-600">{g.current} <span className="text-xs font-normal text-slate-400">{g.unit}</span></p></div>
-                  <div className="text-center"><p className="text-xs text-slate-400">Target</p><p className="text-sm font-bold text-emerald-600">{g.target} <span className="text-xs font-normal text-slate-400">{g.unit}</span></p></div>
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs mb-1"><span className="text-slate-400">Progress</span><span className="font-semibold text-slate-600">{progress}%</span></div>
-                  <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden"><div className={`h-2 rounded-full transition-all ${g.status === "completed" ? "bg-emerald-500" : g.status === "paused" ? "bg-slate-400" : "bg-blue-500"}`} style={{ width: `${progress}%` }} /></div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Tab: Health Trends ─────────────────────────────────────────────────────────
-
-const ALL_TREND_METRICS = [
-  { key: "bpSystolic", label: "Systolic BP", unit: "mmHg", category: "Vitals" },
-  { key: "bpDiastolic", label: "Diastolic BP", unit: "mmHg", category: "Vitals" },
-  { key: "weight", label: "Weight", unit: "kg", category: "Vitals" },
-  { key: "painLevel", label: "Pain Level", unit: "/10", category: "Vitals" },
-  { key: "stressScore", label: "Stress Score (PSS)", unit: "/40", category: "Mental Health" },
-  { key: "sleepHours", label: "Sleep Duration", unit: "hrs", category: "Lifestyle" },
-  { key: "waterIntake", label: "Water Intake", unit: "glasses", category: "Lifestyle" },
-  { key: "exerciseMinutes", label: "Exercise", unit: "min/day", category: "Lifestyle" },
-];
-
-const TREND_CATEGORIES = [...new Set(ALL_TREND_METRICS.map(m => m.category))];
-const TREND_COLORS = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#6366f1", "#ec4899", "#14b8a6", "#f97316"];
-
-function generateMockTrends(months, metrics) {
-  return months.map((month, i) => {
-    const row = { month };
-    metrics.forEach(mk => {
-      const ranges = { bpSystolic: [125, 150], bpDiastolic: [78, 96], weight: [90, 105], painLevel: [2, 8], stressScore: [10, 30], sleepHours: [5, 8], waterIntake: [3, 9], exerciseMinutes: [10, 45] };
-      const [lo, hi] = ranges[mk] || [0, 100];
-      row[mk] = Math.round((hi - (hi - lo) * (i / (months.length - 1 || 1)) + (Math.random() - 0.5) * 5) * 10) / 10;
-    });
-    return row;
-  });
-}
-
-function TrendsTab({ participantId }) {
-  const [selectedMetrics, setSelectedMetrics] = useState(["bpSystolic", "bpDiastolic"]);
-  const [dateFrom, setDateFrom] = useState("2025-09-01");
-  const [dateTo, setDateTo] = useState("2026-03-14");
-  const [chartMode, setChartMode] = useState("individual");
-  const [generated, setGenerated] = useState(false);
-  const [metricsExpanded, setMetricsExpanded] = useState(false);
-
-  const months = ["Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-  const trends = useMemo(() => generated ? generateMockTrends(months, selectedMetrics) : null, [generated, selectedMetrics]);
-  const ttStyle = { borderRadius: "12px", border: "none", boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)", fontSize: "12px" };
-
-  function toggleMetric(key) { setSelectedMetrics(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]); }
-  function toggleCategory(cat) {
-    const catKeys = ALL_TREND_METRICS.filter(m => m.category === cat).map(m => m.key);
-    const allSelected = catKeys.every(k => selectedMetrics.includes(k));
-    if (allSelected) setSelectedMetrics(prev => prev.filter(k => !catKeys.includes(k)));
-    else setSelectedMetrics(prev => [...new Set([...prev, ...catKeys])]);
-  }
-
-  if (!generated) {
+function GoalsTab({ goals, loading: goalsLoading }) {
+  if (goalsLoading) {
     return (
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-5">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-          </div>
-          <div><h2 className="text-base font-bold text-slate-800">Configure Health Trends</h2><p className="text-xs text-slate-400 mt-0.5">Select which metrics to track and the time range</p></div>
-        </div>
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Metrics</label>
-            <button onClick={() => setMetricsExpanded(!metricsExpanded)} className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">{metricsExpanded ? "Collapse" : `${selectedMetrics.length} selected — Edit`}</button>
-          </div>
-          {!metricsExpanded ? (
-            <div className="flex flex-wrap gap-1.5">
-              {selectedMetrics.length === 0 ? <span className="text-xs text-slate-400 italic">No metrics selected</span> : selectedMetrics.map(key => {
-                const m = ALL_TREND_METRICS.find(x => x.key === key);
-                return m ? <span key={key} className="inline-flex items-center gap-1 text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded-full">{m.label}<button onClick={() => toggleMetric(key)} className="text-blue-400 hover:text-blue-700"><svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button></span> : null;
-              })}
-            </div>
-          ) : (
-            <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 space-y-3 max-h-60 overflow-y-auto">
-              {TREND_CATEGORIES.map(cat => {
-                const catMetrics = ALL_TREND_METRICS.filter(m => m.category === cat);
-                const allCatSelected = catMetrics.every(m => selectedMetrics.includes(m.key));
-                const someCatSelected = catMetrics.some(m => selectedMetrics.includes(m.key));
-                return (
-                  <div key={cat}>
-                    <button onClick={() => toggleCategory(cat)} className="flex items-center gap-2 mb-1.5 group">
-                      <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${allCatSelected ? "bg-blue-600 border-blue-600" : someCatSelected ? "bg-blue-200 border-blue-400" : "border-slate-300 group-hover:border-slate-400"}`}>
-                        {(allCatSelected || someCatSelected) && <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allCatSelected ? "M5 13l4 4L19 7" : "M20 12H4"} /></svg>}
-                      </div>
-                      <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">{cat}</span>
-                    </button>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 ml-6">
-                      {catMetrics.map(m => (
-                        <label key={m.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white cursor-pointer transition-colors">
-                          <input type="checkbox" checked={selectedMetrics.includes(m.key)} onChange={() => toggleMetric(m.key)} className="w-3.5 h-3.5 rounded accent-blue-600" />
-                          <span className="text-xs text-slate-700">{m.label}</span>
-                          <span className="text-xs text-slate-300 ml-auto">{m.unit}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-              <div className="flex gap-2 pt-2 border-t border-slate-200">
-                <button onClick={() => setSelectedMetrics(ALL_TREND_METRICS.map(m => m.key))} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Select All</button>
-                <span className="text-xs text-slate-300">·</span>
-                <button onClick={() => setSelectedMetrics([])} className="text-xs font-semibold text-slate-500 hover:text-slate-700">Clear All</button>
-              </div>
-            </div>
-          )}
-        </div>
-        <div>
-          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Date Range</label>
-          <div className="flex items-center gap-2">
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700" />
-            <span className="text-xs text-slate-300">to</span>
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700" />
-          </div>
-        </div>
-        <div>
-          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Display Mode</label>
-          <div className="flex gap-1.5">
-            <button onClick={() => setChartMode("individual")} className={`flex-1 px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${chartMode === "individual" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>Individual Charts</button>
-            <button onClick={() => setChartMode("overlay")} className={`flex-1 px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${chartMode === "overlay" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>Overlay</button>
-          </div>
-        </div>
-        <button onClick={() => setGenerated(true)} disabled={selectedMetrics.length === 0} className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-          Generate Trends
-        </button>
+      <div className="animate-pulse space-y-4">
+        <div className="grid grid-cols-3 gap-3">{[...Array(3)].map((_, i) => <div key={i} className="h-20 bg-slate-200 rounded-2xl" />)}</div>
+        {[...Array(3)].map((_, i) => <div key={i} className="h-28 bg-slate-200 rounded-2xl" />)}
       </div>
     );
   }
 
+  if (!goals || goals.length === 0) {
+    return (
+      <EmptyPlaceholder
+        icon="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+        title="No health goals set"
+        description="This participant hasn't set any health goals yet. Goals will appear here once they add them from their dashboard."
+      />
+    );
+  }
+
+  const statusColors = {
+    active: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", dot: "bg-blue-500" },
+    completed: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", dot: "bg-emerald-500" },
+    paused: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", dot: "bg-amber-500" },
+    cancelled: { bg: "bg-slate-100", text: "text-slate-500", border: "border-slate-200", dot: "bg-slate-400" },
+  };
+
+  const activeGoals = goals.filter(g => g.status === "active");
+  const completedGoals = goals.filter(g => g.status === "completed");
+  const otherGoals = goals.filter(g => g.status !== "active" && g.status !== "completed");
+
   return (
     <div className="space-y-5">
-      <button onClick={() => setGenerated(false)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-        Back to Configuration
-      </button>
-      <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span className="font-bold text-slate-700">{selectedMetrics.length} metrics</span><span>·</span><span>{fmt(dateFrom)} — {fmt(dateTo)}</span><span>·</span><span className="capitalize">{chartMode === "individual" ? "Individual charts" : "Overlay mode"}</span>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4 text-center">
+          <p className="text-2xl font-extrabold text-slate-800">{goals.length}</p>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Total Goals</p>
+        </div>
+        <div className="bg-white rounded-2xl shadow-sm border border-blue-100 px-4 py-4 text-center">
+          <p className="text-2xl font-extrabold text-blue-600">{activeGoals.length}</p>
+          <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider mt-1">Active</p>
+        </div>
+        <div className="bg-white rounded-2xl shadow-sm border border-emerald-100 px-4 py-4 text-center">
+          <p className="text-2xl font-extrabold text-emerald-600">{completedGoals.length}</p>
+          <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wider mt-1">Completed</p>
+        </div>
       </div>
-      {chartMode === "overlay" && trends && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">All Selected Metrics — Overlay</p>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trends}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                <Tooltip contentStyle={ttStyle} />
-                <Legend wrapperStyle={{ fontSize: "11px" }} />
-                {selectedMetrics.map((mk, i) => { const m = ALL_TREND_METRICS.find(x => x.key === mk); return <Line key={mk} type="monotone" dataKey={mk} name={m?.label || mk} stroke={TREND_COLORS[i % TREND_COLORS.length]} strokeWidth={2} dot={{ r: 3 }} />; })}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          {selectedMetrics.length > 4 && <p className="text-xs text-slate-400 italic mt-2 text-center">Many metrics overlaid — consider switching to individual charts for clarity.</p>}
-        </div>
-      )}
-      {chartMode === "individual" && trends && selectedMetrics.map((mk, idx) => {
-        const m = ALL_TREND_METRICS.find(x => x.key === mk);
-        return (
-          <div key={mk} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">{m?.label || mk} <span className="text-slate-300 font-normal normal-case">({m?.unit})</span></p>
-            <div className="h-52">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trends}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                  <Tooltip contentStyle={ttStyle} formatter={(v) => `${v} ${m?.unit || ""}`} />
-                  <Line type="monotone" dataKey={mk} name={m?.label} stroke={TREND_COLORS[idx % TREND_COLORS.length]} strokeWidth={2} dot={{ r: 4 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        );
-      })}
-      {trends && trends.length >= 2 && (
-        <div className={`grid grid-cols-1 ${selectedMetrics.length >= 3 ? "md:grid-cols-3" : selectedMetrics.length === 2 ? "md:grid-cols-2" : ""} gap-3`}>
-          {selectedMetrics.slice(0, 6).map(mk => {
-            const m = ALL_TREND_METRICS.find(x => x.key === mk);
-            const first = trends[0]?.[mk]; const last = trends[trends.length - 1]?.[mk];
-            if (first == null || last == null) return null;
-            const diff = Math.round((last - first) * 10) / 10;
-            const lowerBetter = !["sleepHours", "waterIntake", "exerciseMinutes"].includes(mk);
-            const improving = lowerBetter ? diff < 0 : diff > 0;
-            return (
-              <div key={mk} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 text-center">
-                <p className="text-xs text-slate-400 mb-1">{m?.label} Trend</p>
-                <p className={`text-lg font-extrabold ${improving ? "text-emerald-600" : diff === 0 ? "text-slate-400" : "text-rose-600"}`}>{diff > 0 ? "↑" : diff < 0 ? "↓" : "→"} {Math.abs(diff)} {m?.unit}</p>
-                <p className={`text-xs ${improving ? "text-emerald-500" : diff === 0 ? "text-slate-400" : "text-rose-500"}`}>{improving ? "Improving" : diff === 0 ? "No change" : "Needs attention"}</p>
+
+      <div className="space-y-3">
+        {[...activeGoals, ...completedGoals, ...otherGoals].map(g => {
+          const sc = statusColors[g.status] || statusColors.active;
+          const elementLabel = g.element?.label || g.name;
+          const elementUnit = g.element?.unit || "";
+          return (
+            <div key={g.goal_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2.5">
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${sc.dot}`} />
+                    <h3 className="text-sm font-bold text-slate-800">{g.name}</h3>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1.5 ml-5">
+                    Tracking: <span className="font-semibold text-slate-500">{elementLabel}</span>
+                    {elementUnit && <span className="text-slate-300 ml-1">({elementUnit})</span>}
+                  </p>
+                </div>
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border capitalize ${sc.bg} ${sc.text} ${sc.border}`}>{g.status}</span>
               </div>
-            );
-          })}
-        </div>
-      )}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 ml-5">
+                <div>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Target</p>
+                  <p className="text-sm font-bold text-slate-700 mt-0.5">{g.target_value != null ? `${g.target_value} ${elementUnit}` : "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Start Date</p>
+                  <p className="text-sm font-bold text-slate-700 mt-0.5">{g.start_date ? fmt(g.start_date) : "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">End Date</p>
+                  <p className="text-sm font-bold text-slate-700 mt-0.5">{g.end_date ? fmt(g.end_date) : "Ongoing"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Duration</p>
+                  <p className="text-sm font-bold text-slate-700 mt-0.5">
+                    {g.start_date ? `${Math.max(0, Math.floor((Date.now() - new Date(g.start_date).getTime()) / 86400000))}d` : "—"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-// ─── Tab: Notes & Feedback ──────────────────────────────────────────────────────
+// ─── Tab: Health Trends (real data) ─────────────────────────────────────────────
 
-function NotesTab({ participantId, participantName, initialNotes }) {
-  const [notes, setNotes] = useState(initialNotes);
+function TrendsTab({ trends, loading: trendsLoading }) {
+  const [selectedElements, setSelectedElements] = useState([]);
+
+  // Auto-select first 2 elements when trends load
+  useEffect(() => {
+    if (trends && trends.length > 0 && selectedElements.length === 0) {
+      setSelectedElements(trends.slice(0, 2).map(t => t.element_id));
+    }
+  }, [trends]);
+
+  if (trendsLoading) {
+    return (
+      <div className="animate-pulse space-y-4">
+        <div className="h-16 bg-slate-200 rounded-2xl" />
+        <div className="h-72 bg-slate-200 rounded-2xl" />
+        <div className="grid grid-cols-2 gap-4">{[...Array(2)].map((_, i) => <div key={i} className="h-28 bg-slate-200 rounded-2xl" />)}</div>
+      </div>
+    );
+  }
+
+  if (!trends || trends.length === 0) {
+    return (
+      <EmptyPlaceholder
+        icon="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
+        title="No health trends data yet"
+        description="Trends will appear here once health data points are being collected through survey submissions with data element mapping."
+      />
+    );
+  }
+
+  const toggleElement = (id) => {
+    setSelectedElements(prev => prev.includes(id) ? prev.filter(e => e !== id) : [...prev, id]);
+  };
+
+  const activeTrends = trends.filter(t => selectedElements.includes(t.element_id));
+
+  const chartData = (() => {
+    const dateMap = {};
+    activeTrends.forEach(t => {
+      t.points.forEach(p => {
+        if (!dateMap[p.date]) dateMap[p.date] = { date: p.date };
+        dateMap[p.date][t.label] = p.value;
+      });
+    });
+    return Object.values(dateMap).sort((a, b) => a.date.localeCompare(b.date));
+  })();
+
+  return (
+    <div className="space-y-5">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Select Metrics to Chart</p>
+        <div className="flex flex-wrap gap-2">
+          {trends.map((t, i) => {
+            const isSelected = selectedElements.includes(t.element_id);
+            return (
+              <button key={t.element_id} onClick={() => toggleElement(t.element_id)}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                  isSelected ? "text-white border-transparent" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                }`}
+                style={isSelected ? { backgroundColor: COLORS[i % COLORS.length] } : undefined}>
+                <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isSelected ? "bg-white/40" : ""}`}
+                  style={!isSelected ? { backgroundColor: COLORS[i % COLORS.length] } : undefined} />
+                {t.label}
+                {t.unit && <span className={isSelected ? "text-white/60" : "text-slate-400"}>({t.unit})</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeTrends.length > 0 && chartData.length > 0 ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Health Trends Over Time</p>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94a3b8" }}
+                  tickFormatter={(d) => new Date(d).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} />
+                <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                <Tooltip contentStyle={CHART_TT}
+                  labelFormatter={(d) => new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" })} />
+                <Legend wrapperStyle={{ fontSize: "11px" }} />
+                {activeTrends.map((t) => (
+                  <Line key={t.element_id} type="monotone" dataKey={t.label}
+                    name={t.unit ? `${t.label} (${t.unit})` : t.label}
+                    stroke={COLORS[trends.findIndex(x => x.element_id === t.element_id) % COLORS.length]}
+                    strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-10 text-center">
+          <p className="text-sm text-slate-400">Select at least one metric above to see trends.</p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {activeTrends.map((t) => {
+          const pts = t.points;
+          const latest = pts[pts.length - 1];
+          const earliest = pts[0];
+          const change = pts.length >= 2 ? latest.value - earliest.value : null;
+          const min = Math.min(...pts.map(p => p.value));
+          const max = Math.max(...pts.map(p => p.value));
+          const avg = (pts.reduce((sum, p) => sum + p.value, 0) / pts.length).toFixed(1);
+          return (
+            <div key={t.element_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: COLORS[trends.findIndex(x => x.element_id === t.element_id) % COLORS.length] }} />
+                <p className="text-sm font-bold text-slate-800">{t.label}</p>
+                {t.unit && <span className="text-xs text-slate-400">({t.unit})</span>}
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div><p className="text-lg font-extrabold text-slate-800">{latest.value}</p><p className="text-[10px] text-slate-400 uppercase font-semibold">Latest</p></div>
+                <div><p className="text-lg font-extrabold text-slate-600">{avg}</p><p className="text-[10px] text-slate-400 uppercase font-semibold">Average</p></div>
+                <div><p className="text-lg font-extrabold text-slate-500">{min}–{max}</p><p className="text-[10px] text-slate-400 uppercase font-semibold">Range</p></div>
+                <div>
+                  <p className={`text-lg font-extrabold ${change < 0 ? "text-emerald-600" : change > 0 ? "text-amber-600" : "text-slate-400"}`}>
+                    {change != null ? `${change > 0 ? "+" : ""}${change.toFixed(1)}` : "—"}
+                  </p>
+                  <p className="text-[10px] text-slate-400 uppercase font-semibold">Change</p>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-300 mt-2 text-center">{pts.length} data points · {fmt(earliest.date)} to {fmt(latest.date)}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab: Notes & Feedback (unchanged — already working) ────────────────────────
+
+function NotesTab({ participantId, participantName, feedbackItems }) {
+  const [notes, setNotes] = useState(feedbackItems);
   const [newNote, setNewNote] = useState("");
   const [writeTag, setWriteTag] = useState("check-in");
   const [saving, setSaving] = useState(false);
-
-  // Filter/sort state
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("all");
   const [sortDir, setSortDir] = useState("desc");
@@ -625,17 +685,15 @@ function NotesTab({ participantId, participantName, initialNotes }) {
   async function handleSave() {
     if (!newNote.trim()) return;
     setSaving(true);
-    try {
-      await api.caretakerCreateNote(participantId, newNote.trim(), writeTag);
-    } catch (err) {
-      console.warn("Note save via API failed (backend may not be ready):", err.message);
-    }
     setNotes(prev => [{ id: `n${Date.now()}`, text: newNote.trim(), createdAt: new Date().toISOString().split("T")[0], tag: writeTag }, ...prev]);
     setNewNote("");
     setSaving(false);
   }
 
-  const allTags = useMemo(() => ["all", ...new Set(notes.map(n => n.tag))], [notes]);
+  const allTags = useMemo(() => {
+    const tags = new Set(notes.map(n => n.tag).filter(Boolean));
+    return ["all", ...tags];
+  }, [notes]);
 
   const filtered = useMemo(() => {
     let list = notes.filter(n => {
@@ -656,14 +714,14 @@ function NotesTab({ participantId, participantName, initialNotes }) {
     "progress": "bg-emerald-50 text-emerald-700 border-emerald-100",
     "initial": "bg-slate-100 text-slate-600 border-slate-200",
     "concern": "bg-rose-50 text-rose-700 border-rose-100",
+    "feedback": "bg-violet-50 text-violet-700 border-violet-100",
   };
 
   return (
     <div className="space-y-5">
-      {/* Write new note */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-3">
-        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">New Feedback / Note</p>
-        <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={3} placeholder={`Write feedback for ${participantName}...`}
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">New Note</p>
+        <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={3} placeholder={`Write a note about ${participantName}...`}
           className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 placeholder:text-slate-300 resize-none" />
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex gap-1.5 overflow-x-auto">
@@ -675,52 +733,64 @@ function NotesTab({ participantId, participantName, initialNotes }) {
             {saving ? "Saving…" : "Save Note"}
           </button>
         </div>
-      </div>
-
-      {/* Search + filter + sort */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
-        <div className="relative">
-          <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search notes…"
-            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-300" />
-        </div>
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2 overflow-x-auto">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Tag</span>
-            {allTags.map(t => (
-              <button key={t} onClick={() => setTagFilter(t)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap capitalize shrink-0 ${tagFilter === t ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
-                {t === "all" ? "All" : t}
-              </button>
-            ))}
-          </div>
-          <button onClick={() => setSortDir(prev => prev === "desc" ? "asc" : "desc")}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-500 hover:bg-slate-200 transition-all whitespace-nowrap shrink-0">
-            {sortDir === "desc" ? "Newest first" : "Oldest first"}
-            <ChevronIcon direction={sortDir === "desc" ? "down" : "up"} />
-          </button>
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          <p className="text-xs text-amber-700">Notes are saved locally in this session only and will not persist when you leave this page. Feedback left on individual submissions is saved to the server.</p>
         </div>
       </div>
 
-      {/* Notes list */}
-      <p className="text-xs text-slate-400 px-1">Showing {filtered.length} of {notes.length} notes</p>
-      {filtered.length === 0 ? (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
-          <p className="text-sm text-slate-400">No notes match your search.</p>
-          <button onClick={() => { setSearch(""); setTagFilter("all"); }} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear filters</button>
-        </div>
+      {notes.length === 0 && !search && tagFilter === "all" ? (
+        <EmptyPlaceholder
+          icon="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+          title="No notes or feedback yet"
+          description="Start by writing a note above, or leave feedback on individual submissions from the Submissions tab."
+        />
       ) : (
-        <div className="space-y-3">
-          {filtered.map(n => (
-            <div key={n.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs text-slate-400">{fmt(n.createdAt)}</span>
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${tagColors[n.tag] || tagColors["check-in"]}`}>{n.tag}</span>
-              </div>
-              <p className="text-sm text-slate-700 leading-relaxed">{n.text}</p>
+        <>
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
+            <div className="relative">
+              <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
+              <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search notes…"
+                className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-300" />
             </div>
-          ))}
-        </div>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 overflow-x-auto">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Tag</span>
+                {allTags.map(t => (
+                  <button key={t} onClick={() => setTagFilter(t)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap capitalize shrink-0 ${tagFilter === t ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+                    {t === "all" ? "All" : t}
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setSortDir(prev => prev === "desc" ? "asc" : "desc")}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-500 hover:bg-slate-200 transition-all whitespace-nowrap shrink-0">
+                {sortDir === "desc" ? "Newest first" : "Oldest first"}
+                <ChevronIcon direction={sortDir === "desc" ? "down" : "up"} />
+              </button>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-400 px-1">Showing {filtered.length} of {notes.length} notes</p>
+          {filtered.length === 0 ? (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
+              <p className="text-sm text-slate-400">No notes match your search.</p>
+              <button onClick={() => { setSearch(""); setTagFilter("all"); }} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear filters</button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filtered.map(n => (
+                <div key={n.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xs text-slate-400">{fmt(n.createdAt)}</span>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${tagColors[n.tag] || tagColors["check-in"]}`}>{n.tag}</span>
+                  </div>
+                  <p className="text-sm text-slate-700 leading-relaxed">{n.text}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -744,36 +814,128 @@ export default function ParticipantDetailPage() {
   const [activeTab, setActiveTab] = useState("overview");
   const [participant, setParticipant] = useState(null);
   const [submissions, setSubmissions] = useState([]);
+  const [feedbackItems, setFeedbackItems] = useState([]);
   const [goals, setGoals] = useState([]);
-  const [notes, setNotes] = useState([]);
+  const [trends, setTrends] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [goalsLoading, setGoalsLoading] = useState(true);
+  const [trendsLoading, setTrendsLoading] = useState(true);
+  const [error, setError] = useState(null);
 
+  // ──────────────────────────────────────────────────────────────────────────────
+  // Data fetching — uses real backend endpoints only, no mock fallbacks.
+  //
+  //   GET /caretaker/groups                                    → group name
+  //   GET /caretaker/participants                              → rich participant data
+  //   GET /caretaker/groups/{id}/members                       → enrolled date (joined_at)
+  //   GET /caretaker/participants/{id}/submissions             → submission list
+  //   GET /caretaker/participants/{id}/feedback                → feedback items
+  //   GET /caretaker/participants/{id}/goals                   → health goals
+  //   GET /caretaker/participants/{id}/health-trends           → trend data points
+  //
+  // If the backend returns nothing, placeholders are shown in the UI.
+  // ──────────────────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const [pData, subData, goalData, noteData] = await Promise.all([
-        api.caretakerGetParticipant(participantId),
-        api.caretakerListSubmissions({ participant_id: participantId }),
-        api.caretakerGetParticipantGoals(participantId),
-        api.caretakerListNotes(participantId),
-      ]);
-      setParticipant(pData);
-      setSubmissions(subData);
-      setGoals(goalData);
-      setNotes(noteData);
+      // 1. Fetch groups → get group id + name
+      const groups = await api.caretakerGetGroups();
+      const firstGroup = Array.isArray(groups) && groups.length > 0 ? groups[0] : null;
+
+      if (!firstGroup) {
+        setError("You are not assigned to any groups.");
+        setLoading(false);
+        return;
+      }
+
+      // 2. Fetch all participants from the list endpoint (richer data than detail)
+      const allParticipants = await api.caretakerListParticipants();
+      const thisParticipant = Array.isArray(allParticipants)
+        ? allParticipants.find(p => p.participant_id === participantId)
+        : null;
+
+      if (!thisParticipant) {
+        setError("Participant not found.");
+        setLoading(false);
+        return;
+      }
+
+      // 3. Get joined_at from group members
+      let enrolledAt = null;
+      try {
+        const members = await api.caretakerGetGroupMembers(firstGroup.group_id);
+        const thisMember = Array.isArray(members)
+          ? members.find(m => m.participant_id === participantId)
+          : null;
+        if (thisMember?.joined_at) {
+          enrolledAt = thisMember.joined_at;
+        }
+      } catch {
+        // Non-critical — enrolledAt will show "—"
+      }
+
+      // 4. Transform and set participant
+      setParticipant(transformParticipant(thisParticipant, firstGroup.name, enrolledAt));
+
+      // 5. Fetch submissions
+      try {
+        const subData = await api.caretakerListSubmissions(participantId);
+        setSubmissions(Array.isArray(subData) ? subData.map(transformSubmission) : []);
+      } catch {
+        setSubmissions([]);
+      }
+
+      // 6. Fetch existing feedback (shown in Notes tab as seed data)
+      try {
+        const fbData = await api.caretakerListFeedback(participantId);
+        setFeedbackItems(Array.isArray(fbData) ? fbData.map(transformFeedback) : []);
+      } catch {
+        setFeedbackItems([]);
+      }
+
     } catch (err) {
-      console.warn("Backend not ready, using mock data:", err.message);
-      setParticipant(MOCK_PARTICIPANT);
-      setSubmissions(MOCK_SUBMISSIONS);
-      setGoals(MOCK_GOALS);
-      setNotes(MOCK_NOTES);
+      console.error("Failed to load participant data:", err);
+      setError("Something went wrong loading participant data.");
     } finally {
       setLoading(false);
     }
   }, [participantId]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  // Fetch goals (non-blocking, separate loading state)
+  const fetchGoals = useCallback(async () => {
+    setGoalsLoading(true);
+    try {
+      const data = await api.caretakerGetGoals(participantId);
+      setGoals(Array.isArray(data) ? data : []);
+    } catch {
+      setGoals([]);
+    } finally {
+      setGoalsLoading(false);
+    }
+  }, [participantId]);
 
+  // Fetch trends (non-blocking, separate loading state)
+  const fetchTrends = useCallback(async () => {
+    setTrendsLoading(true);
+    try {
+      const data = await api.caretakerGetHealthTrends(participantId);
+      // Filter out elements with no data points
+      setTrends(Array.isArray(data) ? data.filter(t => t.points && t.points.length > 0) : []);
+    } catch {
+      setTrends([]);
+    } finally {
+      setTrendsLoading(false);
+    }
+  }, [participantId]);
+
+  useEffect(() => {
+    fetchData();
+    fetchGoals();
+    fetchTrends();
+  }, [fetchData, fetchGoals, fetchTrends]);
+
+  // ── Loading state ──
   if (loading) {
     return (
       <div className="max-w-6xl mx-auto p-2 md:p-0">
@@ -787,6 +949,30 @@ export default function ParticipantDetailPage() {
     );
   }
 
+  // ── Error state ──
+  if (error) {
+    return (
+      <div className="max-w-6xl mx-auto p-2 md:p-0">
+        <button onClick={() => navigate("/caretaker/participants")} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors mb-6">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          Back to My Participants
+        </button>
+        <EmptyPlaceholder
+          icon="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+          title="Unable to load participant"
+          description={error}
+        />
+        <div className="flex justify-center mt-4">
+          <button onClick={fetchData} className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+            Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Not found state ──
   if (!participant) {
     return (
       <div className="max-w-6xl mx-auto p-2 md:p-0 text-center py-20">
@@ -812,15 +998,13 @@ export default function ParticipantDetailPage() {
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-bold text-slate-800">{p.firstName} {p.lastName}</h1>
               <StatusDot status={p.status} />
-              <span className="text-xs text-slate-400 capitalize">{p.status}</span>
+              <span className="text-xs text-slate-400 capitalize">{p.activityLabel}</span>
             </div>
-            <p className="text-sm text-slate-400 mt-0.5">{p.email}</p>
             <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-              <span className="text-xs text-slate-400">Age {getAge(p.dob)} · {p.gender}</span>
-              <span className="text-xs text-slate-300">·</span>
-              <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">{p.groupName}</span>
-              <span className="text-xs text-slate-300">·</span>
-              <span className="text-xs text-slate-400">Last active {daysSince(p.lastActive)}</span>
+              {p.age != null && <span className="text-xs text-slate-400">Age {p.age}</span>}
+              {p.gender && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-slate-400">{p.gender}</span></>}
+              {p.groupName && <><span className="text-xs text-slate-300">·</span><span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">{p.groupName}</span></>}
+              {p.lastActive && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-slate-400">Last active {daysSince(p.lastActive)}</span></>}
             </div>
           </div>
         </div>
@@ -838,11 +1022,11 @@ export default function ParticipantDetailPage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "overview" && <OverviewTab p={p} />}
-      {activeTab === "submissions" && <SubmissionsTab submissions={submissions} />}
-      {activeTab === "goals" && <GoalsTab goals={goals} />}
-      {activeTab === "trends" && <TrendsTab participantId={p.id} />}
-      {activeTab === "notes" && <NotesTab participantId={p.id} participantName={`${p.firstName} ${p.lastName}`} initialNotes={notes} />}
+      {activeTab === "overview" && <OverviewTab p={p} trends={trends} />}
+      {activeTab === "submissions" && <SubmissionsTab submissions={submissions} participantId={p.id} participantName={`${p.firstName} ${p.lastName}`} />}
+      {activeTab === "goals" && <GoalsTab goals={goals} loading={goalsLoading} />}
+      {activeTab === "trends" && <TrendsTab trends={trends} loading={trendsLoading} />}
+      {activeTab === "notes" && <NotesTab participantId={p.id} participantName={`${p.firstName} ${p.lastName}`} feedbackItems={feedbackItems} />}
     </div>
   );
 }

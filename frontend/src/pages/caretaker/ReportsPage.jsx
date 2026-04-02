@@ -1,87 +1,13 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useOutletContext } from "react-router-dom";
 import { api } from "../../services/api";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Legend, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from "recharts";
-
-// ─── Mock Data ──────────────────────────────────────────────────────────────────
-
-const CARETAKER_GROUP = { id: "g1", name: "Morning Cohort A" };
-
-const MOCK_PARTICIPANTS = [
-  { id: "p1", name: "Sarah Chen", status: "active" },
-  { id: "p2", name: "Marcus Webb", status: "active" },
-  { id: "p3", name: "Lily Hartmann", status: "inactive" },
-  { id: "p4", name: "Aiko Tanaka", status: "active" },
-  { id: "p5", name: "Omar Diallo", status: "active" },
-  { id: "p6", name: "Priya Sharma", status: "active" },
-  { id: "p7", name: "James Kowalski", status: "active" },
-  { id: "p8", name: "Fatima Al-Rashid", status: "inactive" },
-];
-
-const ALL_METRICS = [
-  { key: "bpSystolic", label: "Systolic BP", unit: "mmHg", category: "Vitals" },
-  { key: "bpDiastolic", label: "Diastolic BP", unit: "mmHg", category: "Vitals" },
-  { key: "weight", label: "Weight", unit: "kg", category: "Vitals" },
-  { key: "painLevel", label: "Pain Level", unit: "/10", category: "Vitals" },
-  { key: "stressScore", label: "Stress Score (PSS)", unit: "/40", category: "Mental Health" },
-  { key: "lonelinessScore", label: "Loneliness Score", unit: "/80", category: "Social Wellness" },
-  { key: "sleepHours", label: "Sleep Duration", unit: "hrs", category: "Lifestyle" },
-  { key: "waterIntake", label: "Water Intake", unit: "glasses", category: "Lifestyle" },
-  { key: "exerciseMinutes", label: "Exercise", unit: "min/day", category: "Lifestyle" },
-  { key: "surveyCompletion", label: "Survey Completion", unit: "%", category: "Engagement" },
-  { key: "goalCompletion", label: "Goal Completion", unit: "%", category: "Engagement" },
-];
-
-const METRIC_CATEGORIES = [...new Set(ALL_METRICS.map(m => m.category))];
-
-function generateGroupData(metrics) {
-  const participants = MOCK_PARTICIPANTS;
-  const data = {};
-  metrics.forEach(mk => {
-    const m = ALL_METRICS.find(x => x.key === mk);
-    if (!m) return;
-    const values = participants.map(() => {
-      const ranges = { bpSystolic: [105, 150], bpDiastolic: [65, 95], weight: [50, 105], painLevel: [0, 8], stressScore: [5, 35], lonelinessScore: [20, 65], sleepHours: [4, 9], waterIntake: [2, 10], exerciseMinutes: [0, 60], surveyCompletion: [0, 100], goalCompletion: [0, 100] };
-      const [lo, hi] = ranges[mk] || [0, 100];
-      return Math.round((lo + Math.random() * (hi - lo)) * 10) / 10;
-    });
-    data[mk] = { label: m.label, unit: m.unit, category: m.category, avg: Math.round(values.reduce((a, b) => a + b, 0) / values.length * 10) / 10, min: Math.min(...values), max: Math.max(...values), perParticipant: participants.map((p, i) => ({ name: p.name.split(" ")[0][0] + ". " + p.name.split(" ").slice(1).join(" "), value: values[i], status: p.status })) };
-  });
-  return data;
-}
-
-function generateTrends(months, metrics) {
-  return months.map((month, i) => {
-    const row = { month };
-    metrics.forEach(mk => {
-      const ranges = { bpSystolic: [125, 150], bpDiastolic: [78, 96], weight: [75, 105], painLevel: [2, 8], stressScore: [10, 30], lonelinessScore: [25, 55], sleepHours: [5, 8], waterIntake: [4, 9], exerciseMinutes: [10, 45], surveyCompletion: [40, 95], goalCompletion: [20, 80] };
-      const [lo, hi] = ranges[mk] || [0, 100];
-      row[mk] = Math.round((hi - (hi - lo) * (i / (months.length - 1 || 1)) + (Math.random() - 0.5) * 5) * 10) / 10;
-    });
-    return row;
-  });
-}
-
-const MONTH_OPTIONS = ["Jan 2026", "Feb 2026", "Mar 2026", "Apr 2026", "May 2026", "Jun 2026", "Jul 2026", "Aug 2026", "Sep 2025", "Oct 2025", "Nov 2025", "Dec 2025"];
-const MONTH_SHORT = ["Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-
-const MOCK_REPORT_HISTORY = [
-  { id: "r1", scope: "group", title: "Group Report — March 2026", createdAt: "2026-03-10", metrics: ["Systolic BP", "Weight", "Pain Level"], type: "graph" },
-  { id: "r2", scope: "comparison", title: "James Kowalski vs Group", createdAt: "2026-03-08", metrics: ["BP", "Surveys", "Goals"], type: "numeric" },
-  { id: "r3", scope: "trends", title: "Health Trends — Priya Sharma", createdAt: "2026-02-28", metrics: ["Systolic BP", "Weight"], type: "graph" },
-  { id: "r4", scope: "group", title: "Group Report — February 2026", createdAt: "2026-02-15", metrics: ["All Vitals", "Engagement"], type: "graph" },
-  { id: "r5", scope: "comparison", title: "Sarah Chen vs Group", createdAt: "2026-02-10", metrics: ["Vitals", "Lifestyle"], type: "numeric" },
-  { id: "r6", scope: "trends", title: "Health Trends — Marcus Webb", createdAt: "2026-01-25", metrics: ["Pain Level", "Exercise"], type: "graph" },
-  { id: "r7", scope: "group", title: "Group Report — January 2026", createdAt: "2026-01-12", metrics: ["All metrics"], type: "graph" },
-];
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Legend } from "recharts";
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
 
 function fmt(d) { if (!d) return "—"; return new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" }); }
-const CHART_TT = { borderRadius: "12px", border: "none", boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)", fontSize: "12px" };
-const COLORS = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#6366f1", "#ec4899", "#14b8a6", "#f97316", "#8b5cf6", "#06b6d4", "#84cc16"];
-
-// ─── Shared Components ──────────────────────────────────────────────────────────
+const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
+const CHART_TT = { borderRadius: "10px", border: "none", boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)", fontSize: "12px" };
 
 function Tip({ text, children }) {
   return (
@@ -100,14 +26,27 @@ function ScopeBadge({ scope }) {
   return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${s[scope] || s.group}`}>{scope}</span>;
 }
 
-function MetricPicker({ selected, onChange, label = "Select Metrics" }) {
+// ─── Shared: MetricPicker (driven by real elements) ─────────────────────────────
+
+function MetricPicker({ elements, selected, onChange, label = "Select Metrics" }) {
   const [expanded, setExpanded] = useState(false);
-  const toggleMetric = (key) => onChange(selected.includes(key) ? selected.filter(k => k !== key) : [...selected, key]);
+
+  const categories = useMemo(() => {
+    const cats = {};
+    elements.forEach(e => {
+      const cat = e.category || "Other";
+      if (!cats[cat]) cats[cat] = [];
+      cats[cat].push(e);
+    });
+    return cats;
+  }, [elements]);
+
+  const toggleMetric = (id) => onChange(selected.includes(id) ? selected.filter(k => k !== id) : [...selected, id]);
   const toggleCategory = (cat) => {
-    const catKeys = ALL_METRICS.filter(m => m.category === cat).map(m => m.key);
-    const allSelected = catKeys.every(k => selected.includes(k));
-    if (allSelected) onChange(selected.filter(k => !catKeys.includes(k)));
-    else onChange([...new Set([...selected, ...catKeys])]);
+    const ids = categories[cat].map(e => e.element_id);
+    const allSelected = ids.every(id => selected.includes(id));
+    if (allSelected) onChange(selected.filter(id => !ids.includes(id)));
+    else onChange([...new Set([...selected, ...ids])]);
   };
 
   return (
@@ -122,12 +61,12 @@ function MetricPicker({ selected, onChange, label = "Select Metrics" }) {
         <div className="flex flex-wrap gap-1.5">
           {selected.length === 0 ? (
             <span className="text-xs text-slate-400 italic">No metrics selected</span>
-          ) : selected.map(key => {
-            const m = ALL_METRICS.find(x => x.key === key);
-            return m ? (
-              <span key={key} className="inline-flex items-center gap-1 text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded-full">
-                {m.label}
-                <button onClick={() => toggleMetric(key)} className="text-blue-400 hover:text-blue-700 transition-colors">
+          ) : selected.map(id => {
+            const e = elements.find(x => x.element_id === id);
+            return e ? (
+              <span key={id} className="inline-flex items-center gap-1 text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded-full">
+                {e.label}
+                <button onClick={() => toggleMetric(id)} className="text-blue-400 hover:text-blue-700 transition-colors">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </span>
@@ -136,24 +75,23 @@ function MetricPicker({ selected, onChange, label = "Select Metrics" }) {
         </div>
       ) : (
         <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 space-y-3 max-h-60 overflow-y-auto">
-          {METRIC_CATEGORIES.map(cat => {
-            const catMetrics = ALL_METRICS.filter(m => m.category === cat);
-            const allCatSelected = catMetrics.every(m => selected.includes(m.key));
-            const someCatSelected = catMetrics.some(m => selected.includes(m.key));
+          {Object.entries(categories).map(([cat, catElements]) => {
+            const allSelected = catElements.every(e => selected.includes(e.element_id));
+            const someSelected = catElements.some(e => selected.includes(e.element_id));
             return (
               <div key={cat}>
                 <button onClick={() => toggleCategory(cat)} className="flex items-center gap-2 mb-1.5 group">
-                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${allCatSelected ? "bg-blue-600 border-blue-600" : someCatSelected ? "bg-blue-200 border-blue-400" : "border-slate-300 group-hover:border-slate-400"}`}>
-                    {(allCatSelected || someCatSelected) && <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allCatSelected ? "M5 13l4 4L19 7" : "M20 12H4"} /></svg>}
+                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${allSelected ? "bg-blue-600 border-blue-600" : someSelected ? "bg-blue-200 border-blue-400" : "border-slate-300 group-hover:border-slate-400"}`}>
+                    {(allSelected || someSelected) && <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allSelected ? "M5 13l4 4L19 7" : "M20 12H4"} /></svg>}
                   </div>
                   <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">{cat}</span>
                 </button>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 ml-6">
-                  {catMetrics.map(m => (
-                    <label key={m.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white cursor-pointer transition-colors">
-                      <input type="checkbox" checked={selected.includes(m.key)} onChange={() => toggleMetric(m.key)} className="w-3.5 h-3.5 rounded accent-blue-600" />
-                      <span className="text-xs text-slate-700">{m.label}</span>
-                      <span className="text-xs text-slate-300 ml-auto">{m.unit}</span>
+                  {catElements.map(e => (
+                    <label key={e.element_id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white cursor-pointer transition-colors">
+                      <input type="checkbox" checked={selected.includes(e.element_id)} onChange={() => toggleMetric(e.element_id)} className="w-3.5 h-3.5 rounded accent-blue-600" />
+                      <span className="text-xs text-slate-700">{e.label}</span>
+                      <span className="text-xs text-slate-300 ml-auto">{e.unit}</span>
                     </label>
                   ))}
                 </div>
@@ -161,7 +99,7 @@ function MetricPicker({ selected, onChange, label = "Select Metrics" }) {
             );
           })}
           <div className="flex gap-2 pt-2 border-t border-slate-200">
-            <button onClick={() => onChange(ALL_METRICS.map(m => m.key))} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Select All</button>
+            <button onClick={() => onChange(elements.map(e => e.element_id))} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Select All</button>
             <span className="text-xs text-slate-300">·</span>
             <button onClick={() => onChange([])} className="text-xs font-semibold text-slate-500 hover:text-slate-700">Clear All</button>
           </div>
@@ -202,24 +140,52 @@ function ReportTypeRow({ value, onChange }) {
 
 // ─── Tab: Group Report ──────────────────────────────────────────────────────────
 
-function GroupReport({ participants = MOCK_PARTICIPANTS, groupName = CARETAKER_GROUP.name }) {
-  const [metrics, setMetrics] = useState(["bpSystolic", "weight", "painLevel", "surveyCompletion"]);
+function GroupReportTab({ groups, selectedGroupId, elements }) {
+  const [metrics, setMetrics] = useState([]);
   const [dateFrom, setDateFrom] = useState("2025-09-01");
-  const [dateTo, setDateTo] = useState("2026-03-14");
+  const [dateTo, setDateTo] = useState(new Date().toISOString().split("T")[0]);
   const [reportType, setReportType] = useState("graph");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [generated, setGenerated] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [report, setReport] = useState(null);
   const [chartMetric, setChartMetric] = useState(null);
+  const [error, setError] = useState(null);
 
-  const data = useMemo(() => generated ? generateGroupData(metrics) : null, [generated, metrics]);
-  const trends = useMemo(() => generated ? generateTrends(MONTH_SHORT, metrics) : null, [generated, metrics]);
+  useEffect(() => {
+    if (elements.length > 0 && metrics.length === 0) {
+      setMetrics(elements.slice(0, 4).map(e => e.element_id));
+    }
+  }, [elements]);
 
-  function handleGenerate() {
-    setGenerated(true);
-    setChartMetric(metrics[0] || null);
+  const groupName = selectedGroupId === "all" ? "All Groups" : groups.find(g => g.id === selectedGroupId)?.name || "Group";
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setError(null);
+    try {
+      const groupId = selectedGroupId !== "all" ? selectedGroupId : groups[0]?.id;
+      if (!groupId) { setError("No group selected."); setGenerating(false); return; }
+      const payload = {
+        element_ids: metrics,
+        date_from: dateFrom || null,
+        date_to: dateTo || null,
+        report_type: reportType,
+      };
+      const data = await api.caretakerGenerateGroupReport(groupId, payload);
+      setReport(data.payload || data);
+      const elems = data.payload?.elements || data.elements || [];
+      if (elems.length > 0) setChartMetric(elems[0].element_id);
+    } catch (err) {
+      console.error("Group report generation failed:", err);
+      setError(err.message || "Failed to generate report. Please try again.");
+    } finally {
+      setGenerating(false);
+    }
   }
 
-  if (!generated) {
+  useEffect(() => { setReport(null); }, [selectedGroupId]);
+
+  if (!report) {
     return (
       <div className="space-y-5">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-5">
@@ -229,197 +195,188 @@ function GroupReport({ participants = MOCK_PARTICIPANTS, groupName = CARETAKER_G
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-800">Configure Group Report</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Aggregate data across all participants in {groupName}</p>
+              <p className="text-xs text-slate-400 mt-0.5">Aggregate data across all participants in <span className="font-semibold text-slate-500">{groupName}</span></p>
             </div>
           </div>
 
-          <MetricPicker selected={metrics} onChange={setMetrics} />
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <DateRangeRow from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
-            <ReportTypeRow value={reportType} onChange={setReportType} />
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Include Participants</label>
-            <div className="flex gap-1.5">
-              {[{ v: "all", l: "All" }, { v: "active", l: "Active Only" }, { v: "inactive", l: "Inactive Only" }].map(s => (
-                <button key={s.v} onClick={() => setStatusFilter(s.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${statusFilter === s.v ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{s.l}</button>
-              ))}
+          {elements.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+              <p className="text-sm text-slate-400">No data elements configured for this group yet.</p>
+              <p className="text-xs text-slate-300 mt-1">Ask a researcher to set up data element mappings for the surveys deployed to this group.</p>
             </div>
-          </div>
-
-          <button onClick={handleGenerate} disabled={metrics.length === 0}
-            className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-            Generate Group Report
-          </button>
+          ) : (
+            <>
+              <MetricPicker elements={elements} selected={metrics} onChange={setMetrics} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <DateRangeRow from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+                <ReportTypeRow value={reportType} onChange={setReportType} />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Include Participants</label>
+                <div className="flex gap-1.5">
+                  {[{ v: "all", l: "All" }, { v: "active", l: "Active Only" }, { v: "inactive", l: "Inactive Only" }].map(s => (
+                    <button key={s.v} onClick={() => setStatusFilter(s.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${statusFilter === s.v ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{s.l}</button>
+                  ))}
+                </div>
+              </div>
+              {error && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2.5 rounded-xl">{error}</p>}
+              <button onClick={handleGenerate} disabled={metrics.length === 0 || generating}
+                className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                {generating ? (
+                  <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Generating...</>
+                ) : (
+                  <><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>Generate Group Report</>
+                )}
+              </button>
+            </>
+          )}
         </div>
       </div>
     );
   }
 
+  const elems = report.elements || [];
+
   return (
     <div className="space-y-5">
-      {/* Back to configure */}
-      <button onClick={() => setGenerated(false)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+      <button onClick={() => setReport(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         Back to Configuration
       </button>
-
-      {/* Config summary */}
       <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span className="font-bold text-slate-700">Group Report</span>
-        <span>·</span>
-        <span>{metrics.length} metrics</span>
-        <span>·</span>
-        <span>{fmt(dateFrom)} — {fmt(dateTo)}</span>
-        <span>·</span>
-        <span className="capitalize">{statusFilter} participants</span>
-        <span>·</span>
-        <span className="capitalize">{reportType}</span>
+        <span className="font-bold text-slate-700">Group Report — {groupName}</span>
+        <span>·</span><span>{elems.length} metrics</span>
+        <span>·</span><span>{fmt(dateFrom)} — {fmt(dateTo)}</span>
+        <span>·</span><span className="capitalize">{statusFilter} participants</span>
+        <span>·</span><span className="capitalize">{reportType}</span>
       </div>
 
-      {/* Metric summary cards */}
-      {data && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {Object.entries(data).slice(0, 8).map(([key, m]) => (
-            <div key={key} className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-center cursor-pointer hover:border-blue-200 transition-colors" onClick={() => setChartMetric(key)}>
-              <p className="text-xs text-slate-400 mb-0.5 truncate">{m.label}</p>
-              <p className="text-xl font-extrabold text-slate-800">{m.avg}<span className="text-xs text-slate-400 ml-0.5">{m.unit}</span></p>
-              <p className="text-xs text-slate-300 mt-0.5">{m.min} — {m.max}</p>
+      {elems.length === 0 ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
+          <p className="text-sm text-slate-400">No data found for the selected metrics and date range.</p>
+          <button onClick={() => setReport(null)} className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-800">Adjust configuration</button>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {elems.map(e => (
+              <div key={e.element_id} onClick={() => setChartMetric(e.element_id)}
+                className={`bg-white rounded-2xl shadow-sm border px-4 py-3 text-center cursor-pointer transition-colors ${chartMetric === e.element_id ? "border-blue-200 bg-blue-50/30" : "border-slate-100 hover:border-blue-200"}`}>
+                <p className="text-xs text-slate-400 mb-0.5 truncate">{e.label}</p>
+                <p className="text-xl font-extrabold text-slate-800">{e.avg}<span className="text-xs text-slate-400 ml-0.5">{e.unit}</span></p>
+                <p className="text-xs text-slate-300 mt-0.5">{e.min} — {e.max}</p>
+                <p className="text-[10px] text-slate-300">{e.count} data points</p>
+              </div>
+            ))}
+          </div>
+          {reportType === "graph" && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Average Values</p>
+                <div className="flex gap-1 overflow-x-auto">
+                  {elems.map(e => (
+                    <button key={e.element_id} onClick={() => setChartMetric(e.element_id)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${chartMetric === e.element_id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+                      {e.label.split(" ")[0]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={elems} margin={{ bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} angle={-20} textAnchor="end" height={50} />
+                    <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                    <ReTooltip contentStyle={CHART_TT} formatter={(v, name, props) => [`${v} ${props.payload.unit}`, "Average"]} />
+                    <Bar dataKey="avg" name="Group Average" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* Chart area — single metric at a time */}
-      {reportType === "graph" && chartMetric && data?.[chartMetric] && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{data[chartMetric].label} — Per Participant</p>
-            <div className="flex gap-1 overflow-x-auto">
-              {metrics.map(mk => {
-                const m = ALL_METRICS.find(x => x.key === mk);
-                return (
-                  <Tip key={mk} text={`View ${m?.label}`}>
-                    <button onClick={() => setChartMetric(mk)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${chartMetric === mk ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{m?.label?.split(" ")[0]}</button>
-                  </Tip>
-                );
-              })}
+          )}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Numeric Summary</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-100">
+                  <th className="text-left text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Metric</th>
+                  <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Avg</th>
+                  <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Min</th>
+                  <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Max</th>
+                  <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Count</th>
+                </tr></thead>
+                <tbody>
+                  {elems.map(e => (
+                    <tr key={e.element_id} className="border-b border-slate-50 hover:bg-slate-50">
+                      <td className="py-2.5 px-4 font-semibold text-slate-700">{e.label} <span className="text-slate-400 font-normal">({e.unit})</span></td>
+                      <td className="py-2.5 px-4 text-center font-bold text-blue-600">{e.avg}</td>
+                      <td className="py-2.5 px-4 text-center text-slate-500">{e.min}</td>
+                      <td className="py-2.5 px-4 text-center text-slate-500">{e.max}</td>
+                      <td className="py-2.5 px-4 text-center text-slate-400">{e.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data[chartMetric].perParticipant} margin={{ bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94a3b8" }} angle={-30} textAnchor="end" height={50} />
-                <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                <ReTooltip contentStyle={CHART_TT} formatter={(v) => `${v} ${data[chartMetric].unit}`} />
-                <Bar dataKey="value" name={data[chartMetric].label} fill="#3b82f6" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {/* Monthly trends — select which metrics to overlay */}
-      {reportType === "graph" && trends && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Monthly Group Trends</p>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trends}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                <ReTooltip contentStyle={CHART_TT} />
-                <Legend wrapperStyle={{ fontSize: "11px" }} />
-                {metrics.slice(0, 4).map((mk, i) => {
-                  const m = ALL_METRICS.find(x => x.key === mk);
-                  return <Line key={mk} type="monotone" dataKey={mk} name={m?.label || mk} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={{ r: 3 }} />;
-                })}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          {metrics.length > 4 && <p className="text-xs text-slate-400 italic mt-2 text-center">Showing first 4 metrics on chart. Click metric cards above to focus individual metrics.</p>}
-        </div>
-      )}
-
-      {/* Numeric table */}
-      {reportType === "numeric" && data && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Numeric Summary</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-100">
-                <th className="text-left text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Metric</th>
-                <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-3">Avg</th>
-                <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-3">Min</th>
-                <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-3">Max</th>
-                <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-3">Unit</th>
-              </tr></thead>
-              <tbody>
-                {Object.entries(data).map(([key, m]) => (
-                  <tr key={key} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
-                    <td className="py-2.5 px-4 font-medium text-slate-700">{m.label}</td>
-                    <td className="py-2.5 px-3 text-center font-bold text-blue-600">{m.avg}</td>
-                    <td className="py-2.5 px-3 text-center text-slate-500">{m.min}</td>
-                    <td className="py-2.5 px-3 text-center text-slate-500">{m.max}</td>
-                    <td className="py-2.5 px-3 text-center text-slate-400">{m.unit}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        </>
       )}
     </div>
   );
 }
 
-// ─── Tab: Comparison ────────────────────────────────────────────────────────────
+// ─── Tab: Comparison Report (with MetricPicker) ─────────────────────────────────
 
-function ComparisonReport({ participants = MOCK_PARTICIPANTS, groupName = CARETAKER_GROUP.name }) {
-  const [selectedIds, setSelectedIds] = useState([]);
-  const [includeGroupAvg, setIncludeGroupAvg] = useState(true);
-  const [metrics, setMetrics] = useState(["bpSystolic", "bpDiastolic", "weight", "painLevel", "surveyCompletion", "goalCompletion"]);
+function ComparisonTab({ participants, groups, selectedGroupId, elements }) {
+  const [selectedParticipant, setSelectedParticipant] = useState("");
+  const [compareWith, setCompareWith] = useState("group");
+  const [compareParticipantId, setCompareParticipantId] = useState("");
+  const [metrics, setMetrics] = useState([]);
   const [dateFrom, setDateFrom] = useState("2025-09-01");
-  const [dateTo, setDateTo] = useState("2026-03-14");
-  const [generated, setGenerated] = useState(false);
+  const [dateTo, setDateTo] = useState(new Date().toISOString().split("T")[0]);
+  const [generating, setGenerating] = useState(false);
+  const [report, setReport] = useState(null);
+  const [error, setError] = useState(null);
 
-  function toggleParticipant(id) {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const groupName = selectedGroupId === "all" ? "All Groups" : groups.find(g => g.id === selectedGroupId)?.name || "Group";
+
+  // Auto-select first 4 elements
+  useEffect(() => {
+    if (elements.length > 0 && metrics.length === 0) {
+      setMetrics(elements.slice(0, 4).map(e => e.element_id));
+    }
+  }, [elements]);
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setError(null);
+    try {
+      const queryParams = { compare_with: compareWith };
+      if (compareWith === "participant" && compareParticipantId) {
+        queryParams.compare_participant_id = compareParticipantId;
+      }
+      if (compareWith === "group") {
+        queryParams.group_id = selectedGroupId !== "all" ? selectedGroupId : groups[0]?.id;
+      }
+      const payload = {
+        date_from: dateFrom || null,
+        date_to: dateTo || null,
+        element_ids: metrics.length > 0 ? metrics : [],
+      };
+      const data = await api.caretakerGenerateComparisonReport(selectedParticipant, queryParams, payload);
+      setReport(data.payload || data);
+    } catch (err) {
+      console.error("Comparison report failed:", err);
+      setError(err.message || "Failed to generate comparison report.");
+    } finally {
+      setGenerating(false);
+    }
   }
 
-  // Generate mock values per participant per metric (seeded by id so values are stable)
-  const mockData = useMemo(() => {
-    if (!generated) return null;
-    const ranges = { bpSystolic: [105, 150], bpDiastolic: [65, 95], weight: [50, 105], painLevel: [0, 8], stressScore: [5, 35], lonelinessScore: [20, 65], sleepHours: [4, 9], waterIntake: [2, 10], exerciseMinutes: [0, 60], surveyCompletion: [0, 100], goalCompletion: [0, 100] };
-    const seed = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0; return Math.abs(h); };
-    const vals = {};
-    selectedIds.forEach(pid => {
-      vals[pid] = {};
-      metrics.forEach(mk => {
-        const [lo, hi] = ranges[mk] || [0, 100];
-        const s = seed(pid + mk);
-        vals[pid][mk] = Math.round((lo + (s % 1000) / 1000 * (hi - lo)) * 10) / 10;
-      });
-    });
-    // Group averages
-    if (includeGroupAvg) {
-      vals["__group__"] = {};
-      metrics.forEach(mk => {
-        const [lo, hi] = ranges[mk] || [0, 100];
-        vals["__group__"][mk] = Math.round(((lo + hi) / 2) * 10) / 10;
-      });
-    }
-    return vals;
-  }, [generated, selectedIds, metrics, includeGroupAvg]);
-
-  if (!generated) {
+  if (!report) {
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-5">
         <div className="flex items-center gap-3">
@@ -427,240 +384,187 @@ function ComparisonReport({ participants = MOCK_PARTICIPANTS, groupName = CARETA
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
           </div>
           <div>
-            <h2 className="text-base font-bold text-slate-800">Configure Comparison Report</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Compare two or more participants head-to-head, optionally against the group average</p>
+            <h2 className="text-base font-bold text-slate-800">Comparison Report</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Compare a participant against the group average or another participant</p>
           </div>
         </div>
 
-        {/* Multi-select participants */}
         <div>
-          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">
-            Select Participants <span className="text-slate-300 font-normal normal-case">(pick 2 or more)</span>
-          </label>
-          <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 space-y-1.5 max-h-48 overflow-y-auto">
-            {participants.map(p => {
-              const isSelected = selectedIds.includes(p.id);
-              return (
-                <label key={p.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${isSelected ? "bg-indigo-50 border border-indigo-200" : "hover:bg-white border border-transparent"}`}>
-                  <input type="checkbox" checked={isSelected} onChange={() => toggleParticipant(p.id)} className="w-4 h-4 rounded accent-indigo-600" />
-                  <span className="text-sm font-medium text-slate-700">{p.name}</span>
-                  <span className={`text-xs ml-auto ${p.status === "active" ? "text-emerald-500" : "text-slate-400"}`}>{p.status}</span>
-                </label>
-              );
-            })}
-          </div>
-          {selectedIds.length > 0 && (
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <span className="text-xs text-slate-400">{selectedIds.length} selected:</span>
-              {selectedIds.map(id => {
-                const p = participants.find(x => x.id === id);
-                return (
-                  <span key={id} className="inline-flex items-center gap-1 text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-full">
-                    {p?.name?.split(" ")[0]}
-                    <button onClick={() => toggleParticipant(id)} className="text-indigo-400 hover:text-indigo-700">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                  </span>
-                );
-              })}
-            </div>
-          )}
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Participant</p>
+          <select value={selectedParticipant} onChange={e => setSelectedParticipant(e.target.value)}
+            className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 bg-white">
+            <option value="">Select a participant…</option>
+            {participants.map(p => <option key={p.participant_id} value={p.participant_id}>{p.name}</option>)}
+          </select>
         </div>
 
-        {/* Include group average toggle */}
-        <label className="flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-100 cursor-pointer hover:bg-emerald-100 transition-colors">
-          <input type="checkbox" checked={includeGroupAvg} onChange={e => setIncludeGroupAvg(e.target.checked)} className="w-4 h-4 rounded accent-emerald-600" />
-          <div>
-            <span className="text-sm font-semibold text-emerald-800">Include Group Average</span>
-            <p className="text-xs text-emerald-600 mt-0.5">Add the {groupName} average as a reference column</p>
+        <div>
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Compare Against</p>
+          <div className="flex gap-1.5 flex-wrap">
+            {[{ v: "group", l: `Group Avg (${groupName})` }, { v: "participant", l: "Another Participant" }, { v: "all", l: "All Participants" }].map(opt => (
+              <button key={opt.v} onClick={() => setCompareWith(opt.v)}
+                className={`flex-1 px-3 py-2 rounded-xl text-xs font-semibold transition-all border min-w-0 ${compareWith === opt.v ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>
+                {opt.l}
+              </button>
+            ))}
           </div>
-        </label>
+        </div>
 
-        <MetricPicker selected={metrics} onChange={setMetrics} label="Metrics to Compare" />
+        {compareWith === "participant" && (
+          <div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Compare Participant</p>
+            <select value={compareParticipantId} onChange={e => setCompareParticipantId(e.target.value)}
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 bg-white">
+              <option value="">Select…</option>
+              {participants.filter(p => p.participant_id !== selectedParticipant).map(p => (
+                <option key={p.participant_id} value={p.participant_id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <MetricPicker elements={elements} selected={metrics} onChange={setMetrics} label="Metrics to Compare" />
+
         <DateRangeRow from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
 
-        <button onClick={() => setGenerated(true)} disabled={selectedIds.length < 2 || metrics.length === 0}
+        {error && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2.5 rounded-xl">{error}</p>}
+
+        <button onClick={handleGenerate}
+          disabled={!selectedParticipant || metrics.length === 0 || generating || (compareWith === "participant" && !compareParticipantId)}
           className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
-          {selectedIds.length < 2 ? "Select at least 2 participants" : "Generate Comparison"}
+          {generating ? (
+            <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Generating...</>
+          ) : (
+            <><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>Generate Comparison</>
+          )}
         </button>
       </div>
     );
   }
 
-  const selectedPeople = selectedIds.map(id => participants.find(p => p.id === id)).filter(Boolean);
-  const columnIds = includeGroupAvg ? [...selectedIds, "__group__"] : [...selectedIds];
-  const columnNames = columnIds.map(id => id === "__group__" ? "Group Avg" : participants.find(p => p.id === id)?.name?.split(" ")[0] || id);
-  const lowerBetterKeys = new Set(["bpSystolic", "bpDiastolic", "weight", "painLevel", "stressScore", "lonelinessScore"]);
-
-  // Radar data: normalize each metric to 0-100 scale for visual comparison
-  const radarData = useMemo(() => {
-    return metrics.slice(0, 8).map(mk => {
-      const m = ALL_METRICS.find(x => x.key === mk);
-      const row = { metric: m?.label?.split(" ").slice(0, 2).join(" ") || mk };
-      columnIds.forEach((id, i) => {
-        row[`val_${i}`] = mockData?.[id]?.[mk] != null ? Math.round(Math.min(100, Math.max(0, mockData[id][mk]))) : 0;
-      });
-      return row;
-    });
-  }, [metrics, columnIds, mockData]);
+  const elems = report.elements || [];
+  const subjectName = participants.find(p => p.participant_id === selectedParticipant)?.name || "Participant";
+  const compLabel = compareWith === "group" ? groupName : compareWith === "all" ? "All Participants" : participants.find(p => p.participant_id === compareParticipantId)?.name || "Comparison";
+  const barData = elems.map(e => ({ label: e.label, unit: e.unit, [subjectName]: e.subject?.avg, [compLabel]: e.comparison?.avg }));
 
   return (
     <div className="space-y-5">
-      <button onClick={() => setGenerated(false)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+      <button onClick={() => setReport(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         Back to Configuration
       </button>
-
       <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span className="font-bold text-slate-700">{selectedPeople.map(p => p.name.split(" ")[0]).join(" vs ")}{includeGroupAvg ? " vs Group" : ""}</span>
-        <span>·</span><span>{metrics.length} metrics</span><span>·</span><span>{fmt(dateFrom)} — {fmt(dateTo)}</span>
+        <span className="font-bold text-slate-700">{subjectName} vs {compLabel}</span>
+        <span>·</span><span>{elems.length} elements</span>
+        <span>·</span><span>{fmt(dateFrom)} — {fmt(dateTo)}</span>
       </div>
 
-      {/* Head-to-head table */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr className="border-b border-slate-100 bg-slate-50">
-              <th className="text-left text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4 sticky left-0 bg-slate-50 z-10">Metric</th>
-              {columnIds.map((id, i) => (
-                <th key={id} className={`text-center text-xs font-bold uppercase tracking-wider py-2.5 px-3 ${id === "__group__" ? "text-emerald-600" : `text-${["indigo", "rose", "amber", "blue", "violet", "pink", "teal", "orange"][i % 8]}-600`}`}>
-                  {columnNames[i]}
-                </th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {metrics.map(mk => {
-                const m = ALL_METRICS.find(x => x.key === mk);
-                const values = columnIds.map(id => mockData?.[id]?.[mk] ?? "—");
-                const isLB = lowerBetterKeys.has(mk);
-                const numVals = values.filter(v => typeof v === "number");
-                const best = numVals.length > 0 ? (isLB ? Math.min(...numVals) : Math.max(...numVals)) : null;
-                return (
-                  <tr key={mk} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
-                    <td className="py-2.5 px-4 font-medium text-slate-700 sticky left-0 bg-white z-10">{m?.label} <span className="text-slate-300">{m?.unit}</span></td>
-                    {values.map((v, i) => (
-                      <td key={i} className={`py-2.5 px-3 text-center font-bold ${typeof v === "number" && v === best ? "text-emerald-600" : columnIds[i] === "__group__" ? "text-emerald-700/70" : "text-slate-700"}`}>
-                        {v}{typeof v === "number" && v === best && " ✓"}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      {elems.length === 0 ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
+          <p className="text-sm text-slate-400">No data found for this comparison.</p>
+          <button onClick={() => setReport(null)} className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-800">Adjust configuration</button>
         </div>
-      </div>
-
-      {/* Radar chart */}
-      {radarData.length >= 3 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Performance Radar</p>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <RadarChart data={radarData}>
-                <PolarGrid stroke="#e2e8f0" />
-                <PolarAngleAxis dataKey="metric" tick={{ fontSize: 10, fill: "#64748b" }} />
-                <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 9, fill: "#94a3b8" }} />
-                {columnIds.map((id, i) => (
-                  <Radar key={id} name={columnNames[i]} dataKey={`val_${i}`}
-                    stroke={id === "__group__" ? "#10b981" : COLORS[i % COLORS.length]}
-                    fill={id === "__group__" ? "#10b981" : COLORS[i % COLORS.length]}
-                    fillOpacity={id === "__group__" ? 0.08 : 0.12}
-                    strokeWidth={id === "__group__" ? 1.5 : 2}
-                    strokeDasharray={id === "__group__" ? "4 4" : undefined} />
-                ))}
-                <Legend wrapperStyle={{ fontSize: "11px" }} />
-                <ReTooltip contentStyle={CHART_TT} />
-              </RadarChart>
-            </ResponsiveContainer>
+      ) : (
+        <>
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Average Comparison</p>
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={barData} margin={{ bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} angle={-20} textAnchor="end" height={50} />
+                  <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                  <ReTooltip contentStyle={CHART_TT} />
+                  <Legend wrapperStyle={{ fontSize: "11px" }} />
+                  <Bar dataKey={subjectName} fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey={compLabel} fill="#94a3b8" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
-        </div>
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Detailed Comparison</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-100">
+                  <th className="text-left text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Element</th>
+                  <th className="text-center text-xs font-bold text-indigo-500 uppercase tracking-wider py-2.5 px-4">{subjectName.split(" ")[0]} Avg</th>
+                  <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">{compLabel.split(" ")[0]} Avg</th>
+                  <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Diff</th>
+                </tr></thead>
+                <tbody>
+                  {elems.map(e => {
+                    const diff = e.subject?.avg != null && e.comparison?.avg != null ? e.subject.avg - e.comparison.avg : null;
+                    return (
+                      <tr key={e.element_id} className="border-b border-slate-50 hover:bg-slate-50">
+                        <td className="py-2.5 px-4 font-semibold text-slate-700">{e.label} <span className="text-slate-400 font-normal">({e.unit})</span></td>
+                        <td className="py-2.5 px-4 text-center font-bold text-indigo-600">{e.subject?.avg ?? "—"}</td>
+                        <td className="py-2.5 px-4 text-center text-slate-500">{e.comparison?.avg ?? "—"}</td>
+                        <td className={`py-2.5 px-4 text-center font-bold ${diff != null ? (diff < 0 ? "text-emerald-600" : diff > 0 ? "text-amber-600" : "text-slate-400") : "text-slate-400"}`}>
+                          {diff != null ? `${diff > 0 ? "+" : ""}${diff.toFixed(1)}` : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
 }
 
-// ─── Tab: Health Trends (with Notes) ────────────────────────────────────────────
+// ─── Tab: Health Trends (with metric visibility toggles in results) ─────────────
 
-const MOCK_NOTES_BY_PARTICIPANT = {
-  p7: [
-    { id: "n1", text: "James showed improvement in daily step count but BP is still above target. Discussed medication adherence.", createdAt: "2026-03-08", tag: "check-in" },
-    { id: "n2", text: "Reviewed latest PSS scores — stress levels remain elevated. Recommended exploring community walking group.", createdAt: "2026-02-25", tag: "recommendation" },
-    { id: "n3", text: "Weight down 1.5 kg from last month. Positive trend. Flagged chest pain reported in PAR-Q — follow up with GP.", createdAt: "2026-02-15", tag: "progress" },
-  ],
-  p1: [
-    { id: "n10", text: "Sarah's BP is well-controlled and she's been consistent with surveys. Great progress overall.", createdAt: "2026-03-10", tag: "progress" },
-  ],
-};
-
-function HealthTrendsReport({ participants = MOCK_PARTICIPANTS }) {
+function TrendsTab({ participants, elements }) {
   const [selectedId, setSelectedId] = useState("");
-  const [metrics, setMetrics] = useState(["bpSystolic", "bpDiastolic"]);
+  const [metrics, setMetrics] = useState([]);
   const [dateFrom, setDateFrom] = useState("2025-09-01");
-  const [dateTo, setDateTo] = useState("2026-03-14");
-  const [generated, setGenerated] = useState(false);
+  const [dateTo, setDateTo] = useState(new Date().toISOString().split("T")[0]);
+  const [loading, setLoading] = useState(false);
+  const [trends, setTrends] = useState(null);
+  const [error, setError] = useState(null);
+  const [visibleMetrics, setVisibleMetrics] = useState([]);
 
-  // Notes state
-  const [notes, setNotes] = useState([]);
-  const [newNote, setNewNote] = useState("");
-  const [noteTag, setNoteTag] = useState("check-in");
-  const [editingNoteId, setEditingNoteId] = useState(null);
-  const [editText, setEditText] = useState("");
+  const toggleVisible = (id) => {
+    setVisibleMetrics(prev => prev.includes(id) ? prev.filter(e => e !== id) : [...prev, id]);
+  };
 
-  const trends = useMemo(() => generated ? generateTrends(MONTH_SHORT, metrics) : null, [generated, metrics]);
+  useEffect(() => {
+    if (elements.length > 0 && metrics.length === 0) {
+      setMetrics(elements.slice(0, 3).map(e => e.element_id));
+    }
+  }, [elements]);
 
-  function handleGenerate() {
-    setGenerated(true);
-    // Load notes for selected participant from API
-    api.caretakerListNotes(selectedId)
-      .then(data => setNotes(data))
-      .catch(() => setNotes(MOCK_NOTES_BY_PARTICIPANT[selectedId] || []));
-    setNewNote("");
-    setEditingNoteId(null);
-  }
-
-  async function handleSaveNote() {
-    if (!newNote.trim()) return;
-    const note = { id: `n${Date.now()}`, text: newNote.trim(), createdAt: new Date().toISOString().split("T")[0], tag: noteTag };
-    setNotes(prev => [note, ...prev]);
-    setNewNote("");
+  async function handleGenerate() {
+    if (!selectedId) return;
+    setLoading(true);
+    setError(null);
     try {
-      await api.caretakerCreateNote(selectedId, newNote.trim(), noteTag);
+      const params = {};
+      if (metrics.length > 0) params.element_ids = metrics;
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      const data = await api.caretakerGetHealthTrends(selectedId, params);
+      const filtered = Array.isArray(data) ? data.filter(t => t.points && t.points.length > 0) : [];
+      setTrends(filtered);
+      setVisibleMetrics(filtered.map(t => t.element_id));
     } catch (err) {
-      console.warn("Note save via API failed (backend may not be ready):", err.message);
+      console.error("Health trends fetch failed:", err);
+      setError(err.message || "Failed to load health trends.");
+      setTrends([]);
+    } finally {
+      setLoading(false);
     }
   }
 
-  function handleEditNote(noteId) {
-    const n = notes.find(x => x.id === noteId);
-    if (n) { setEditingNoteId(noteId); setEditText(n.text); }
-  }
+  const pName = participants.find(p => p.participant_id === selectedId)?.name || "Participant";
 
-  async function handleSaveEdit(noteId) {
-    if (!editText.trim()) return;
-    setNotes(prev => prev.map(n => n.id === noteId ? { ...n, text: editText.trim() } : n));
-    setEditingNoteId(null);
-    setEditText("");
-    try {
-      await api.caretakerUpdateNote(noteId, editText.trim());
-    } catch (err) {
-      console.warn("Note update via API failed:", err.message);
-    }
-  }
-
-  async function handleDeleteNote(noteId) {
-    setNotes(prev => prev.filter(n => n.id !== noteId));
-    try {
-      await api.caretakerDeleteNote(noteId);
-    } catch (err) {
-      console.warn("Note delete via API failed:", err.message);
-    }
-  }
-
-  const tagColors = { "check-in": "bg-blue-50 text-blue-700 border-blue-100", "recommendation": "bg-indigo-50 text-indigo-700 border-indigo-100", "progress": "bg-emerald-50 text-emerald-700 border-emerald-100", "concern": "bg-rose-50 text-rose-700 border-rose-100" };
-
-  if (!generated) {
+  if (!trends) {
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-5">
         <div className="flex items-center gap-3">
@@ -668,156 +572,258 @@ function HealthTrendsReport({ participants = MOCK_PARTICIPANTS }) {
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
           </div>
           <div>
-            <h2 className="text-base font-bold text-slate-800">Configure Health Trends</h2>
-            <p className="text-xs text-slate-400 mt-0.5">View how a participant's metrics change over time and add notes</p>
+            <h2 className="text-base font-bold text-slate-800">Health Trends</h2>
+            <p className="text-xs text-slate-400 mt-0.5">View a participant's health data over time</p>
           </div>
         </div>
 
         <div>
-          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Participant</label>
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Select Participant</p>
           <select value={selectedId} onChange={e => setSelectedId(e.target.value)}
-            className="w-full md:w-72 px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 bg-white">
-            <option value="">Select a participant…</option>
-            {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 bg-white">
+            <option value="">Choose a participant…</option>
+            {participants.map(p => <option key={p.participant_id} value={p.participant_id}>{p.name}</option>)}
           </select>
         </div>
 
-        <MetricPicker selected={metrics} onChange={setMetrics} label="Metrics to Track" />
+        {elements.length > 0 && (
+          <MetricPicker elements={elements} selected={metrics} onChange={setMetrics} label="Metrics to Track" />
+        )}
+
         <DateRangeRow from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
 
-        <button onClick={handleGenerate} disabled={!selectedId || metrics.length === 0}
+        {error && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2.5 rounded-xl">{error}</p>}
+
+        <button onClick={handleGenerate} disabled={!selectedId || loading}
           className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-          Generate Trends
+          {loading ? (
+            <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Loading...</>
+          ) : (
+            <><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>Generate Trends</>
+          )}
         </button>
       </div>
     );
   }
 
-  const pName = participants.find(p => p.id === selectedId)?.name || "Participant";
+  // ── Results ──
+  const displayedTrends = trends.filter(t => visibleMetrics.includes(t.element_id));
 
   return (
     <div className="space-y-5">
-      <button onClick={() => setGenerated(false)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+      <button onClick={() => { setTrends(null); setVisibleMetrics([]); }} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         Back to Configuration
       </button>
 
       <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span className="font-bold text-slate-700">{pName}</span><span>·</span><span>{metrics.length} metrics</span><span>·</span><span>{fmt(dateFrom)} — {fmt(dateTo)}</span>
+        <span className="font-bold text-slate-700">{pName}</span>
+        <span>·</span><span>{trends.length} metrics with data</span>
+        <span>·</span><span>{fmt(dateFrom)} — {fmt(dateTo)}</span>
       </div>
 
-      {/* Charts — one per metric */}
-      {trends && metrics.map((mk, idx) => {
-        const m = ALL_METRICS.find(x => x.key === mk);
-        return (
-          <div key={mk} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">{m?.label || mk} <span className="text-slate-300 font-normal normal-case">({m?.unit})</span></p>
-            <div className="h-52">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trends}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                  <ReTooltip contentStyle={CHART_TT} formatter={(v) => `${v} ${m?.unit || ""}`} />
-                  <Line type="monotone" dataKey={mk} name={m?.label} stroke={COLORS[idx % COLORS.length]} strokeWidth={2} dot={{ r: 4 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+      {/* Metric visibility toggles */}
+      {trends.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Show / Hide Metrics</p>
+          <div className="flex flex-wrap gap-2">
+            {trends.map((t, i) => {
+              const isVisible = visibleMetrics.includes(t.element_id);
+              return (
+                <button key={t.element_id} onClick={() => toggleVisible(t.element_id)}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                    isVisible ? "text-white border-transparent" : "bg-white text-slate-400 border-slate-200 line-through"
+                  }`}
+                  style={isVisible ? { backgroundColor: COLORS[i % COLORS.length] } : undefined}>
+                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isVisible ? "bg-white/40" : "bg-slate-300"}`} />
+                  {t.label}
+                  {t.unit && <span className={isVisible ? "text-white/60" : "text-slate-300"}>({t.unit})</span>}
+                </button>
+              );
+            })}
           </div>
-        );
-      })}
-
-      {/* ── Notes & Feedback Section ────────────────────────────────── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-          <p className="text-sm font-bold text-slate-700">Notes & Feedback for {pName}</p>
-          <span className="text-xs text-slate-400 ml-auto">{notes.length} notes · synced with participant profile</span>
+          <p className="text-[10px] text-slate-400 mt-2">Click a metric to show or hide its chart below</p>
         </div>
+      )}
 
-        {/* Write new note */}
-        <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50 space-y-3">
-          <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={3} placeholder={`Add a note about ${pName}...`}
-            className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 placeholder:text-slate-300 resize-none bg-white" />
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex gap-1.5 overflow-x-auto">
-              {["check-in", "recommendation", "progress", "concern"].map(t => (
-                <button key={t} onClick={() => setNoteTag(t)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap capitalize ${noteTag === t ? "bg-blue-600 text-white" : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-100"}`}>{t}</button>
-              ))}
-            </div>
-            <button onClick={handleSaveNote} disabled={!newNote.trim()} className="px-4 py-2 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
-              Save Note
-            </button>
+      {trends.length === 0 ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
+          <p className="text-sm text-slate-400">No trend data found for this participant in the selected date range.</p>
+          <button onClick={() => { setTrends(null); setVisibleMetrics([]); }} className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-800">Adjust configuration</button>
+        </div>
+      ) : displayedTrends.length === 0 ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-10 text-center">
+          <p className="text-sm text-slate-400">All metrics are hidden. Click a metric above to show its chart.</p>
+        </div>
+      ) : displayedTrends.map((t, idx) => (
+        <div key={t.element_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{t.label}{t.unit && <span className="text-slate-300 font-normal normal-case"> ({t.unit})</span>}</p>
+            {t.points.length >= 2 && (() => {
+              const change = t.points[t.points.length - 1].value - t.points[0].value;
+              return (
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${change < 0 ? "bg-emerald-50 text-emerald-700" : change > 0 ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
+                  {change > 0 ? "+" : ""}{change.toFixed(1)} overall
+                </span>
+              );
+            })()}
+          </div>
+          <div className="h-52">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={t.points}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94a3b8" }}
+                  tickFormatter={d => new Date(d).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} />
+                <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                <ReTooltip contentStyle={CHART_TT} formatter={v => t.unit ? `${v} ${t.unit}` : `${v}`} labelFormatter={d => fmt(d)} />
+                <Line type="monotone" dataKey="value" name={t.label} stroke={COLORS[trends.indexOf(t) % COLORS.length]} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
         </div>
-
-        {/* Notes list */}
-        <div className="divide-y divide-slate-100">
-          {notes.length === 0 ? (
-            <div className="px-5 py-8 text-center">
-              <p className="text-sm text-slate-400">No notes yet for {pName}.</p>
-              <p className="text-xs text-slate-300 mt-1">Notes you add here will appear on their participant profile too.</p>
-            </div>
-          ) : notes.map(n => (
-            <div key={n.id} className="px-5 py-4 group hover:bg-slate-50/50 transition-colors">
-              {editingNoteId === n.id ? (
-                <div className="space-y-2">
-                  <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={3}
-                    className="w-full px-3 py-2 text-sm border border-blue-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 resize-none" />
-                  <div className="flex gap-2 justify-end">
-                    <button onClick={() => setEditingNoteId(null)} className="px-3 py-1.5 text-xs font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200">Cancel</button>
-                    <button onClick={() => handleSaveEdit(n.id)} disabled={!editText.trim()} className="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40">Save</button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400">{fmt(n.createdAt)}</span>
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${tagColors[n.tag] || tagColors["check-in"]}`}>{n.tag}</span>
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Tip text="Edit note">
-                        <button onClick={() => handleEditNote(n.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                        </button>
-                      </Tip>
-                      <Tip text="Delete note">
-                        <button onClick={() => handleDeleteNote(n.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>
-                      </Tip>
-                    </div>
-                  </div>
-                  <p className="text-sm text-slate-700 leading-relaxed">{n.text}</p>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Sync notice */}
-      <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-xs text-blue-700">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-        <span>Notes added here are synced with {pName}'s <strong>Notes & Feedback</strong> tab on their participant detail page. Edits and deletions are reflected everywhere.</span>
-      </div>
+      ))}
     </div>
   );
 }
 
 // ─── Tab: History ───────────────────────────────────────────────────────────────
 
-function ReportHistory() {
+function HistoryTab() {
+  const [reports, setReports] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [scopeFilter, setScopeFilter] = useState("all");
+  const [viewing, setViewing] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
-  const filtered = useMemo(() => MOCK_REPORT_HISTORY.filter(r => {
+  useEffect(() => {
+    api.caretakerListReports()
+      .then(data => {
+        setReports((data || []).map(r => ({
+          id: r.report_id,
+          scope: r.scope || "unknown",
+          createdAt: r.created_at,
+        })));
+      })
+      .catch(() => setReports([]))
+      .finally(() => setHistoryLoading(false));
+  }, []);
+
+  const filtered = useMemo(() => reports.filter(r => {
     if (scopeFilter !== "all" && r.scope !== scopeFilter) return false;
-    if (search && !r.title.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search && !`${r.scope} ${fmt(r.createdAt)}`.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
-  }), [search, scopeFilter]);
+  }), [search, scopeFilter, reports]);
+
+  async function handleViewReport(r) {
+    setDetailLoading(true);
+    try {
+      const detail = await api.caretakerGetReport(r.id);
+      setViewing({ ...r, payload: detail.payload || {} });
+    } catch (err) {
+      console.warn("Failed to load report detail:", err);
+      setViewing({ ...r, payload: {} });
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  if (historyLoading) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
+        <p className="text-sm text-slate-400 animate-pulse">Loading report history…</p>
+      </div>
+    );
+  }
+
+  if (viewing) {
+    const elems = viewing.payload?.elements || [];
+    const isComparison = viewing.scope === "comparison";
+
+    return (
+      <div className="space-y-5">
+        <button onClick={() => setViewing(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          Back to History
+        </button>
+        <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <ScopeBadge scope={viewing.scope} />
+          <span>·</span><span>Generated {fmt(viewing.createdAt)}</span>
+          <span>·</span><span>{elems.length} elements</span>
+        </div>
+
+        {detailLoading ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+            <div className="animate-pulse space-y-4">
+              {[...Array(4)].map((_, i) => <div key={i} className="h-10 bg-slate-200 rounded-xl" />)}
+            </div>
+          </div>
+        ) : elems.length === 0 ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
+            <p className="text-sm text-slate-400">This report has no data.</p>
+          </div>
+        ) : (
+          <>
+            {!isComparison && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {elems.map(e => (
+                  <div key={e.element_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-center">
+                    <p className="text-xs text-slate-400 mb-0.5 truncate">{e.label}</p>
+                    <p className="text-xl font-extrabold text-slate-800">{e.avg}<span className="text-xs text-slate-400 ml-0.5">{e.unit}</span></p>
+                    <p className="text-xs text-slate-300 mt-0.5">{e.min} — {e.max}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Report Data</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b border-slate-100">
+                    <th className="text-left text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Element</th>
+                    {isComparison ? (
+                      <><th className="text-center text-xs font-bold text-indigo-500 uppercase tracking-wider py-2.5 px-4">Subject Avg</th>
+                      <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Comparison Avg</th>
+                      <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Diff</th></>
+                    ) : (
+                      <><th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Avg</th>
+                      <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Min</th>
+                      <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Max</th>
+                      <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Count</th></>
+                    )}
+                  </tr></thead>
+                  <tbody>
+                    {elems.map(e => {
+                      const diff = isComparison && e.subject?.avg != null && e.comparison?.avg != null ? e.subject.avg - e.comparison.avg : null;
+                      return (
+                        <tr key={e.element_id} className="border-b border-slate-50 hover:bg-slate-50">
+                          <td className="py-2.5 px-4 font-semibold text-slate-700">{e.label} <span className="text-slate-400 font-normal">({e.unit})</span></td>
+                          {isComparison ? (
+                            <><td className="py-2.5 px-4 text-center font-bold text-indigo-600">{e.subject?.avg ?? "—"}</td>
+                            <td className="py-2.5 px-4 text-center text-slate-500">{e.comparison?.avg ?? "—"}</td>
+                            <td className={`py-2.5 px-4 text-center font-bold ${diff != null ? (diff < 0 ? "text-emerald-600" : diff > 0 ? "text-amber-600" : "text-slate-400") : "text-slate-400"}`}>
+                              {diff != null ? `${diff > 0 ? "+" : ""}${diff.toFixed(1)}` : "—"}
+                            </td></>
+                          ) : (
+                            <><td className="py-2.5 px-4 text-center font-bold text-blue-600">{e.avg}</td>
+                            <td className="py-2.5 px-4 text-center text-slate-500">{e.min}</td>
+                            <td className="py-2.5 px-4 text-center text-slate-500">{e.max}</td>
+                            <td className="py-2.5 px-4 text-center text-slate-400">{e.count}</td></>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -828,43 +834,75 @@ function ReportHistory() {
             className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-slate-300" />
         </div>
         <div className="flex gap-1.5 shrink-0">
-          {[{ v: "all", l: "All" }, { v: "group", l: "Group" }, { v: "comparison", l: "Comparison" }, { v: "trends", l: "Trends" }].map(s => (
+          {[{ v: "all", l: "All" }, { v: "group", l: "Group" }, { v: "comparison", l: "Comparison" }].map(s => (
             <button key={s.v} onClick={() => setScopeFilter(s.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${scopeFilter === s.v ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{s.l}</button>
           ))}
         </div>
       </div>
-
-      <p className="text-xs text-slate-400 px-1">{filtered.length} reports</p>
-
+      <p className="text-xs text-slate-400 px-1">{filtered.length} report{filtered.length !== 1 ? "s" : ""}</p>
       {filtered.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
-          <p className="text-sm text-slate-400">No reports match your search.</p>
+          <p className="text-sm text-slate-400">{reports.length === 0 ? "No reports generated yet. Use the Group or Comparison tabs to create one." : "No reports match your search."}</p>
         </div>
-      ) : (
-        <div className="space-y-2">
-          {filtered.map(r => (
-            <div key={r.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-4 flex items-center justify-between gap-3 hover:bg-slate-50 hover:border-slate-200 transition-all cursor-pointer group">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-700 transition-colors">{r.title}</p>
-                  <ScopeBadge scope={r.scope} />
-                  <span className="text-xs text-slate-300 bg-slate-50 border border-slate-100 px-1.5 py-0.5 rounded capitalize">{r.type}</span>
-                </div>
-                <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
-                  <span>{fmt(r.createdAt)}</span>
-                  <span>·</span>
-                  <span>{r.metrics.join(", ")}</span>
-                </div>
-              </div>
-              <Tip text="View report">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 group-hover:text-blue-500 group-hover:bg-blue-50 transition-colors">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                </div>
-              </Tip>
+      ) : filtered.map(r => (
+        <div key={r.id} onClick={() => handleViewReport(r)}
+          className="bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-4 flex items-center justify-between gap-3 hover:bg-slate-50 hover:border-slate-200 transition-all cursor-pointer group">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-700 transition-colors capitalize">{r.scope} Report</p>
+              <ScopeBadge scope={r.scope} />
             </div>
-          ))}
+            <p className="text-xs text-slate-400 mt-1">Generated {fmt(r.createdAt)}</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-300 group-hover:text-blue-500 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
         </div>
-      )}
+      ))}
+    </div>
+  );
+}
+
+// ─── Group Selector ─────────────────────────────────────────────────────────────
+
+function ReportsGroupSelector({ groups, selectedGroupId, onChange, totalParticipants }) {
+  const [open, setOpen] = useState(false);
+  const selected = selectedGroupId === "all" ? null : groups.find(g => g.id === selectedGroupId);
+  const label = selected ? selected.name : "All Groups";
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(!open)}
+        className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm w-full sm:w-auto">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+        <span className="truncate">{label}</span>
+        <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 text-slate-400 transition-transform ml-auto sm:ml-0 ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (<>
+        <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+        <div className="absolute left-0 top-full mt-1.5 z-20 w-full sm:w-80 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+          <button onClick={() => { onChange("all"); setOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${selectedGroupId === "all" ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${selectedGroupId === "all" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+            </div>
+            <div className="flex-1"><p className={`text-sm font-semibold ${selectedGroupId === "all" ? "text-blue-700" : "text-slate-700"}`}>All Groups</p><p className="text-xs text-slate-400">{totalParticipants} participants</p></div>
+            {selectedGroupId === "all" && <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+          </button>
+          <div className="border-t border-slate-100" />
+          {groups.map(g => {
+            const isSelected = selectedGroupId === g.id;
+            return (
+              <button key={g.id} onClick={() => { onChange(g.id); setOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${isSelected ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isSelected ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                </div>
+                <div className="flex-1"><p className={`text-sm font-semibold ${isSelected ? "text-blue-700" : "text-slate-700"}`}>{g.name}</p></div>
+                {isSelected && <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+              </button>
+            );
+          })}
+        </div>
+      </>)}
     </div>
   );
 }
@@ -882,28 +920,61 @@ export default function ReportsPage() {
   const { user } = useOutletContext();
   const [activeTab, setActiveTab] = useState("group");
   const [participants, setParticipants] = useState([]);
-  const [group, setGroup] = useState(null);
+  const [groups, setGroups] = useState([]);
+  const [elements, setElements] = useState([]);
+  const [selectedGroupId, setSelectedGroupId] = useState("all");
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const [pData, gData] = await Promise.all([
-        api.caretakerListParticipants(),
-        api.caretakerGetGroups(),
+        api.caretakerListParticipants().catch(() => []),
+        api.caretakerGetGroups().catch(() => []),
       ]);
-      setParticipants(pData);
-      setGroup(gData?.[0] ?? null);
+      setParticipants(Array.isArray(pData) ? pData : []);
+      const transformedGroups = Array.isArray(gData)
+        ? gData.map(g => ({ id: g.group_id, name: g.name }))
+        : [];
+      setGroups(transformedGroups);
+      if (Array.isArray(gData) && gData.length > 0) {
+        try {
+          const elemData = await api.caretakerGetGroupElements(gData[0].group_id);
+          const elems = Array.isArray(elemData) ? elemData.map(e => ({
+            ...e, element_id: e.element_id,
+            label: e.label || e.code || "Unknown",
+            unit: e.unit || "",
+            category: e.category || inferCategory(e.label || e.code || ""),
+          })) : [];
+          setElements(elems);
+        } catch { setElements([]); }
+      }
     } catch (err) {
-      console.warn("Backend not ready, using mock data:", err.message);
-      setParticipants(MOCK_PARTICIPANTS);
-      setGroup(CARETAKER_GROUP);
+      console.warn("Failed to load reports data:", err.message);
     } finally {
       setLoading(false);
     }
   }, []);
 
+  useEffect(() => {
+    if (selectedGroupId === "all" || groups.length === 0) return;
+    api.caretakerGetGroupElements(selectedGroupId)
+      .then(data => {
+        setElements(Array.isArray(data) ? data.map(e => ({
+          ...e, element_id: e.element_id,
+          label: e.label || e.code || "Unknown",
+          unit: e.unit || "",
+          category: e.category || inferCategory(e.label || e.code || ""),
+        })) : []);
+      })
+      .catch(() => setElements([]));
+  }, [selectedGroupId, groups]);
+
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const filteredParticipants = selectedGroupId === "all"
+    ? participants
+    : participants.filter(p => p.group_id === selectedGroupId);
 
   if (loading) {
     return (
@@ -917,26 +988,16 @@ export default function ReportsPage() {
     );
   }
 
-  const groupName = group?.name || CARETAKER_GROUP.name;
-  // Normalize participant shape for child components
-  const normalizedParticipants = participants.length > 0 ? participants.map(p => ({
-    id: p.id || p.participant_id,
-    name: p.name || `${p.firstName || ""} ${p.lastName || ""}`.trim(),
-    status: p.status || "active",
-  })) : MOCK_PARTICIPANTS;
-
   return (
-    <div className="max-w-6xl mx-auto space-y-6 p-4">
+    <div className="max-w-6xl mx-auto space-y-6 p-2 md:p-0">
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Reports</h1>
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-            {groupName}
-          </span>
-          <span className="text-sm text-slate-400">Generate and review health reports.</span>
-        </div>
+        <p className="text-sm text-slate-400 mt-1">Generate and review health reports for your groups.</p>
       </div>
+
+      {groups.length > 0 && (
+        <ReportsGroupSelector groups={groups} selectedGroupId={selectedGroupId} onChange={setSelectedGroupId} totalParticipants={participants.length} />
+      )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-1.5 flex gap-1 overflow-x-auto">
         {TABS.map(tab => (
@@ -950,10 +1011,22 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {activeTab === "group" && <GroupReport participants={normalizedParticipants} groupName={groupName} />}
-      {activeTab === "comparison" && <ComparisonReport participants={normalizedParticipants} groupName={groupName} />}
-      {activeTab === "trends" && <HealthTrendsReport participants={normalizedParticipants} />}
-      {activeTab === "history" && <ReportHistory />}
+      {activeTab === "group" && <GroupReportTab groups={groups} selectedGroupId={selectedGroupId} elements={elements} />}
+      {activeTab === "comparison" && <ComparisonTab participants={filteredParticipants} groups={groups} selectedGroupId={selectedGroupId} elements={elements} />}
+      {activeTab === "trends" && <TrendsTab participants={filteredParticipants} elements={elements} />}
+      {activeTab === "history" && <HistoryTab />}
     </div>
   );
+}
+
+// ─── Category inference helper ──────────────────────────────────────────────────
+
+function inferCategory(label) {
+  const l = label.toLowerCase();
+  if (l.includes("bp") || l.includes("blood") || l.includes("weight") || l.includes("pain") || l.includes("heart") || l.includes("bmi")) return "Vitals";
+  if (l.includes("stress") || l.includes("anxiety") || l.includes("depress") || l.includes("mental") || l.includes("mood")) return "Mental Health";
+  if (l.includes("lonely") || l.includes("social") || l.includes("connect")) return "Social Wellness";
+  if (l.includes("sleep") || l.includes("exercise") || l.includes("water") || l.includes("diet") || l.includes("alcohol") || l.includes("screen")) return "Lifestyle";
+  if (l.includes("survey") || l.includes("goal") || l.includes("complet")) return "Engagement";
+  return "Other";
 }

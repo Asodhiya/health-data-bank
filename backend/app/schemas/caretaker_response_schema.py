@@ -1,8 +1,7 @@
-from pydantic import BaseModel, Field, model_validator
-from typing import List, Optional, Any, Dict,Literal
-from datetime import datetime,date
+from pydantic import BaseModel, Field, model_validator, ConfigDict
+from typing import List, Optional, Any, Dict, Literal
+from datetime import datetime, date
 from uuid import UUID
-from datetime import date
 
 class DashboardStats(BaseModel):
     total_assigned_participants: int = 0
@@ -103,7 +102,7 @@ class HealthTrendsResponse(BaseModel):
 
 
 class GoalItem(BaseModel):
-    goal_id: int
+    goal_id: UUID
     title: str
     metric_name: str
     baseline_value: Optional[float] = None
@@ -118,16 +117,31 @@ class SubmissionListItem(BaseModel):
     participant_id: UUID
     form_id: UUID
     form_name: str
-    submitted_at: date
+    submitted_at: Optional[datetime]
 
 
-class SubmissionDetail(BaseModel):
-    submission_id: int
-    participant_id: int
-    form_id: int
+class SubmissionAnswerItem(BaseModel):
+    field_id: Optional[UUID] = None
+    field_label: Optional[str] = None
+    value_text: Optional[str] = None
+    value_number: Optional[float] = None
+    value_date: Optional[str] = None
+    value_json: Optional[Any] = None
+
+
+class SubmissionDetailItem(BaseModel):
+    submission_id: UUID
+    participant_id: UUID
+    form_id: UUID
     form_name: str
-    submitted_at: date
-    answers: dict[str, Any] = Field(default_factory=dict)
+    submitted_at: Optional[datetime]
+    answers: list[SubmissionAnswerItem] = Field(default_factory=list)
+
+
+class ReportListItem(BaseModel):
+    report_id: UUID
+    scope: str
+    created_at: datetime
 
 
 class NoteCreateRequest(BaseModel):
@@ -217,10 +231,10 @@ class GoalSuggestionRequest(BaseModel):
 
 
 class NotificationItem(BaseModel):
-    notification_id: int
-    title: str
-    message: str
-    created_at: date
+    notification_id: UUID
+    title: Optional[str] = None
+    message: Optional[str] = None
+    created_at: Optional[datetime] = None
     is_read: bool
 
 
@@ -245,3 +259,36 @@ class FeedbackItem(BaseModel):
     submission_id: Optional[UUID] = None
     message: str
     created_at: datetime
+
+
+# ── Caretaker Profile schemas ─────────────────────────────────────────────────
+
+class CaretakerProfileUpdate(BaseModel):
+    title: Optional[str] = None
+    credentials: Optional[str] = None
+    organization: Optional[str] = None
+    department: Optional[str] = None
+    specialty: Optional[str] = None
+    bio: Optional[str] = None
+    working_hours_start: Optional[str] = None
+    working_hours_end: Optional[str] = None
+    contact_preference: Optional[str] = None
+    available_days: Optional[List[str]] = None
+
+
+class CaretakerProfileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    caretaker_id: UUID
+    user_id: UUID
+    title: Optional[str] = None
+    credentials: Optional[str] = None
+    organization: Optional[str] = None
+    department: Optional[str] = None
+    specialty: Optional[str] = None
+    bio: Optional[str] = None
+    working_hours_start: Optional[str] = None
+    working_hours_end: Optional[str] = None
+    contact_preference: Optional[str] = None
+    available_days: Optional[List[str]] = None
+    onboarding_completed: bool

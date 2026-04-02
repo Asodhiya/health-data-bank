@@ -232,6 +232,7 @@ export default function AuditLogPage() {
     if (search.trim()) {
       const q = search.toLowerCase();
       r = r.filter(l =>
+        (ACT[l.action]?.title || "").toLowerCase().includes(q) ||
         l.actor_label?.toLowerCase().includes(q) || l.ip_address?.toLowerCase().includes(q) ||
         l.details?.email_attempted?.toLowerCase().includes(q) || l.details?.target_email?.toLowerCase().includes(q) ||
         l.details?.target_user?.toLowerCase().includes(q) || l.action?.toLowerCase().includes(q) ||
@@ -276,8 +277,8 @@ export default function AuditLogPage() {
   };
   const jumpToDateRange = (days) => { clearAll(); setDatePreset(days); scrollToLog(); };
   const jumpToAction = (act) => {
-    clearAll(); setCatFilter("auth"); setPage(1);
-    setSearch(act === "LOGIN_SUCCESS" ? "successful login" : act === "LOGIN_FAILED" ? "failed login" : act === "INVITE_SENT" ? "invite sent" : act === "REGISTER_SUCCESS" ? "account registered" : "");
+    clearAll(); setPage(1);
+    setSearch(ACT[act]?.title || act);
     scrollToLog();
   };
 

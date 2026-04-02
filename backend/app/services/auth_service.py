@@ -1,3 +1,4 @@
+import os
 from fastapi import HTTPException, status, BackgroundTasks
 
 from app.core.security import PasswordHash, verify_password_async, generate_reset_token, hash_reset_token, reset_token_expiry
@@ -14,9 +15,14 @@ from app.db.queries.Queries import RoleQuery, UserQuery
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_DURATION_MINUTES = 15
 
-async def authenticate_user(email: str, password: str, db: AsyncSession):
-    """Checks email and password if in db or not"""
-    res = await(db.execute(select(User).where(User.email == email)))
+async def authenticate_user(identifier: str, password: str, db: AsyncSession):
+    """Checks email or username and password if in db or not"""
+    identifier = identifier.strip()
+    res = await db.execute(
+        select(User).where(
+            (User.email == identifier) | (User.username == identifier)
+        )
+    )
     user = res.scalar_one_or_none()
 
     if not user:
@@ -54,7 +60,6 @@ async def authenticate_user(email: str, password: str, db: AsyncSession):
     user.locked_until = None
     user.last_login_at = now
     await db.commit()
-    await db.refresh(user)
 
     return user
 
@@ -109,6 +114,7 @@ async def create_user_with_role(payload: UserSignup, role_name: str, db: AsyncSe
         first_name=payload.first_name,
         last_name=payload.last_name,
         phone=payload.phone,
+        Address=payload.address,
         status=True,
     )
 
@@ -141,7 +147,7 @@ async def reset_forgot_password( payload: ForgotPasswordIn, background: Backgrou
     user.reset_token_expires_at = reset_token_expiry(15)
 
     await db.commit()
-    FRONTEND_URL = "http://localhost:5173"
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
     reset_link = f"{FRONTEND_URL}/reset-password?token={raw_token}"
     send_reset_email(user.email, reset_link)
     # background.add_task(send_reset_email, user.email, reset_link)

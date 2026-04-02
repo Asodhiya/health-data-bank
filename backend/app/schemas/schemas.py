@@ -15,7 +15,7 @@ class RegisterRequest(BaseModel):
  
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    identifier: str  # email or username
     password: str
 
 
@@ -36,6 +36,7 @@ class UserSignup(BaseModel):
     password: str
     confirm_password: str
     phone: str
+    address: str
 
 class SurveyRequest(BaseModel):
     # If empty, sets default value to a dictionary

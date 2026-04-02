@@ -7,7 +7,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const { refetch } = useAuth();
 
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -19,7 +19,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      await api.login(email, password); // Cookie is now set — hydrate the auth context to get the real role
+      await api.login(identifier.trim(), password);
       const me = await refetch(); 
       const role = me?.Role?.[0] ?? null;
       if (role) {
@@ -52,7 +52,16 @@ export default function LoginPage() {
       )}
 
       {/* Form */}
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <form
+        onSubmit={handleSubmit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !loading) {
+            e.preventDefault();
+            handleSubmit(e);
+          }
+        }}
+        className="flex flex-col gap-4"
+      >
         {/* Email field */}
         <div className="relative">
           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
@@ -73,13 +82,13 @@ export default function LoginPage() {
             </svg>
           </span>
           <input
-            type="email"
+            type="text"
             className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email or Username"
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
             required
-            autoComplete="email"
+            autoComplete="username"
           />
         </div>
 

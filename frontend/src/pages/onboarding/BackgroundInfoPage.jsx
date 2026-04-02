@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../../services/api';
 
 export default function BackgroundInfoPage() {
   const navigate = useNavigate();
@@ -10,6 +11,8 @@ export default function BackgroundInfoPage() {
     at least seen the full document before proceeding.
   */
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
+  const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -27,6 +30,20 @@ export default function BackgroundInfoPage() {
     handleScroll();
     return () => el.removeEventListener('scroll', handleScroll);
   }, []);
+
+  const handleContinue = async () => {
+    if (!hasScrolledToBottom || isSubmitting) return;
+    setError('');
+    setIsSubmitting(true);
+    try {
+      await api.markBackgroundRead();
+      navigate('/onboarding/consent');
+    } catch (err) {
+      setError(err.message || 'Could not continue. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <>
@@ -288,18 +305,23 @@ export default function BackgroundInfoPage() {
           ↓ Scroll to read the full document before continuing
         </p>
       )}
+      {error && (
+        <div className="bg-rose-50 border border-rose-100 text-rose-700 text-sm px-4 py-2.5 rounded-lg mt-3">
+          {error}
+        </div>
+      )}
 
       {/* Continue button */}
       <button
         className={`w-full py-3 rounded-xl text-sm font-semibold transition-colors mt-4 ${
-          hasScrolledToBottom
+          hasScrolledToBottom && !isSubmitting
             ? 'bg-blue-600 hover:bg-blue-700 text-white'
             : 'bg-slate-100 text-slate-400 cursor-not-allowed'
         }`}
-        disabled={!hasScrolledToBottom}
-        onClick={() => navigate('/onboarding/consent')}
+        disabled={!hasScrolledToBottom || isSubmitting}
+        onClick={handleContinue}
       >
-        I Have Read This Document — Continue
+        {isSubmitting ? 'Saving...' : 'I Have Read This Document - Continue'}
       </button>
     </>
   );

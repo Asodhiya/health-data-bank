@@ -1,11 +1,15 @@
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     User, FormSubmission, ParticipantProfile, SurveyForm,
-    HealthDataPoint, DataElement,
+    HealthDataPoint, DataElement, UserRole, Role, FormDeployment, Group, GroupMember,
 )
 from app.schemas.filter_data_schema import ParticipantFilter
 from datetime import date, timedelta
+import csv
+import io
+from typing import Optional, Set
+from starlette.responses import StreamingResponse
 
 
 def calculate_age(born):
@@ -16,10 +20,38 @@ def calculate_age(born):
 
 
 async def get_available_surveys(db: AsyncSession):
-    """Fetches all published survey forms for dropdown."""
-    stmt = select(SurveyForm).where(SurveyForm.status == 'PUBLISHED')
-    result = await db.execute(stmt)
-    return result.scalars().all()
+    """Fetches published forms that have at least one completed submission."""
+    published_stmt = (
+        select(SurveyForm)
+        .where(SurveyForm.status == 'PUBLISHED')
+        .where(
+            select(func.count(FormSubmission.submission_id))
+            .where(
+                FormSubmission.form_id == SurveyForm.form_id,
+                FormSubmission.submitted_at.is_not(None),
+            )
+            .correlate(SurveyForm)
+            .scalar_subquery() > 0
+        )
+    )
+
+    published_result = await db.execute(published_stmt)
+    forms = published_result.scalars().all()
+
+    if forms:
+        form_ids = [f.form_id for f in forms]
+        dep_result = await db.execute(
+            select(FormDeployment.form_id, Group.name)
+            .join(Group, Group.group_id == FormDeployment.group_id)
+            .where(FormDeployment.form_id.in_(form_ids))
+        )
+        group_map: dict = {}
+        for fid, gname in dep_result.all():
+            group_map.setdefault(fid, []).append(gname)
+        for form in forms:
+            form.deployed_groups = group_map.get(form.form_id, [])
+
+    return forms
 
 
 async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, filters: ParticipantFilter = None):
@@ -32,7 +64,7 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
     """
 
     demographic_columns = [
-        User.user_id.label("participant_id"),
+        ParticipantProfile.participant_id.label("participant_id"),
         ParticipantProfile.gender,
         ParticipantProfile.pronouns,
         ParticipantProfile.primary_language,
@@ -43,6 +75,13 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
         ParticipantProfile.marital_status,
         ParticipantProfile.dob,
     ]
+
+    participant_role_filter = (
+        select(UserRole.user_id)
+        .join(Role, UserRole.role_id == Role.role_id)
+        .where(Role.role_name == "participant")
+        .scalar_subquery()
+    )
 
     if survey_id:
         stmt = (
@@ -58,61 +97,74 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
             )
             .select_from(User)
             .join(ParticipantProfile, User.user_id == ParticipantProfile.user_id)
-            .join(HealthDataPoint, ParticipantProfile.participant_id == HealthDataPoint.participant_id)
+            .join(
+                FormSubmission,
+                and_(
+                    FormSubmission.participant_id == ParticipantProfile.participant_id,
+                    FormSubmission.form_id == survey_id,
+                    FormSubmission.submitted_at.is_not(None),
+                )
+            )
+            .join(
+                HealthDataPoint,
+                and_(
+                    HealthDataPoint.participant_id == ParticipantProfile.participant_id,
+                    HealthDataPoint.source_submission_id == FormSubmission.submission_id,
+                )
+            )
             .join(DataElement, HealthDataPoint.element_id == DataElement.element_id)
+            .where(User.user_id.in_(participant_role_filter))
         )
     else:
+        has_submission = (
+            select(FormSubmission.participant_id)
+            .where(FormSubmission.submitted_at.is_not(None))
+            .scalar_subquery()
+        )
         stmt = (
             select(*demographic_columns)
             .select_from(User)
             .join(ParticipantProfile, User.user_id == ParticipantProfile.user_id)
+            .where(User.user_id.in_(participant_role_filter))
+            .where(ParticipantProfile.participant_id.in_(has_submission))
         )
 
     conditions = []
 
-    if survey_id:
-        # Only include health data points that came from this survey's submissions
-        submission_ids = select(FormSubmission.submission_id).where(
-            FormSubmission.form_id == survey_id
-        )
-        conditions.append(HealthDataPoint.source_submission_id.in_(submission_ids))
-
     if filters:
         if filters.gender:
-            conditions.append(ParticipantProfile.gender == filters.gender)
+            conditions.append(func.lower(ParticipantProfile.gender) == filters.gender.lower())
         if filters.pronouns:
-            conditions.append(ParticipantProfile.pronouns == filters.pronouns)
+            conditions.append(func.lower(ParticipantProfile.pronouns) == filters.pronouns.lower())
         if filters.primary_language:
-            conditions.append(ParticipantProfile.primary_language == filters.primary_language)
+            conditions.append(func.lower(ParticipantProfile.primary_language) == filters.primary_language.lower())
         if filters.occupation_status:
-            conditions.append(ParticipantProfile.occupation_status == filters.occupation_status)
+            conditions.append(func.lower(ParticipantProfile.occupation_status) == filters.occupation_status.lower())
         if filters.living_arrangement:
-            conditions.append(ParticipantProfile.living_arrangement == filters.living_arrangement)
+            conditions.append(func.lower(ParticipantProfile.living_arrangement) == filters.living_arrangement.lower())
         if filters.highest_education_level:
-            conditions.append(ParticipantProfile.highest_education_level == filters.highest_education_level)
+            conditions.append(func.lower(ParticipantProfile.highest_education_level) == filters.highest_education_level.lower())
         if filters.dependents is not None:
             conditions.append(ParticipantProfile.dependents == filters.dependents)
         if filters.marital_status:
-            conditions.append(ParticipantProfile.marital_status == filters.marital_status)
+            conditions.append(func.lower(ParticipantProfile.marital_status) == filters.marital_status.lower())
         if filters.status:
             conditions.append(User.status == (filters.status.lower() == 'active'))
-        if filters.group_id:
-            pass  # TODO: join GroupMembership when group support is added
+        if filters.group_ids:
+            conditions.append(
+                ParticipantProfile.participant_id.in_(
+                    select(GroupMember.participant_id).where(
+                        GroupMember.group_id.in_(filters.group_ids)
+                    )
+                )
+            )
         if filters.age_min:
             max_dob = date.today() - timedelta(days=filters.age_min * 365.25)
             conditions.append(ParticipantProfile.dob <= max_dob)
         if filters.age_max:
             min_dob = date.today() - timedelta(days=(filters.age_max + 1) * 365.25)
             conditions.append(ParticipantProfile.dob >= min_dob)
-        if filters.search:
-            term = f"%{filters.search}%"
-            conditions.append(
-                or_(
-                    User.first_name.ilike(term),
-                    User.last_name.ilike(term),
-                    User.email.ilike(term),
-                )
-            )
+        # search by name/email intentionally excluded to preserve anonymity
 
     if conditions:
         stmt = stmt.where(and_(*conditions))
@@ -131,7 +183,6 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
 
         if participant_id not in pivoted_data:
             pivoted_data[participant_id] = {
-                "participant_id": participant_id,
                 "gender": row.gender,
                 "pronouns": row.pronouns,
                 "primary_language": row.primary_language,
@@ -160,7 +211,6 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
                 elements_meta[element_id] = f"{row.element_label}{unit_suffix}"
 
     columns_list = [
-        {"id": "participant_id",          "text": "Participant ID"},
         {"id": "gender",                  "text": "Gender"},
         {"id": "pronouns",                "text": "Pronouns"},
         {"id": "primary_language",        "text": "Primary Language"},
@@ -179,3 +229,37 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
         "columns": columns_list,
         "data": list(pivoted_data.values()),
     }
+
+
+async def export_survey_results_csv(
+    db: AsyncSession,
+    survey_id: Optional[str] = None,
+    filters: Optional[ParticipantFilter] = None,
+    exclude_columns: Optional[Set[str]] = None,
+) -> StreamingResponse:
+    """Build and return a UTF-8 CSV StreamingResponse of survey results."""
+    results = await get_survey_results_pivoted(db, survey_id, filters)
+
+    if not results["data"]:
+        return StreamingResponse(
+            io.BytesIO(b"\xef\xbb\xbf"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=survey_results.csv"},
+        )
+
+    excluded = exclude_columns or set()
+    visible_columns = [col for col in results["columns"] if col["id"] not in excluded]
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([col["text"] for col in visible_columns])
+    for record in results["data"]:
+        writer.writerow([record.get(col["id"]) or "" for col in visible_columns])
+
+    csv_bytes = ("\ufeff" + output.getvalue()).encode("utf-8")
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=survey_results.csv"},
+    )

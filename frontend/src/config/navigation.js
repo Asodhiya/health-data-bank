@@ -13,7 +13,7 @@ export const DASHBOARD_NAV = [
   {
     label: "Groups / Cohorts",
     to: "/groups",
-    roles: ["admin", "researcher"], //removed caretaker for now since they won't be managing groups
+    roles: ["researcher"], //removed caretaker and admin for now since they won't be managing groups
   },
 
   /* =====================
@@ -43,6 +43,12 @@ export const DASHBOARD_NAV = [
     roles: ["admin"],
   },
 
+  {
+    label: "Backup & Restore",
+    to: "/backup",
+    roles: ["admin"],
+  },
+
   /* =====================
      RESEARCHER
   ====================== */
@@ -58,7 +64,7 @@ export const DASHBOARD_NAV = [
     roles: ["researcher"],
   },
 
-  { label: "Create Golas", to: "researcher/goals", roles: ["researcher"] },
+  { label: "Create Goals", to: "/researcher/goals", roles: ["researcher"] },
 
   /* =====================
      CARETAKER
@@ -107,7 +113,7 @@ export const PARTICIPANT_NAV = [
     roles: ["participant"],
   },
   {
-    label: "Health Goals",
+    label: "My Goals",
     to: "/participant/healthgoals",
     roles: ["participant"],
   },

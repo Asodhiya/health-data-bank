@@ -36,15 +36,21 @@ import Messages from "./pages/participant/Message";
 // ── Admin pages ──
 import UserManagementPage from "./pages/admin/UserManagementPage";
 import AuditLogPage from "./pages/admin/AuditLogPage";
+import BackupRestorePage from "./pages/admin/BackupRestorePage";
+import SystemSettingsPage from "./pages/admin/SystemSettingsPage";
+import AdminOnboardingPage from "./pages/admin/AdminOnboardingPage";
 
 // --- Researcher pages ---
+import ResearcherOnboardingPage from "./pages/researcher/ResearcherOnboardingPage";
 import DataElementManager from "./pages/researcher/DataElementMangaer";
 import Groups from "./pages/researcher/Group_Chorts";
+import GoalTemplates from "./pages/researcher/GoalTemplates";
+
 // ── Caretaker pages ──
+import CaretakerOnboardingPage from "./pages/caretaker/CaretakerOnboardingPage";
 import MyParticipantsPage from "./pages/caretaker/MyParticipantsPage";
 import ParticipantDetailPage from "./pages/caretaker/ParticipantDetailPage";
 import ReportsPage from "./pages/caretaker/ReportsPage";
-import GoalTemplates from "./pages/researcher/GoalTemplates";
 
 function App() {
   const { role } = useAuth();
@@ -78,6 +84,7 @@ function App() {
 
         {/* ── Admin ── */}
         <Route element={<AdminRoute />}>
+          <Route path="/admin/onboarding" element={<AdminOnboardingPage />} />
           <Route element={<DashboardLayout role={role} />}>
             <Route path="/admin" element={<AdminDashboard />} />
             <Route
@@ -87,6 +94,8 @@ function App() {
             <Route path="/surveys" element={<SurveyBuilderPage />} />
             <Route path="/users" element={<UserManagementPage />} />
             <Route path="/audit-logs" element={<AuditLogPage />} /> 
+            <Route path="/settings" element={<SystemSettingsPage />} />
+            <Route path="/backup" element={<BackupRestorePage />} />
           </Route>
         </Route>
 
@@ -110,6 +119,8 @@ function App() {
 
         {/* ── Caretaker ── */}
         <Route element={<CaretakerRoute />}>
+          {/* Onboarding — standalone page, no sidebar/dashboard layout */}
+          <Route path="/caretaker/onboarding" element={<CaretakerOnboardingPage />} />
           <Route element={<DashboardLayout role={role} />}>
             <Route path="/caretaker" element={<CaretakerDashboard />} />
             <Route
@@ -126,6 +137,11 @@ function App() {
             />
             <Route path="/caretaker/reports" element={<ReportsPage />} />
           </Route>
+        </Route>
+
+        {/* ── Researcher onboarding (separate wrapper to avoid redirect loop) ── */}
+        <Route element={<ResearcherRoute allowOnboarding />}>
+          <Route path="/researcher/onboarding" element={<ResearcherOnboardingPage />} />
         </Route>
 
         {/* ── Researcher ── */}
