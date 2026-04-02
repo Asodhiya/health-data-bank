@@ -54,12 +54,6 @@ export default function LoginPage() {
       {/* Form */}
       <form
         onSubmit={handleSubmit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !loading) {
-            e.preventDefault();
-            handleSubmit(e);
-          }
-        }}
         className="flex flex-col gap-4"
       >
         {/* Email field */}
