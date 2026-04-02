@@ -14,7 +14,6 @@ export default function NoSidebarDashboardLayout() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 2. Make the API call
     api.me()
       .then((data) => {
         setUser({
@@ -26,17 +25,29 @@ export default function NoSidebarDashboardLayout() {
         console.error("Error fetching user:", error);
       })
       .finally(() => {
-        // 3. This ALWAYS runs, success or failure
         setLoading(false);
       });
   }, []);
 
-  // 4. The "Safety Shield" - If loading, show a nice message instead of the app
+  // BUG 12 fix: close profile dropdown on outside click
+  useEffect(() => {
+    if (!isProfileMenuOpen) return;
+
+    function handleClickOutside(e) {
+      if (!e.target.closest("#participant-profile-dropdown")) {
+        setIsProfileMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isProfileMenuOpen]);
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50">
         <p className="text-xl font-semibold animate-pulse text-blue-600">
-          Loading Health Data Bank... 🩺
+          Loading Health Data Bank...
         </p>
       </div>
     );
@@ -67,7 +78,7 @@ export default function NoSidebarDashboardLayout() {
               />
             </svg>
           </button>
-          {/* __ Logo is clickable that redirects to dashboard */}
+          {/* Logo is clickable that redirects to dashboard */}
           <Link
             to="/participant"
             className="font-bold text-xl text-blue-600 hover:text-blue-700 transition-colors"
@@ -99,8 +110,8 @@ export default function NoSidebarDashboardLayout() {
         <div className="flex items-center gap-4 relative">
           <NotificationBell role="participant" />
 
-          {/* 2. Profile Dropdown Container */}
-          <div className="relative">
+          {/* Profile Dropdown Container */}
+          <div className="relative" id="participant-profile-dropdown">
             {/* The Avatar Button */}
             <button
               onClick={() => {
@@ -143,7 +154,6 @@ export default function NoSidebarDashboardLayout() {
             )}
           </div>
         </div>
-        {/* RIGHT: Profile Settings Menu */}
       </header>
 
       {/* --- BODY --- */}
