@@ -119,10 +119,8 @@ export default function DashboardLayout({ role }) {
         {/* Sidebar */}
         <aside
           className={`${
-            isSidebarOpen
-              ? "fixed top-0 left-0 z-50 h-screen shadow-xl"
-              : "hidden"
-          } bg-white border-r border-gray-200 md:flex md:flex-col md:w-64`}
+            isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+          } fixed top-0 left-0 z-50 h-screen w-64 shadow-xl transition-transform duration-300 ease-in-out md:translate-x-0 md:relative md:z-auto md:shadow-none bg-white border-r border-gray-200 md:flex md:flex-col md:w-64`}
         >
           <nav className="flex-1 p-6 flex flex-col gap-2">
             {/* USER PROFILE CARD */}
