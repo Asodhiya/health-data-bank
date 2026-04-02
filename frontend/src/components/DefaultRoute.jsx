@@ -6,6 +6,7 @@ export default function DefaultRoute() {
 
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
+  if (!role) return <Navigate to="/login" replace />;
 
   return <Navigate to={`/${role}`} replace />;
 }
