@@ -16,8 +16,14 @@ async function request(endpoint, options = {}) {
     ...options,
   });
 
-  const data = await res.json();
- 
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    return null;
+  }
+
   if (!res.ok) {
     const msg =
       typeof data.detail === "string"
@@ -27,7 +33,7 @@ async function request(endpoint, options = {}) {
           : "Something went wrong";
     throw new Error(msg);
   }
- 
+
   return data;
 }
 
