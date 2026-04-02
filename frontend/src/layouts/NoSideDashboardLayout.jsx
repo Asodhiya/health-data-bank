@@ -1,7 +1,6 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import api from "../utils/axiosInstance";
-import { api as authApi } from "../services/api";
+import { api } from "../services/api";
 import { PARTICIPANT_NAV } from "../config/navigation";
 import NotificationBell from "../components/NotificationBell";
 
@@ -16,12 +15,11 @@ export default function NoSidebarDashboardLayout() {
 
   useEffect(() => {
     // 2. Make the API call
-    api
-      .get("/auth/me")
-      .then((response) => {
+    api.me()
+      .then((data) => {
         setUser({
-          firstName: response.data.first_name,
-          lastName: response.data.last_name,
+          firstName: data.first_name,
+          lastName: data.last_name,
         });
       })
       .catch((error) => {
@@ -134,7 +132,7 @@ export default function NoSidebarDashboardLayout() {
                 <button
                   onClick={async () => {
                     setIsProfileMenuOpen(false);
-                    await authApi.logout();
+                    await api.logout();
                     navigate("/login");
                   }}
                   className="block w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-slate-50"

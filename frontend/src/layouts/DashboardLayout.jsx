@@ -1,7 +1,6 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import api from "../utils/axiosInstance";
-import { api as authApi } from "../services/api";
+import { api } from "../services/api";
 import { DASHBOARD_NAV } from "../config/navigation";
 import NotificationBell from "../components/NotificationBell";
 
@@ -13,9 +12,8 @@ export default function DashboardLayout({ role }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api
-      .get("/auth/me")
-      .then((response) => setUser(response.data))
+    api.me()
+      .then((data) => setUser(data))
       .catch((error) => console.error("Not logged in:", error));
   }, []);
 
@@ -96,7 +94,7 @@ export default function DashboardLayout({ role }) {
                 <button
                   onClick={async () => {
                     setIsProfileMenuOpen(false);
-                    await authApi.logout();
+                    await api.logout();
                     navigate("/login");
                   }}
                   className="block w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-slate-50"
