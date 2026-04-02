@@ -209,6 +209,7 @@ export const api = {
 
   // Admin Profile (requires backend changes)
   adminGetProfile: () => request("/admin_only/profile"),
+  adminGetSystemStats: () => request("/admin_only/system-stats"),
 
   adminUpdateProfile: (payload) =>
     request("/admin_only/profile", {

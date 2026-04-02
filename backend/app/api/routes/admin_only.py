@@ -295,4 +295,31 @@ async def remove_backup(backup_id: UUID, db: AsyncSession = Depends(get_db)):
     return await delete_backup(backup_id, db)
 
 
+@router.get("/system-stats", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
+async def get_system_stats():
+    """Return live server metrics for admin dashboard gauges."""
+    import psutil, time, platform
 
+    boot_time = psutil.boot_time()
+    uptime_seconds = time.time() - boot_time
+    days, remainder = divmod(int(uptime_seconds), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, _ = divmod(remainder, 60)
+
+    cpu_percent = psutil.cpu_percent(interval=0.5)
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+
+    return {
+        "cpu_percent": cpu_percent,
+        "memory_percent": memory.percent,
+        "memory_used_gb": round(memory.used / (1024 ** 3), 2),
+        "memory_total_gb": round(memory.total / (1024 ** 3), 2),
+        "disk_percent": disk.percent,
+        "disk_used_gb": round(disk.used / (1024 ** 3), 2),
+        "disk_total_gb": round(disk.total / (1024 ** 3), 2),
+        "uptime_seconds": int(uptime_seconds),
+        "uptime_formatted": f"{days}d {hours}h {minutes}m",
+        "platform": platform.system(),
+        "python_version": platform.python_version(),
+    }

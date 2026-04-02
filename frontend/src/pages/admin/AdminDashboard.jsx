@@ -49,8 +49,7 @@ function getLogStyles(type) {
   }
 }
 
-
-
+// ─── Component ─────────────────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
   const [showAllLogs, setShowAllLogs] = useState(false);
@@ -66,23 +65,23 @@ export default function AdminDashboard() {
   const [recentBackups, setRecentBackups] = useState([]);
   const [backupsLoading, setBackupsLoading] = useState(true);
 
+  const [sysStats, setSysStats] = useState(null);
+  const [sysLoading, setSysLoading] = useState(true);
   const [groups, setGroups] = useState([]);
   const [caretakers, setCaretakers] = useState([]);
   const [users, setUsers] = useState([]);
 
   // Fetch audit logs
   useEffect(() => {
-    setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
-    setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
+    setLoading(true);
+    setError(null);
     api.getAuditLogs({ limit: showAllLogs ? 20 : 3 })
-      .then((data) => { setError(null); setLogs(data.logs || []); setTotalLogs(data.total || 0); })
-      .then((data) => { setError(null); setLogs(data.logs || []); setTotalLogs(data.total || 0); })
+      .then((data) => { setLogs(data.logs || []); setTotalLogs(data.total || 0); })
       .catch((err) => { setError("Could not load security logs."); console.error(err); })
       .finally(() => setLoading(false));
   }, [showAllLogs]);
 
-  // Fetch all dashboard data in parallel
-  // Fetch all dashboard data in parallel
+  // Fetch backups
   useEffect(() => {
     api.listBackups()
       .then((data) => setRecentBackups((Array.isArray(data) ? data : []).slice(0, 3)))
@@ -101,10 +100,30 @@ export default function AdminDashboard() {
     }).catch(() => setUsers([]));
   }, []);
 
+  useEffect(() => {
+    api.adminGetSystemStats()
+      .then(d => setSysStats(d))
+      .catch(() => setSysStats(null))
+      .finally(() => setSysLoading(false));
+  }, []);
+
   // ── Computed ──
   const failedLogins = useMemo(() => logs.filter(l => l.action === "LOGIN_FAILED").length, [logs]);
   const alertNeedleAngle = useMemo(() => -70 + (Math.min(failedLogins, 5) / 5) * 140, [failedLogins]);
   const alertDashOffset = useMemo(() => 125.6 * (1 - Math.min(failedLogins, 5) / 5), [failedLogins]);
+
+  const cpuPct = sysStats?.cpu_percent ?? 0;
+  const cpuOffset = 125.6 * (1 - cpuPct / 100);
+  const cpuNeedle = -70 + (cpuPct / 100) * 140;
+  const cpuColor = cpuPct < 50 ? "#10b981" : cpuPct < 80 ? "#f59e0b" : "#ef4444";
+  const cpuLabel = cpuPct < 50 ? "Healthy" : cpuPct < 80 ? "Moderate" : "High";
+
+  const uptimeStr = sysStats?.uptime_formatted ?? "—";
+  const uptimeSec = sysStats?.uptime_seconds ?? 0;
+  // Uptime gauge: 100% = 30+ days, scaled proportionally
+  const uptimePct = Math.min(100, (uptimeSec / (30 * 86400)) * 100);
+  const uptimeOffset = 125.6 * (1 - uptimePct / 100);
+  const uptimeNeedle = -70 + (uptimePct / 100) * 140;
 
   // All role counts from the same users array — matches UserManagementPage
   const distributionData = useMemo(() => [
@@ -150,34 +169,67 @@ export default function AdminDashboard() {
 
       {/* GAUGES */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Server Load — static */}
+        {/* Server Load — live */}
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col items-center justify-center text-center">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Server Load</h3>
           <div className="relative w-32 h-16 mb-2 flex justify-center">
-            <svg viewBox="0 0 100 55" className="w-full h-full overflow-visible"><path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#f1f5f9" strokeWidth="12" strokeLinecap="round" /><path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#10b981" strokeWidth="12" strokeLinecap="round" strokeDasharray="125.6" strokeDashoffset="82" /></svg>
-            <div className="absolute bottom-0 left-1/2 w-1 h-12 bg-slate-700 origin-bottom -translate-x-1/2 -rotate-45 rounded-full"></div>
+            <svg viewBox="0 0 100 55" className="w-full h-full overflow-visible">
+              <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#f1f5f9" strokeWidth="12" strokeLinecap="round" />
+              <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke={cpuColor} strokeWidth="12" strokeLinecap="round" strokeDasharray="125.6" strokeDashoffset={cpuOffset} className="transition-all duration-700" />
+            </svg>
+            <div className="absolute bottom-0 left-1/2 w-1 h-12 bg-slate-700 origin-bottom -translate-x-1/2 rounded-full transition-transform duration-700" style={{ transform: `translateX(-50%) rotate(${cpuNeedle}deg)` }}></div>
             <div className="absolute bottom-[-4px] left-1/2 w-3 h-3 bg-slate-800 rounded-full -translate-x-1/2"></div>
           </div>
-          <p className="text-3xl font-extrabold text-emerald-500 mt-4">34%</p>
-          <p className="text-sm text-slate-500 font-medium">Healthy</p>
+          {sysLoading ? (
+            <p className="text-sm text-slate-400 mt-4 animate-pulse">Loading…</p>
+          ) : (
+            <>
+              <p className="text-3xl font-extrabold mt-4" style={{ color: cpuColor }}>{cpuPct}%</p>
+              <p className="text-sm text-slate-500 font-medium">{cpuLabel}</p>
+              {sysStats && (
+                <p className="text-xs text-slate-400 mt-1">
+                  RAM: {sysStats.memory_used_gb}/{sysStats.memory_total_gb} GB ({sysStats.memory_percent}%)
+                </p>
+              )}
+            </>
+          )}
         </div>
-        {/* Uptime — static */}
+
+        {/* Uptime — live */}
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col items-center justify-center text-center">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Uptime</h3>
           <div className="relative w-32 h-16 mb-2 flex justify-center">
-            <svg viewBox="0 0 100 55" className="w-full h-full overflow-visible"><path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#f1f5f9" strokeWidth="12" strokeLinecap="round" /><path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#10b981" strokeWidth="12" strokeLinecap="round" strokeDasharray="125.6" strokeDashoffset="0" /></svg>
-            <div className="absolute bottom-0 left-1/2 w-1 h-12 bg-slate-700 origin-bottom -translate-x-1/2 rotate-[70deg] rounded-full"></div>
+            <svg viewBox="0 0 100 55" className="w-full h-full overflow-visible">
+              <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#f1f5f9" strokeWidth="12" strokeLinecap="round" />
+              <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#10b981" strokeWidth="12" strokeLinecap="round" strokeDasharray="125.6" strokeDashoffset={uptimeOffset} className="transition-all duration-700" />
+            </svg>
+            <div className="absolute bottom-0 left-1/2 w-1 h-12 bg-slate-700 origin-bottom -translate-x-1/2 rounded-full transition-transform duration-700" style={{ transform: `translateX(-50%) rotate(${uptimeNeedle}deg)` }}></div>
             <div className="absolute bottom-[-4px] left-1/2 w-3 h-3 bg-slate-800 rounded-full -translate-x-1/2"></div>
           </div>
-          <p className="text-3xl font-extrabold text-emerald-500 mt-4">99.97%</p>
-          <p className="text-sm text-slate-500 font-medium">Excellent</p>
+          {sysLoading ? (
+            <p className="text-sm text-slate-400 mt-4 animate-pulse">Loading…</p>
+          ) : (
+            <>
+              <p className="text-3xl font-extrabold text-emerald-500 mt-4">{uptimeStr}</p>
+              <p className="text-sm text-slate-500 font-medium">System uptime</p>
+              {sysStats && (
+                <p className="text-xs text-slate-400 mt-1">
+                  Disk: {sysStats.disk_used_gb}/{sysStats.disk_total_gb} GB ({sysStats.disk_percent}%)
+                </p>
+              )}
+            </>
+          )}
         </div>
-        {/* Security Alerts — dynamic */}
+
+        {/* Security Alerts — dynamic (unchanged logic) */}
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-rose-100 ring-1 ring-rose-50 flex flex-col items-center justify-center text-center relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-rose-50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 relative z-10">Security Alerts</h3>
           <div className="relative w-32 h-16 mb-2 flex justify-center z-10">
-            <svg viewBox="0 0 100 55" className="w-full h-full overflow-visible"><path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#f1f5f9" strokeWidth="12" strokeLinecap="round" /><path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#ef4444" strokeWidth="12" strokeLinecap="round" strokeDasharray="125.6" strokeDashoffset={alertDashOffset} /></svg>
+            <svg viewBox="0 0 100 55" className="w-full h-full overflow-visible">
+              <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#f1f5f9" strokeWidth="12" strokeLinecap="round" />
+              <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#ef4444" strokeWidth="12" strokeLinecap="round" strokeDasharray="125.6" strokeDashoffset={alertDashOffset} />
+            </svg>
             <div className="absolute bottom-0 left-1/2 w-1 h-12 bg-rose-600 origin-bottom -translate-x-1/2 rounded-full transition-transform duration-500" style={{ transform: `translateX(-50%) rotate(${alertNeedleAngle}deg)` }}></div>
             <div className="absolute bottom-[-4px] left-1/2 w-3 h-3 bg-rose-700 rounded-full -translate-x-1/2"></div>
           </div>
@@ -295,7 +347,6 @@ export default function AdminDashboard() {
               <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: "#64748b", fontSize: 12, fontWeight: 600 }} />
               <Tooltip cursor={{ fill: "transparent" }} contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)" }} />
               <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={20} className="cursor-pointer"
-                onClick={() => navigate("/users")}>
                 onClick={() => navigate("/users")}>
                 {distributionData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
               </Bar>

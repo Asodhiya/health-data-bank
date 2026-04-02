@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { sanitizeText, trimPayload } from '../../utils/sanitize';
+import { sanitizeText, sanitizeEmail, trimPayload } from '../../utils/sanitize';
 import { api } from '../../services/api';
 
 /*

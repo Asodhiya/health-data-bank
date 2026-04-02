@@ -37,8 +37,6 @@ function fmtTime(d) { if (!d) return "—"; return new Date(d).toLocaleDateStrin
 function timeUntil(iso) { const ms = new Date(iso) - Date.now(); if (ms < 0) return "Expired"; const h = Math.floor(ms / 3600000); if (h < 1) return `${Math.floor(ms / 60000)}m`; if (h < 24) return `${h}h`; return `${Math.floor(h / 24)}d`; }
 
 // ── Backend → Frontend user transform ────────────────────────────────────────
-// Backend UserListItem uses snake_case + boolean status.
-// Frontend components use camelCase + string status ("active" / "inactive").
 function transformUser(u) {
   return {
     id: u.id,
@@ -79,21 +77,109 @@ function ApiPendingBanner({ endpoint, description }) {
   );
 }
 
-// ── Create Group Modal (REAL API) ────────────────────────────────────────────
-function CreateGroupModal({ open, onClose, onConfirm, caretakers }) {
-  const [name, setName] = useState(""); const [desc, setDesc] = useState(""); const [cId, setCId] = useState(""); const [loading, setLoading] = useState(false);
+// ── Create Group Modal (REAL API + participant assignment) ───────────────────
+function CreateGroupModal({ open, onClose, onConfirm, caretakers, users }) {
+  const [name, setName] = useState("");
+  const [desc, setDesc] = useState("");
+  const [cId, setCId] = useState("");
+  const [selectedParticipants, setSelectedParticipants] = useState([]);
+  const [participantSearch, setParticipantSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const ungrouped = (users || []).filter(u => u.role === "participant" && !u.groupId);
+  const filtered = ungrouped.filter(u =>
+    `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(participantSearch.toLowerCase())
+  );
+
+  const toggleParticipant = (id) => {
+    setSelectedParticipants(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
   const submit = async () => {
     if (!name.trim()) return;
     setLoading(true);
     try {
       const newGroup = await api.adminCreateGroup({ name: name.trim(), description: desc.trim() });
       if (cId) { try { await api.adminAssignCaretaker(cId, newGroup.group_id); } catch (e) { console.error("Caretaker assignment failed:", e); } }
-      onConfirm(newGroup, cId);
-      setName(""); setDesc(""); setCId("");
+      onConfirm(newGroup, cId, null, selectedParticipants);
+      setName(""); setDesc(""); setCId(""); setSelectedParticipants([]); setParticipantSearch("");
     } catch (err) { onConfirm(null, null, err.message); }
     finally { setLoading(false); }
   };
-  return <Modal open={open} onClose={onClose}><h3 className="text-lg font-bold text-slate-800 mb-4">Create New Group</h3><div className="space-y-4"><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Group Name</label><input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Morning Cohort C" className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200" /></div><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Description</label><textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none" /></div><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Caretaker</label><select value={cId} onChange={e => setCId(e.target.value)} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl"><option value="">None</option>{caretakers.map(c => <option key={c.caretaker_id} value={c.user_id}>{c.name} — {c.title || "Caretaker"}</option>)}</select></div></div><div className="flex gap-3 mt-6"><button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={submit} disabled={!name.trim() || loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">{loading ? <><Spinner /> Creating…</> : "Create"}</button></div></Modal>;
+
+  return (
+    <Modal open={open} onClose={onClose} maxW="max-w-lg">
+      <h3 className="text-lg font-bold text-slate-800 mb-4">Create New Group</h3>
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Group Name</label>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Morning Cohort C"
+            className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Description</label>
+          <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} placeholder="Brief description of this group…"
+            className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none" />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assign Caretaker</label>
+          <select value={cId} onChange={e => setCId(e.target.value)}
+            className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl">
+            <option value="">None (assign later)</option>
+            {caretakers.map(c => <option key={c.caretaker_id} value={c.user_id}>{c.name} — {c.title || "Caretaker"}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+            Add Participants {selectedParticipants.length > 0 && <span className="text-blue-600">({selectedParticipants.length} selected)</span>}
+          </label>
+          {ungrouped.length === 0 ? (
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+              <p className="text-xs text-slate-400">No ungrouped participants available.</p>
+              <p className="text-xs text-slate-300 mt-0.5">Invite new participants or unassign from other groups first.</p>
+            </div>
+          ) : (
+            <>
+              <input type="text" value={participantSearch} onChange={e => setParticipantSearch(e.target.value)}
+                placeholder="Search by name or email…"
+                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 mb-2" />
+              <div className="max-h-40 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-50">
+                {filtered.length === 0 ? (
+                  <p className="text-xs text-slate-400 p-3 text-center">No matches found.</p>
+                ) : filtered.map(u => {
+                  const isSelected = selectedParticipants.includes(u.id);
+                  return (
+                    <button key={u.id} type="button" onClick={() => toggleParticipant(u.id)}
+                      className={`w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors ${isSelected ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isSelected ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300"}`}>
+                        {isSelected && <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-slate-700 truncate">{u.firstName} {u.lastName}</p>
+                        <p className="text-xs text-slate-400 truncate">{u.email}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedParticipants.length > 0 && (
+                <button onClick={() => setSelectedParticipants([])} className="text-xs text-slate-400 hover:text-slate-600 mt-1.5">Clear selection</button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      <div className="flex gap-3 mt-6">
+        <button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button>
+        <button onClick={submit} disabled={!name.trim() || loading}
+          className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">
+          {loading ? <><Spinner /> Creating…</> : "Create"}
+        </button>
+      </div>
+    </Modal>
+  );
 }
 
 // ── Invite Modal (REAL API) ──────────────────────────────────────────────────
@@ -162,18 +248,12 @@ function RevokeModal({ open, onClose, onConfirm, invite, loading }) { if (!open 
 function UserDrawer({ user, users, groups, caretakers, onClose, onEdit, onDeactivate, onReactivate, onDelete, onChangeGroup, onChangeRole }) {
   const [subExp, setSubExp] = useState(null);
   const [goalExp, setGoalExp] = useState(null);
-  // Per-user data loaded when drawer opens (placeholders until backend exists)
-  const [submissions, setSubmissions] = useState(null); // null = not loaded, [] = empty
+  const [submissions, setSubmissions] = useState(null);
   const [goals, setGoals] = useState(null);
 
-  // Attempt to fetch participant submissions & goals when drawer opens
   useEffect(() => {
     if (!user || user.role !== "participant") { setSubmissions(null); setGoals(null); return; }
     setSubmissions(null); setGoals(null);
-    // TODO: Replace with real API calls when endpoints exist
-    // e.g. api.adminGetUserSubmissions(user.id).then(setSubmissions).catch(() => setSubmissions([]))
-    // e.g. api.adminGetUserGoals(user.id).then(setGoals).catch(() => setGoals([]))
-    // For now, set empty after a brief delay to show the loading state
     const t = setTimeout(() => { setSubmissions([]); setGoals([]); }, 600);
     return () => clearTimeout(t);
   }, [user]);
@@ -194,7 +274,6 @@ function UserDrawer({ user, users, groups, caretakers, onClose, onEdit, onDeacti
         <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Group</p>{grp ? <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex items-center justify-between"><div><p className="text-sm font-bold text-emerald-800">{grp.name}</p><p className="text-xs text-emerald-600 mt-0.5">{grp.description}</p></div><button onClick={() => onChangeGroup([user])} className="text-xs font-semibold text-blue-600 shrink-0">Change</button></div> : <div className="flex items-center justify-between"><p className="text-xs text-slate-400 italic">Not assigned</p><button onClick={() => onChangeGroup([user])} className="text-xs font-semibold text-blue-600">Assign</button></div>}</div>
         <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Caretaker</p>{ct ? <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3"><Avatar name={`${ct.firstName} ${ct.lastName}`} size="sm" /><div><p className="text-sm font-semibold text-slate-800">{ct.firstName} {ct.lastName}</p><p className="text-xs text-slate-400">{ct.title} · {ct.organization}</p></div></div> : <p className="text-xs text-slate-400 italic">No caretaker</p>}</div>
 
-        {/* Submissions */}
         <div className="px-5 py-4 border-b border-slate-100">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Submissions</p>
           {submissions === null ? <div className="flex items-center justify-center py-4"><Spinner /><span className="text-xs text-slate-400 ml-2">Loading…</span></div>
@@ -202,7 +281,6 @@ function UserDrawer({ user, users, groups, caretakers, onClose, onEdit, onDeacti
             : <div className="space-y-2">{submissions.map(s => { const st = SUB_STYLES[s.status] || SUB_STYLES.new; const ex = subExp === s.id; return <div key={s.id} className="border border-slate-100 rounded-xl overflow-hidden"><button onClick={() => setSubExp(ex ? null : s.id)} className="w-full px-3 py-2.5 flex items-center justify-between text-left hover:bg-slate-50/50"><div className="min-w-0"><p className="text-sm font-semibold text-slate-700 truncate">{s.form_name}</p><p className="text-xs text-slate-400 mt-0.5">{s.submitted_at ? fmtTime(s.submitted_at) : "Draft"}</p></div><div className="flex items-center gap-2 shrink-0"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${st.bg} ${st.text}`}>{st.label}</span><IconChevron open={ex} /></div></button>{ex && <div className="px-3 pb-3 border-t border-slate-50 space-y-1.5 pt-2">{(s.answers || []).map((a, i) => <div key={i} className="bg-slate-50 rounded-lg px-3 py-2"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{a.field}</p><p className="text-sm text-slate-700 mt-0.5">{a.value}</p></div>)}</div>}</div>; })}</div>}
         </div>
 
-        {/* Health Goals */}
         <div className="px-5 py-4 border-b border-slate-100">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Health Goals</p>
           {goals === null ? <div className="flex items-center justify-center py-4"><Spinner /><span className="text-xs text-slate-400 ml-2">Loading…</span></div>
@@ -352,7 +430,6 @@ export default function UserManagementPage() {
   const counts = useMemo(() => { const c = {}; ROLES.forEach(r => { c[r.value] = users.filter(u => u.role === r.value).length; }); return c; }, [users]);
   const inviteCounts = useMemo(() => { const c = { all: invites.length, pending: 0, accepted: 0, expired: 0, revoked: 0 }; invites.forEach(i => { if (c[i.status] !== undefined) c[i.status]++; }); return c; }, [invites]);
 
-  // Active filter count for the badge
   const activeFilterCount = useMemo(() => {
     let c = 0;
     if (filterStatus !== "all") c++;
@@ -386,7 +463,6 @@ export default function UserManagementPage() {
       return true;
     });
 
-    // Sort
     const dir = sort.dir === "asc" ? 1 : -1;
     list.sort((a, b) => {
       switch (sort.field) {
@@ -493,7 +569,6 @@ export default function UserManagementPage() {
     } case "Caretaker": return <span className="text-xs text-slate-600">{u.caretaker || "—"}</span>; case "Organization": return <span className="text-xs text-slate-600">{u.organization || "—"}</span>; case "Title": return <span className="text-xs text-slate-600">{u.title || "—"}</span>; case "Institution": return <span className="text-xs text-slate-600">{u.institution || "—"}</span>; case "Department": return <span className="text-xs text-slate-600">{u.department || "—"}</span>; default: return "—"; } };
   const columns = getColumns();
 
-  // Map column names to sort fields
   const colSortMap = { Name: "name", Email: "email", Role: "role", Status: "status", Joined: "joined", Group: "group" };
   const showGroupColumn = !activeRole || activeRole === "participant" || activeRole === "caretaker";
 
@@ -503,7 +578,7 @@ export default function UserManagementPage() {
       <Toast {...toast} onClose={() => setToast(p => ({ ...p, show: false }))} />
       <UserDrawer user={detailUser} users={users} groups={groups} caretakers={caretakers} onClose={() => setDetailUser(null)} onEdit={setEditTarget} onDeactivate={setDeactivateTarget} onReactivate={handleReactivate} onDelete={setDeleteTarget} onChangeGroup={setChangeGroupTargets} onChangeRole={setChangeRoleTarget} />
       <InviteModal open={showInvite} onClose={() => { setShowInvite(false); setInvitePreRole(""); }} groups={groups} preselectedRole={invitePreRole} onError={(m) => msg(m, "error")} onInviteSent={(d) => { setInvites(p => [{ invite_id: `inv${Date.now()}`, email: d.email, role: d.role, group_name: d.group_name, group_id: d.groupId, invited_by: "You", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 48 * 3600000).toISOString(), used: false, status: "pending" }, ...p]); msg("Invite sent."); }} />
-      <CreateGroupModal open={showCreateGroup} onClose={() => setShowCreateGroup(false)} caretakers={caretakers} onConfirm={(newGroup, cId, error) => { if (error) { msg(error, "error"); return; } const ct = caretakers.find(c => String(c.user_id) === cId); setGroups(p => [...p, { ...newGroup, group_id: String(newGroup.group_id), caretaker_id: cId || null, caretaker_name: ct?.name || null, member_count: 0 }]); setShowCreateGroup(false); msg(`"${newGroup.name}" created.`); }} />
+      <CreateGroupModal open={showCreateGroup} onClose={() => setShowCreateGroup(false)} caretakers={caretakers} users={users} onConfirm={(newGroup, cId, error, assignedParticipants) => { if (error) { msg(error, "error"); return; } const ct = caretakers.find(c => String(c.user_id) === cId); const gid = String(newGroup.group_id); setGroups(p => [...p, { ...newGroup, group_id: gid, caretaker_id: cId || null, caretaker_name: ct?.name || null, member_count: (assignedParticipants || []).length }]); if (assignedParticipants?.length) { setUsers(p => p.map(u => assignedParticipants.includes(u.id) ? { ...u, groupId: gid, group: newGroup.name } : u)); } setShowCreateGroup(false); msg(`"${newGroup.name}" created${assignedParticipants?.length ? ` with ${assignedParticipants.length} participant${assignedParticipants.length > 1 ? "s" : ""}` : ""}.`); }} />
       <EditUserModal open={!!editTarget} onClose={() => setEditTarget(null)} user={editTarget} onSave={handleEditSave} />
       <ChangeGroupModal open={!!changeGroupTargets} onClose={() => setChangeGroupTargets(null)} targets={changeGroupTargets || []} groups={groups} onConfirm={handleChangeGroup} />
       <ChangeRoleModal open={!!changeRoleTarget} onClose={() => setChangeRoleTarget(null)} user={changeRoleTarget} onConfirm={handleChangeRole} />
@@ -520,7 +595,7 @@ export default function UserManagementPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{ROLES.map(r => { const a = activeRole === r.value; return <button key={r.value} onClick={() => setActiveRole(a ? null : r.value)} className={`bg-white rounded-2xl p-5 border shadow-sm transition-all text-left ${a ? `${r.border} ring-2 ring-current ${r.lightBg}` : "border-slate-100 hover:border-slate-200 hover:shadow-md"}`}><div className="flex items-center justify-between mb-3"><div className={`w-10 h-10 rounded-xl flex items-center justify-center ${a ? `${r.color} text-white` : `${r.lightBg} ${r.lightText}`}`}><Ic d={r.icon} c="h-5 w-5" /></div>{a && <span className="text-[10px] font-bold uppercase text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Filtered</span>}</div><p className="text-3xl font-extrabold text-slate-800">{loading ? "—" : counts[r.value]}</p><p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">{r.label}</p></button>; })}</div>
 
       {/* Groups (REAL API) */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><button onClick={() => setGroupsExpanded(!groupsExpanded)} className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center"><IconUsers /></div><div><h2 className="text-base font-bold text-slate-800">Groups & Cohorts</h2><p className="text-xs text-slate-400">{loading ? "Loading…" : `${groups.length} groups`}</p></div></div><div className="flex items-center gap-3"><span onClick={e => { e.stopPropagation(); setShowCreateGroup(true); }} className="text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg flex items-center gap-1"><IconPlus /> New</span><IconChevron open={groupsExpanded} /></div></button>{groupsExpanded && <div className="border-t border-slate-100 divide-y divide-slate-50">{groups.length === 0 ? <div className="px-6 py-8 text-center"><p className="text-sm text-slate-400">No groups yet. Create one above.</p></div> : groups.map(g => <div key={g.group_id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${g.caretaker_id ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}><IconUsers /></div><div><p onClick={(e) => { e.stopPropagation(); setExpandedGroupId(prev => prev === g.group_id ? null : g.group_id); }} className="text-sm font-semibold text-blue-600 hover:text-blue-800 cursor-pointer hover:underline">{g.name}</p><span className="text-xs text-slate-400">{g.description || "No description"} · {(() => { const count = users.filter(u => u.role === "participant" && u.groupId === g.group_id).length; return `${count} member${count !== 1 ? "s" : ""}`; })()}</span></div></div><div className="flex items-center gap-2 pl-12 sm:pl-0 flex-wrap">{g.caretaker_name ? <><span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">{g.caretaker_name}</span><button onClick={(e) => { e.stopPropagation(); handleUnassignCaretaker(g); }} className="text-xs font-semibold text-rose-500 hover:text-rose-700">Unassign</button></> : <><span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">No caretaker</span><button onClick={(e) => { e.stopPropagation(); setAssignCaretakerTarget(g); }} className="text-xs font-semibold text-emerald-600 hover:text-emerald-800">Assign</button></>}<button onClick={(e) => { e.stopPropagation(); setEditGroupTarget(g); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Edit</button><button onClick={() => { setInvitePreRole("participant"); setShowInvite(true); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Invite</button><button onClick={() => handleDeleteGroup(g)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50"><IconTrash /></button></div>{expandedGroupId === g.group_id && (() => { const members = users.filter(u => u.role === "participant" && u.groupId === g.group_id); return <div className="px-6 pb-4 pt-1"><div className="ml-12 bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">{members.length === 0 ? <p className="text-xs text-slate-400 italic p-3">No participants in this group</p> : <div className="divide-y divide-slate-100">{members.map(m => <div key={m.id} className="px-3 py-2.5 flex items-center gap-3"><Avatar name={`${m.firstName} ${m.lastName}`} size="sm" /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-700 truncate">{m.firstName} {m.lastName}</p></div><StatusDot status={m.status} /></div>)}</div>}</div></div>; })()}</div>)}</div>}</div>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><button onClick={() => setGroupsExpanded(!groupsExpanded)} className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center"><IconUsers /></div><div><h2 className="text-base font-bold text-slate-800">Groups & Cohorts</h2><p className="text-xs text-slate-400">{loading ? "Loading…" : `${groups.length} groups`}</p></div></div><div className="flex items-center gap-3"><span onClick={e => { e.stopPropagation(); setShowCreateGroup(true); }} className="text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg flex items-center gap-1"><IconPlus /> New</span><IconChevron open={groupsExpanded} /></div></button>{groupsExpanded && <div className="border-t border-slate-100 divide-y divide-slate-50">{groups.length === 0 ? <div className="px-6 py-8 text-center"><p className="text-sm text-slate-400">No groups yet. Create one above.</p></div> : groups.map(g => <div key={g.group_id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${g.caretaker_id ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}><IconUsers /></div><div><p onClick={(e) => { e.stopPropagation(); setExpandedGroupId(prev => prev === g.group_id ? null : g.group_id); }} className="text-sm font-semibold text-blue-600 hover:text-blue-800 cursor-pointer hover:underline">{g.name}</p><div><p className="text-xs text-slate-500 mt-0.5">{g.description || <span className="italic text-slate-300">No description</span>}</p><span className="text-xs text-slate-400">{(() => { const count = users.filter(u => u.role === "participant" && u.groupId === g.group_id).length; return `${count} member${count !== 1 ? "s" : ""}`; })()}</span></div></div></div><div className="flex items-center gap-2 pl-12 sm:pl-0 flex-wrap">{g.caretaker_name ? <><span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">{g.caretaker_name}</span><button onClick={(e) => { e.stopPropagation(); handleUnassignCaretaker(g); }} className="text-xs font-semibold text-rose-500 hover:text-rose-700">Unassign</button></> : <><span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">No caretaker</span><button onClick={(e) => { e.stopPropagation(); setAssignCaretakerTarget(g); }} className="text-xs font-semibold text-emerald-600 hover:text-emerald-800">Assign</button></>}<button onClick={(e) => { e.stopPropagation(); setEditGroupTarget(g); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Edit</button><button onClick={() => { setInvitePreRole("participant"); setShowInvite(true); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Invite</button><button onClick={() => handleDeleteGroup(g)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50"><IconTrash /></button></div>{expandedGroupId === g.group_id && (() => { const members = users.filter(u => u.role === "participant" && u.groupId === g.group_id); return <div className="px-6 pb-4 pt-1"><div className="ml-12 bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">{members.length === 0 ? <p className="text-xs text-slate-400 italic p-3">No participants in this group</p> : <div className="divide-y divide-slate-100">{members.map(m => <div key={m.id} className="px-3 py-2.5 flex items-center gap-3"><Avatar name={`${m.firstName} ${m.lastName}`} size="sm" /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-700 truncate">{m.firstName} {m.lastName}</p></div><StatusDot status={m.status} /></div>)}</div>}</div></div>; })()}</div>)}</div>}</div>
 
       {/* Invites Tracker */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><button onClick={() => setInvitesExpanded(!invitesExpanded)} className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center"><IconSend /></div><div><h2 className="text-base font-bold text-slate-800">Invites Tracker</h2><div className="flex items-center gap-2 mt-0.5 flex-wrap">{invites.length === 0 ? <span className="text-xs text-slate-400">{invitesAvailable ? "No invites yet" : "Awaiting backend endpoint"}</span> : <>{inviteCounts.pending > 0 && <span className="text-xs font-semibold text-amber-600">{inviteCounts.pending} pending</span>}{inviteCounts.accepted > 0 && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-emerald-600">{inviteCounts.accepted} accepted</span></>}</>}</div></div></div><IconChevron open={invitesExpanded} /></button>
@@ -599,7 +674,7 @@ export default function UserManagementPage() {
       </div>
 
       {/* Bulk */}
-      {selected.size > 0 && <div className="bg-slate-800 rounded-2xl px-4 py-3 flex items-center justify-between"><p className="text-sm font-semibold text-white">{selected.size} selected</p><div className="flex items-center gap-2">{users.filter(u => selected.has(u.id)).every(u => u.role === "participant") && <button onClick={() => setChangeGroupTargets(users.filter(u => selected.has(u.id)))} className="px-3 py-1.5 text-xs font-bold text-emerald-300 bg-emerald-900/50 rounded-lg hover:bg-emerald-800/60">Move Group</button>}<button onClick={async () => { const sel = users.filter(u => selected.has(u.id) && u.status === "active"); if (sel.length === 0) { msg("No active users in selection.", "error"); return; } for (const u of sel) { try { await api.adminUpdateUserStatus(u.id, "inactive"); } catch {} } setUsers(p => p.map(u => selected.has(u.id) ? { ...u, status: "inactive" } : u)); setSelected(new Set()); msg(`${sel.length} user${sel.length > 1 ? "s" : ""} deactivated.`); }} className="px-3 py-1.5 text-xs font-bold text-amber-300 bg-amber-900/50 rounded-lg hover:bg-amber-800/60">Deactivate</button><button onClick={async () => { const sel = users.filter(u => selected.has(u.id) && u.status === "inactive"); if (sel.length === 0) { msg("No inactive users in selection.", "error"); return; } for (const u of sel) { try { await api.adminUpdateUserStatus(u.id, "active"); } catch {} } setUsers(p => p.map(u => selected.has(u.id) && u.status === "inactive" ? { ...u, status: "active" } : u)); setSelected(new Set()); msg(`${sel.length} user${sel.length > 1 ? "s" : ""} reactivated.`); }} className="px-3 py-1.5 text-xs font-bold text-emerald-300 bg-emerald-900/50 rounded-lg hover:bg-emerald-800/60">Reactivate</button><button onClick={async () => { const sel = users.filter(u => selected.has(u.id)); if (sel.length === 0) return; for (const u of sel) { if (u.status === "active") { try { await api.adminUpdateUserStatus(u.id, "inactive"); } catch {} } try { await api.adminDeleteUser(u.id, "anonymize"); } catch {} } setUsers(p => p.filter(u => !selected.has(u.id))); setSelected(new Set()); msg(`${sel.length} user${sel.length > 1 ? "s" : ""} deleted.`); }} className="px-3 py-1.5 text-xs font-bold text-rose-300 bg-rose-900/50 rounded-lg hover:bg-rose-800/60">Delete</button><button onClick={() => setSelected(new Set())} className="px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-white">Clear</button></div></div>}
+      {selected.size > 0 && <div className="bg-slate-800 rounded-2xl px-4 py-3 flex items-center justify-between"><p className="text-sm font-semibold text-white">{selected.size} selected</p><div className="flex items-center gap-2">{users.filter(u => selected.has(u.id)).every(u => u.role === "participant") && <button onClick={() => setChangeGroupTargets(users.filter(u => selected.has(u.id)))} className="px-3 py-1.5 text-xs font-bold text-emerald-300 bg-emerald-900/50 rounded-lg hover:bg-emerald-800/60">Move Group</button>}<button onClick={async () => { const sel = users.filter(u => selected.has(u.id) && u.status === "active"); if (sel.length === 0) { msg("No active users in selection.", "error"); return; } for (const u of sel) { try { await api.adminUpdateUserStatus(u.id, "inactive"); } catch {} } setUsers(p => p.map(u => selected.has(u.id) ? { ...u, status: "inactive" } : u)); setSelected(new Set()); msg(`${sel.length} user${sel.length > 1 ? "s" : ""} deactivated.`); }} className="px-3 py-1.5 text-xs font-bold text-amber-300 bg-amber-900/50 rounded-lg hover:bg-amber-800/60">Deactivate</button><button onClick={async () => { const sel = users.filter(u => selected.has(u.id) && u.status === "inactive"); if (sel.length === 0) { msg("No inactive users in selection.", "error"); return; } for (const u of sel) { try { await api.adminUpdateUserStatus(u.id, "active"); } catch {} } setUsers(p => p.map(u => selected.has(u.id) && u.status === "inactive" ? { ...u, status: "active" } : u)); setSelected(new Set()); msg(`${sel.length} user${sel.length > 1 ? "s" : ""} reactivated.`); }} className="px-3 py-1.5 text-xs font-bold text-emerald-300 bg-emerald-900/50 rounded-lg hover:bg-emerald-800/60">Reactivate</button><button onClick={async () => { const sel = users.filter(u => selected.has(u.id) && u.status === "inactive"); if (sel.length === 0) { msg("Only inactive users can be deleted. Deactivate first.", "error"); return; } for (const u of sel) { try { await api.adminDeleteUser(u.id, "anonymize"); } catch {} } setUsers(p => p.filter(u => !selected.has(u.id) || u.status === "active").map(u => { if (!selected.has(u.id)) return u; return { ...u, firstName: "Deleted", lastName: `User #${u.id}`, email: `deleted_${u.id}@removed.local`, phone: "—", status: "inactive" }; })); setSelected(new Set()); msg(`${sel.length} user${sel.length > 1 ? "s" : ""} anonymized.`); }} className="px-3 py-1.5 text-xs font-bold text-rose-300 bg-rose-900/50 rounded-lg hover:bg-rose-800/60">Delete</button><button onClick={() => setSelected(new Set())} className="px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-white">Clear</button></div></div>}
 
       {/* Table */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
