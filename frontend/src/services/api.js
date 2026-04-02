@@ -1,5 +1,14 @@
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
 
+function normalizeNotificationRole(role) {
+  const normalized = String(role || "").toLowerCase();
+  if (normalized === "admin") return "admin_only";
+  if (normalized === "participant") return "participant";
+  if (normalized === "caretaker") return "caretaker";
+  if (normalized === "researcher") return "researcher";
+  return normalized;
+}
+
 async function request(endpoint, options = {}) {
   const res = await fetch(`${API_BASE}${endpoint}`, {
     headers: { "Content-Type": "application/json" },
@@ -30,6 +39,9 @@ export const api = {
     }),
 
   logout: () => request("/auth/logout", { method: "POST" }),
+
+  selfDeactivateAccount: () =>
+    request("/auth/self-deactivate", { method: "POST" }),
 
   me: () => request("/auth/me"),
 
@@ -172,11 +184,23 @@ export const api = {
   adminUnassignCaretaker: (groupId) =>
     request(`/admin_only/assign-caretaker/${groupId}`, { method: "DELETE" }),
 
+  adminMoveParticipant: (userId, groupId) =>
+    request(`/admin_only/users/${userId}/group`, {
+      method: "PATCH",
+      body: JSON.stringify({ group_id: groupId }),
+    }),
+
   adminUpdateGroup: (groupId, payload) =>
     request(`/admin_only/groups/${groupId}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+
+  adminGetUserSubmissions: (userId) =>
+    request(`/admin_only/users/${userId}/submissions`),
+
+  adminGetUserGoals: (userId) =>
+    request(`/admin_only/users/${userId}/goals`),
 
   // ── Admin: Invites ──
   // TODO (backend): Add GET /admin_only/invites and DELETE /admin_only/invites/{id}
@@ -188,6 +212,8 @@ export const api = {
   // ── Admin: User Management ──
   // TODO (backend): Add CRUD endpoints for user management
   adminListUsers: () => request("/admin_only/users"),
+  adminGetOnboardingStats: () => request("/admin_only/stats/onboarding"),
+  adminGetSurveyStats: () => request("/admin_only/stats/surveys"),
 
   adminUpdateUser: (userId, payload) =>
     request(`/admin_only/users/${userId}`, {
@@ -199,6 +225,12 @@ export const api = {
     request(`/admin_only/users/${userId}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status }),
+    }),
+
+  adminReactivateUser: (userId, payload = {}) =>
+    request(`/admin_only/users/${userId}/reactivate`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 
   adminDeleteUser: (userId, mode) =>
@@ -370,6 +402,12 @@ export const api = {
       body: JSON.stringify({ message }),
     }),
 
+  caretakerCreateGeneralFeedback: (participantId, message) =>
+    request(`/caretaker/participants/${participantId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
   // Health Goals (read-only for caretaker)
   caretakerGetGoals: (participantId) =>
     request(`/caretaker/participants/${participantId}/goals`),
@@ -386,7 +424,7 @@ export const api = {
     );
   },
 
-  // Notes (no backend endpoint — kept for future use)
+  // Notes
   caretakerListNotes: (participantId) =>
     request(`/caretaker/participants/${participantId}/notes`),
 
@@ -440,10 +478,13 @@ export const api = {
 
   // ── Notifications (shared across roles) ──────────────────────────────────
 
-  getNotifications: (role) => request(`/${role}/notifications`),
+  getNotifications: (role) => {
+    const r = normalizeNotificationRole(role);
+    return request(`/${r}/notifications`);
+  },
 
   markNotificationRead: (role, notificationId) =>
-    request(`/${role}/notifications/${notificationId}`, {
+    request(`/${normalizeNotificationRole(role)}/notifications/${notificationId}`, {
       method: "PATCH",
       body: JSON.stringify({ is_read: true }),
     }),

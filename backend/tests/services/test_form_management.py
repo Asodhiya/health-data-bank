@@ -1,18 +1,4 @@
-"""
-Unit Tests: Researcher Form Management (app/services/form_management_service.py)
 
-What we are testing:
-    create_survey_form()   — creates form; raises 409 on duplicate title
-    update_survey_form()   — updates form; raises 404/403/400 on bad inputs
-    delete_survey_form()   — deletes form; raises 404/403 on bad inputs
-    Field types            — text, number, dropdown (with options), date fields
-
-These are service-layer unit tests. The DB session is fully mocked —
-no real database is required.
-
-Run with:
-    pytest tests/services/test_form_management.py -v
-"""
 
 import pytest
 import uuid
@@ -22,9 +8,7 @@ from fastapi import HTTPException
 from app.schemas.survey_schema import SurveyCreate, FormFieldCreate, FieldOptionCreate
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+
 
 RESEARCHER_ID = uuid.uuid4()
 FORM_ID = uuid.uuid4()
@@ -81,9 +65,6 @@ def make_survey_create(title="Blood Pressure Survey", fields=None):
     )
 
 
-# ---------------------------------------------------------------------------
-# create_survey_form
-# ---------------------------------------------------------------------------
 
 class TestCreateSurveyForm:
 

@@ -3,9 +3,10 @@ Authentication Routes
 """
 from fastapi import APIRouter, HTTPException, status, Response, Depends, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import User, GroupMember, ParticipantProfile, ResearcherProfile
-from sqlalchemy import select
-from datetime import datetime, timezone
+from app.db.models import User, GroupMember, ParticipantProfile, ResearcherProfile, Role, UserRole, AuditLog
+from sqlalchemy import select, func
+from datetime import datetime, timezone, timedelta
+import secrets
 from app.db.session import get_db
 from app.core.security import PasswordHash, create_access_token, generate_reset_token, hash_reset_token, reset_token_expiry
 from app.schemas.schemas import UserSignup
@@ -19,6 +20,7 @@ from app.core.security import InviteTokenGenerator
 from app.schemas.schemas import SignupInviteRequest
 from app.db.queries.Queries import RoleQuery, UserQuery, InviteQuery
 from app.services.audit_service import write_audit_log
+from app.services.notification_service import create_notifications_bulk, create_notification, notification_exists_recent
 
 
 router = APIRouter()
@@ -57,6 +59,42 @@ async def login(
             entity_type="user",
             details={"identifier_attempted": data.identifier},
         )
+
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+        failed_count = await db.scalar(
+            select(func.count(AuditLog.audit_id))
+            .where(AuditLog.action == "LOGIN_FAILED")
+            .where(AuditLog.created_at >= one_hour_ago)
+        )
+        if (failed_count or 0) >= 5:
+            admin_rows = await db.execute(
+                select(User.user_id)
+                .join(UserRole, UserRole.user_id == User.user_id)
+                .join(Role, Role.role_id == UserRole.role_id)
+                .where(Role.role_name == "admin")
+            )
+            admin_ids = [row[0] for row in admin_rows.all()]
+            for admin_id in admin_ids:
+                exists = await notification_exists_recent(
+                    db,
+                    user_id=admin_id,
+                    notification_type="flag",
+                    source_type="login_failed_spike",
+                    source_id=None,
+                    within_hours=1,
+                )
+                if not exists:
+                    await create_notification(
+                        db=db,
+                        user_id=admin_id,
+                        notification_type="flag",
+                        title="Login failure spike detected",
+                        message=f"{failed_count} failed login attempts were recorded in the last hour.",
+                        link="/audit-logs",
+                        role_target="admin",
+                        source_type="login_failed_spike",
+                        source_id=None,
+                    )
         raise  # re-raise the original 401
 
     # Successful login
@@ -122,6 +160,26 @@ async def register(
         details={"email": new_user.email, "role": role.role_name},
     )
 
+    admin_rows = await db.execute(
+        select(User.user_id)
+        .join(UserRole, UserRole.user_id == User.user_id)
+        .join(Role, Role.role_id == UserRole.role_id)
+        .where(Role.role_name == "admin")
+    )
+    admin_ids = [row[0] for row in admin_rows.all() if row[0] != new_user.user_id]
+    if admin_ids:
+        await create_notifications_bulk(
+            db=db,
+            user_ids=admin_ids,
+            notification_type="invite",
+            title="New user registered",
+            message=f"{new_user.first_name} {new_user.last_name} joined as {role.role_name}.",
+            link="/users",
+            role_target="admin",
+            source_type="registration",
+            source_id=new_user.user_id,
+        )
+
     return new_user
 
 
@@ -169,6 +227,85 @@ async def logout(
 
     response.delete_cookie("token")
     return {"message": "Logged out successfully"}
+
+
+@router.post("/self-deactivate")
+async def self_deactivate_account(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(check_current_user),
+):
+    """
+    Participant/Researcher self-delete flow:
+    - Account is anonymized + deactivated (not hard-deleted)
+    - Related research/forms/group memberships remain intact
+    - Admins are notified
+    """
+    ip = _get_client_ip(request)
+    user_queries = UserQuery(db)
+    roles = await user_queries.get_user_roles(user.user_id)
+    allowed_roles = {"participant", "researcher"}
+    if not any(r in allowed_roles for r in roles):
+        raise HTTPException(status_code=403, detail="Only participants and researchers can self-deactivate.")
+
+    original_email = user.email
+    original_first_name = user.first_name
+    original_last_name = user.last_name
+    role_label = next((r for r in roles if r in allowed_roles), roles[0] if roles else "unknown")
+
+    user.first_name = "Deleted"
+    user.last_name = f"User #{str(user.user_id)[:8]}"
+    user.email = f"deleted_{user.user_id}@deleted.local"
+    user.username = f"deleted_{str(user.user_id).replace('-', '')[:20]}"
+    user.phone = None
+    user.Address = None
+    user.status = False
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    user.reset_token_hash = None
+    user.reset_token_expires_at = None
+    user.password_hash = PasswordHash.from_password(secrets.token_urlsafe(32)).to_str()
+
+    admin_rows = await db.execute(
+        select(User.user_id)
+        .join(UserRole, UserRole.user_id == User.user_id)
+        .join(Role, Role.role_id == UserRole.role_id)
+        .where(Role.role_name == "admin")
+        .where(User.user_id != user.user_id)
+    )
+    admin_ids = [row[0] for row in admin_rows.all()]
+
+    if admin_ids:
+        await create_notifications_bulk(
+            db=db,
+            user_ids=admin_ids,
+            notification_type="flag",
+            title="User self-deactivated",
+            message=f"A {role_label} account was anonymized and deactivated.",
+            link="/users",
+            role_target="admin",
+            source_type="user_self_deactivated",
+            source_id=user.user_id,
+        )
+
+    await db.commit()
+
+    await write_audit_log(
+        db,
+        action="USER_SELF_DEACTIVATED",
+        ip_address=ip,
+        actor_user_id=user.user_id,
+        entity_type="user",
+        entity_id=user.user_id,
+        details={
+            "original_email": original_email,
+            "original_first_name": original_first_name,
+            "original_last_name": original_last_name,
+            "role": role_label,
+        },
+    )
+
+    return {"detail": "Account anonymized and deactivated successfully."}
 
 
 @router.get("/me")

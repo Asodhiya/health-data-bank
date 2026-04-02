@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, Query, UploadFile, File
 from fastapi.responses import Response
 from app.schemas.schemas import Role_schema, Permissions_schema, Role_user_link, Link_role_permission_schema
-from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResponse, UnassignCaretakerResponse, CaretakerItem, DeleteGroupResponse, RestoreResponse, AdminProfileUpdate, AdminProfileOut, UserListItem, AdminUserUpdate, UserStatusUpdate, InviteListItem, BackupListItem
-from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem
+from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResponse, UnassignCaretakerResponse, CaretakerItem, DeleteGroupResponse, RestoreResponse, AdminProfileUpdate, AdminProfileOut, UserListItem, AdminUserUpdate, UserStatusUpdate, UserReactivateRequest, UserDeleteRequest, MoveParticipantRequest, InviteListItem, BackupListItem
+from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem, GroupUpdateRequest
+from app.schemas.notification_schema import NotificationItem
 from app.services.role_service import addroles, viewroles, add_permissions, link_user_roles, link_role_permisson
-from app.services.admin_service import assign_caretaker_to_group, unassign_caretaker_from_group, create_group, delete_group, list_groups, list_caretakers, backup_database, restore_database, list_users, update_user, update_user_status, delete_user, list_invites, revoke_invite, list_backups, delete_backup
+from app.services.admin_service import assign_caretaker_to_group, unassign_caretaker_from_group, create_group, delete_group, update_group, move_participant_group, list_groups, list_caretakers, backup_database, restore_database, list_users, update_user, update_user_status, reactivate_user_access, delete_user, list_invites, revoke_invite, list_backups, delete_backup, get_user_submissions, get_user_goals, get_onboarding_stats, get_survey_completion_stats
 from typing import List
 from app.db.session import get_db
 from app.db.models import Role, AuditLog, User, AdminProfile
@@ -14,6 +15,10 @@ from sqlalchemy import select, desc, func
 from typing import Optional
 from app.core.permissions import ROLE_READ_ALL, GROUP_READ, GROUP_WRITE, GROUP_DELETE, CARETAKER_READ, CARETAKER_ASSIGN, BACKUP_CREATE, USER_READ, USER_WRITE, USER_DELETE
 from uuid import UUID
+from app.services.notification_service import (
+    list_notifications_for_user,
+    mark_notification_read_for_user,
+)
 
 router = APIRouter()
 
@@ -149,6 +154,24 @@ async def delete_group_endpoint(
     return await delete_group(group_id, db)
 
 
+@router.patch("/groups/{group_id}", response_model=GroupItem, dependencies=[Depends(require_permissions(GROUP_WRITE))])
+async def update_group_endpoint(
+    group_id: UUID,
+    payload: GroupUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await update_group(group_id, payload, db)
+
+
+@router.patch("/users/{user_id}/group", dependencies=[Depends(require_permissions(GROUP_WRITE))])
+async def move_participant_group_endpoint(
+    user_id: UUID,
+    payload: MoveParticipantRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await move_participant_group(user_id, payload.group_id, db)
+
+
 @router.post("/assign-caretaker", response_model=AssignCaretakerResponse, dependencies=[Depends(require_permissions(CARETAKER_ASSIGN))])
 async def assign_caretaker(
     payload: AssignCaretakerRequest,
@@ -185,10 +208,11 @@ async def backup_endpoint(
 async def restore_endpoint(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(BACKUP_CREATE)),
 ):
     """Upload a backup JSON file to wipe and restore the database."""
     raw_content = await file.read()
-    return await restore_database(raw_content, db)
+    return await restore_database(raw_content, db, restored_by=current_user.user_id)
 
 
 # ── Admin Profile ────────────────────────────────────────────────────────────
@@ -261,14 +285,42 @@ async def patch_user_status(
     return await update_user_status(user_id, payload.status, actor.user_id, db)
 
 
-@router.delete("/users/{user_id}", dependencies=[Depends(require_permissions(USER_DELETE))])
-async def remove_user(
+@router.post("/users/{user_id}/reactivate", dependencies=[Depends(require_permissions(USER_WRITE))])
+async def reactivate_user(
     user_id: UUID,
-    mode: str = "anonymize",
+    payload: UserReactivateRequest,
     actor: User = Depends(check_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await delete_user(user_id, mode, actor.user_id, db)
+    return await reactivate_user_access(user_id, payload, actor.user_id, db)
+
+
+@router.delete("/users/{user_id}", dependencies=[Depends(require_permissions(USER_DELETE))])
+async def remove_user(
+    user_id: UUID,
+    payload: UserDeleteRequest,
+    actor: User = Depends(check_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await delete_user(user_id, payload.mode, actor.user_id, db)
+
+
+# ── Participant Data (admin drawer) ──────────────────────────────────────────
+
+@router.get("/users/{user_id}/submissions", dependencies=[Depends(require_permissions(USER_READ))])
+async def get_user_submissions_endpoint(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_user_submissions(user_id, db)
+
+
+@router.get("/users/{user_id}/goals", dependencies=[Depends(require_permissions(USER_READ))])
+async def get_user_goals_endpoint(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_user_goals(user_id, db)
 
 
 # ── Invite Management ────────────────────────────────────────────────────────
@@ -293,6 +345,61 @@ async def get_backups(db: AsyncSession = Depends(get_db)):
 @router.delete("/backups/{backup_id}", dependencies=[Depends(require_permissions(BACKUP_CREATE))])
 async def remove_backup(backup_id: UUID, db: AsyncSession = Depends(get_db)):
     return await delete_backup(backup_id, db)
+
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+
+@router.get("/notifications", response_model=list[NotificationItem], dependencies=[Depends(require_permissions(USER_READ))])
+async def get_notifications(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    rows = await list_notifications_for_user(db, current_user.user_id)
+    return [
+        NotificationItem(
+            notification_id=n.notification_id,
+            type=n.type,
+            title=n.title,
+            message=n.message,
+            link=n.link,
+            role_target=n.role_target,
+            created_at=n.created_at,
+            is_read=(n.status == "read"),
+        )
+        for n in rows
+    ]
+
+
+@router.patch("/notifications/{notification_id}", response_model=NotificationItem, dependencies=[Depends(require_permissions(USER_READ))])
+async def mark_notification_read(
+    notification_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    n = await mark_notification_read_for_user(db, notification_id, current_user.user_id)
+    return NotificationItem(
+        notification_id=n.notification_id,
+        type=n.type,
+        title=n.title,
+        message=n.message,
+        link=n.link,
+        role_target=n.role_target,
+        created_at=n.created_at,
+        is_read=(n.status == "read"),
+    )
+
+
+# ── Dashboard Stats ──────────────────────────────────────────────────────────
+
+@router.get("/stats/onboarding", dependencies=[Depends(require_permissions(USER_READ))])
+async def get_onboarding_stats_endpoint(db: AsyncSession = Depends(get_db)):
+    return await get_onboarding_stats(db)
+
+
+@router.get("/stats/surveys", dependencies=[Depends(require_permissions(USER_READ))])
+async def get_survey_stats_endpoint(db: AsyncSession = Depends(get_db)):
+    return await get_survey_completion_stats(db)
+
 
 
 @router.get("/system-stats", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])

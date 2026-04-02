@@ -147,16 +147,16 @@ class ReportListItem(BaseModel):
 class NoteCreateRequest(BaseModel):
     text: str = Field(min_length=1)
     tag: Optional[str] = None
-    relates_to_submission_id: Optional[int] = None
-    relates_to_report_id: Optional[int] = None
+    relates_to_submission_id: Optional[UUID] = None
+    relates_to_report_id: Optional[UUID] = None
 
 
 class NoteItem(BaseModel):
-    note_id: int
-    participant_id: int
+    note_id: UUID
+    participant_id: UUID
     text: str
     tag: Optional[str] = None
-    created_at: date
+    created_at: datetime
 
 
 class NoteUpdateRequest(BaseModel):

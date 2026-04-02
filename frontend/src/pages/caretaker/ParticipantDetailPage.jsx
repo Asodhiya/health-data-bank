@@ -69,6 +69,15 @@ function transformFeedback(raw) {
   };
 }
 
+function transformNote(raw) {
+  return {
+    id: raw.note_id,
+    text: raw.text || "",
+    createdAt: raw.created_at ? raw.created_at.split("T")[0] : null,
+    tag: raw.tag || "check-in",
+  };
+}
+
 // ─── Shared Components ──────────────────────────────────────────────────────────
 
 function ChevronIcon({ direction = "down", className = "" }) {
@@ -673,8 +682,11 @@ function TrendsTab({ trends, loading: trendsLoading }) {
 
 // ─── Tab: Notes & Feedback (unchanged — already working) ────────────────────────
 
-function NotesTab({ participantId, participantName, feedbackItems }) {
-  const [notes, setNotes] = useState(feedbackItems);
+function NotesTab({ participantId, participantName, feedbackItems, noteItems }) {
+  const [notes, setNotes] = useState([...(feedbackItems || []), ...(noteItems || [])]);
+  const [generalFeedbackText, setGeneralFeedbackText] = useState("");
+  const [generalFeedbackSaving, setGeneralFeedbackSaving] = useState(false);
+  const [generalFeedbackSuccess, setGeneralFeedbackSuccess] = useState(false);
   const [newNote, setNewNote] = useState("");
   const [writeTag, setWriteTag] = useState("check-in");
   const [saving, setSaving] = useState(false);
@@ -682,12 +694,45 @@ function NotesTab({ participantId, participantName, feedbackItems }) {
   const [tagFilter, setTagFilter] = useState("all");
   const [sortDir, setSortDir] = useState("desc");
 
+  useEffect(() => {
+    setNotes([...(feedbackItems || []), ...(noteItems || [])]);
+  }, [feedbackItems, noteItems]);
+
+  async function handleSendGeneralFeedback() {
+    if (!generalFeedbackText.trim()) return;
+    setGeneralFeedbackSaving(true);
+    try {
+      await api.caretakerCreateGeneralFeedback(participantId, generalFeedbackText.trim());
+      const createdAt = new Date().toISOString();
+      setNotes(prev => [{
+        id: `f${Date.now()}`,
+        text: generalFeedbackText.trim(),
+        createdAt,
+        tag: "feedback",
+        submissionId: null,
+      }, ...prev]);
+      setGeneralFeedbackSuccess(true);
+      setGeneralFeedbackText("");
+      setTimeout(() => setGeneralFeedbackSuccess(false), 3000);
+    } catch (err) {
+      console.warn("General feedback save failed:", err.message);
+    } finally {
+      setGeneralFeedbackSaving(false);
+    }
+  }
+
   async function handleSave() {
     if (!newNote.trim()) return;
     setSaving(true);
-    setNotes(prev => [{ id: `n${Date.now()}`, text: newNote.trim(), createdAt: new Date().toISOString().split("T")[0], tag: writeTag }, ...prev]);
-    setNewNote("");
-    setSaving(false);
+    try {
+      const created = await api.caretakerCreateNote(participantId, newNote.trim(), writeTag);
+      setNotes(prev => [transformNote(created), ...prev]);
+      setNewNote("");
+    } catch (err) {
+      console.warn("Note save failed:", err.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   const allTags = useMemo(() => {
@@ -720,6 +765,33 @@ function NotesTab({ participantId, participantName, feedbackItems }) {
   return (
     <div className="space-y-5">
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-3">
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">General Feedback</p>
+        <textarea
+          value={generalFeedbackText}
+          onChange={e => setGeneralFeedbackText(e.target.value)}
+          rows={3}
+          placeholder={`Write feedback for ${participantName} (not tied to a specific submission)...`}
+          className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 placeholder:text-slate-300 resize-none"
+        />
+        <div className="flex items-center justify-between gap-3">
+          {generalFeedbackSuccess && (
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              Feedback saved
+            </div>
+          )}
+          <div className="flex-1" />
+          <button
+            onClick={handleSendGeneralFeedback}
+            disabled={!generalFeedbackText.trim() || generalFeedbackSaving}
+            className="px-4 py-2 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+          >
+            {generalFeedbackSaving ? "Saving…" : "Send Feedback"}
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-3">
         <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">New Note</p>
         <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={3} placeholder={`Write a note about ${participantName}...`}
           className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 placeholder:text-slate-300 resize-none" />
@@ -735,7 +807,7 @@ function NotesTab({ participantId, participantName, feedbackItems }) {
         </div>
         <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          <p className="text-xs text-amber-700">Notes are saved locally in this session only and will not persist when you leave this page. Feedback left on individual submissions is saved to the server.</p>
+          <p className="text-xs text-amber-700">Notes and feedback are saved to the server and persist across sessions.</p>
         </div>
       </div>
 
@@ -743,7 +815,7 @@ function NotesTab({ participantId, participantName, feedbackItems }) {
         <EmptyPlaceholder
           icon="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
           title="No notes or feedback yet"
-          description="Start by writing a note above, or leave feedback on individual submissions from the Submissions tab."
+          description="Start by writing a note or sending general feedback above."
         />
       ) : (
         <>
@@ -815,6 +887,7 @@ export default function ParticipantDetailPage() {
   const [participant, setParticipant] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [feedbackItems, setFeedbackItems] = useState([]);
+  const [noteItems, setNoteItems] = useState([]);
   const [goals, setGoals] = useState([]);
   const [trends, setTrends] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -892,6 +965,14 @@ export default function ParticipantDetailPage() {
         setFeedbackItems(Array.isArray(fbData) ? fbData.map(transformFeedback) : []);
       } catch {
         setFeedbackItems([]);
+      }
+
+      // 7. Fetch saved caretaker notes
+      try {
+        const notesData = await api.caretakerListNotes(participantId);
+        setNoteItems(Array.isArray(notesData) ? notesData.map(transformNote) : []);
+      } catch {
+        setNoteItems([]);
       }
 
     } catch (err) {
@@ -1026,7 +1107,14 @@ export default function ParticipantDetailPage() {
       {activeTab === "submissions" && <SubmissionsTab submissions={submissions} participantId={p.id} participantName={`${p.firstName} ${p.lastName}`} />}
       {activeTab === "goals" && <GoalsTab goals={goals} loading={goalsLoading} />}
       {activeTab === "trends" && <TrendsTab trends={trends} loading={trendsLoading} />}
-      {activeTab === "notes" && <NotesTab participantId={p.id} participantName={`${p.firstName} ${p.lastName}`} feedbackItems={feedbackItems} />}
+      {activeTab === "notes" && (
+        <NotesTab
+          participantId={p.id}
+          participantName={`${p.firstName} ${p.lastName}`}
+          feedbackItems={feedbackItems}
+          noteItems={noteItems}
+        />
+      )}
     </div>
   );
 }

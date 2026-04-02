@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Health Data Bank - Audit Error Report</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --text: #1e293b;
+      --muted: #64748b;
+      --ok: #059669;
+      --warn: #d97706;
+      --err: #dc2626;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+    }
+    .wrap { max-width: 980px; margin: 0 auto; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 20px;
+      margin-bottom: 14px;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 0 0 10px; font-size: 18px; }
+    p { margin: 6px 0; color: var(--muted); }
+    .pill {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      margin-right: 8px;
+    }
+    .ok { color: var(--ok); background: #ecfdf5; }
+    .warn { color: var(--warn); background: #fffbeb; }
+    .err { color: var(--err); background: #fef2f2; }
+    ul { margin: 8px 0 0 18px; padding: 0; }
+    li { margin: 6px 0; }
+    .meta { font-size: 13px; color: var(--muted); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 14px;
+    }
+    th, td {
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      padding: 10px 8px;
+      vertical-align: top;
+    }
+    th { color: #334155; font-weight: 700; }
+    code {
+      background: #f1f5f9;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1px 6px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Audit Error Report</h1>
+      <p class="meta">Project: Health Data Bank</p>
+      <p class="meta">Generated: 2026-03-30</p>
+      <div style="margin-top: 10px;">
+        <span class="pill ok">44 Passed</span>
+        <span class="pill err">0 Failed</span>
+        <span class="pill warn">Warnings Present</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Error Summary</h2>
+      <p><strong>No blocking test errors were found</strong> in the requested audit scope.</p>
+      <ul>
+        <li>Participant goal update/log tests: passed</li>
+        <li>Security-critical audit logging tests: passed</li>
+        <li>Authentication endpoint tests: passed</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Warnings Observed</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Details</th>
+            <th>Severity</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Pydantic Deprecation</td>
+            <td>Class-based <code>Config</code> usage warnings in several schema files (migration path: <code>ConfigDict</code>).</td>
+            <td><span class="pill warn">Medium</span></td>
+          </tr>
+          <tr>
+            <td>Pytest Cache</td>
+            <td>Permission warning writing <code>.pytest_cache</code> on Windows environment.</td>
+            <td><span class="pill warn">Low</span></td>
+          </tr>
+          <tr>
+            <td>Test Collection Noise</td>
+            <td>FastAPI object collection warning in tests (non-blocking).</td>
+            <td><span class="pill warn">Low</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Residual Risk (Not Failures)</h2>
+      <ul>
+        <li>Route tests are dependency-mocked, not full DB integration tests.</li>
+        <li>No concurrency stress test for simultaneous goal updates/logging in this batch.</li>
+        <li>Audit assertions validate event calls but not persisted DB rows end-to-end.</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

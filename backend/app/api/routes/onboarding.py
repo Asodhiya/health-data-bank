@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 from app.db.session import get_db
 from app.core.dependency import check_current_user, require_permissions
@@ -101,7 +101,7 @@ async def submit_intake(
     profile_data = payload.profile.model_dump(exclude_none=True)
     if "dob" in profile_data and isinstance(profile_data["dob"], str):
         profile_data["dob"] = date.fromisoformat(profile_data["dob"])
-    profile_data["program_enrolled_at"] = datetime.now()
+    profile_data["program_enrolled_at"] = datetime.now(timezone.utc)
     if profile_data:
         await db.execute(
             update(ParticipantProfile)
@@ -128,7 +128,7 @@ async def submit_intake(
         form_id=form.form_id,
         participant_id=participant.participant_id,
         group_id=None,
-        submitted_at=datetime.now(),
+        submitted_at=datetime.now(timezone.utc),
     )
     db.add(submission)
     await db.flush()
@@ -160,7 +160,7 @@ async def submit_intake(
                 value_text=val_text,
                 value_number=val_num,
                 value_json=val_json,
-                observed_at=datetime.now(),
+                observed_at=datetime.now(timezone.utc),
             ))
 
     await db.commit()

@@ -86,6 +86,7 @@ class UserListItem(BaseModel):
     phone: Optional[str] = None
     role: Optional[str] = None
     status: bool
+    locked_until: Optional[datetime] = None
     joined_at: Optional[datetime] = None
     group_id: Optional[UUID] = None
     group: Optional[str] = None
@@ -93,6 +94,8 @@ class UserListItem(BaseModel):
     caretaker: Optional[str] = None
     dob: Optional[date] = None
     gender: Optional[str] = None
+    anonymized_from: Optional[str] = None
+    self_deactivated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -107,6 +110,18 @@ class AdminUserUpdate(BaseModel):
 
 class UserStatusUpdate(BaseModel):
     status: str  # "active" | "inactive"
+
+
+class UserReactivateRequest(BaseModel):
+    email: Optional[str] = None
+
+
+class UserDeleteRequest(BaseModel):
+    mode: str = "anonymize"  # "anonymize" | "delete" | "permanent"
+
+
+class MoveParticipantRequest(BaseModel):
+    group_id: UUID
 
 
 # ── Invite Management schemas ────────────────────────────────────────────────
@@ -138,3 +153,4 @@ class BackupListItem(BaseModel):
 
     class Config:
         from_attributes = True
+

@@ -3,21 +3,24 @@
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, insert, text, delete as sa_delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy import TIMESTAMP, Date
 from uuid import UUID
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
 import uuid as uuid_module
 import hashlib
 import json
+import os
 
 from app.db.models import (
     AdminProfile, AuditLog, Backup, CaretakerFeedback, CaretakerProfile,
     DataElement, Device, FieldElementMap, FieldOption, FormDeployment,
     FormField, FormSubmission, GoalTemplate, Group, GroupMember,
     HealthDataPoint, HealthGoal, MFAChallenge, MFAMethod, Notification,
+    ParticipantConsent, ConsentFormTemplate, BackgroundInfoTemplate,
     ParticipantProfile, Permission, Report, ReportFile,
     Reminder, ResearcherProfile, RestoreEvent, Role, RolePermission, Session,
     SignupInvite, SubmissionAnswer, SurveyForm, User, UserRole,
@@ -33,9 +36,13 @@ from app.schemas.admin_schema import (
     UserListItem,
     InviteListItem,
     BackupListItem,
+    UserReactivateRequest,
 )
-from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem
+from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem, GroupUpdateRequest
+from app.db.queries.Queries import CaretakersQuery, ParticipantQuery
 from typing import List
+from app.core.security import generate_reset_token, hash_reset_token, reset_token_expiry
+from app.services.email_sender import send_reset_email
 
 # ── Backup helpers ─────────────────────────────────────────────────────────────
 
@@ -44,22 +51,25 @@ TABLE_ORDER = [
     ("roles",               Role),
     ("permissions",         Permission),
     ("users",               User),
-    ("signup_invites",      SignupInvite),
     ("user_roles",          UserRole),
     ("role_permissions",    RolePermission),
     ("devices",             Device),
     ("sessions",            Session),
     ("mfa_methods",         MFAMethod),
     ("mfa_challenges",      MFAChallenge),
+    ("consent_form_template", ConsentFormTemplate),
+    ("background_info_template", BackgroundInfoTemplate),
     ("participant_profile", ParticipantProfile),
+    ("participant_consent", ParticipantConsent),
     ("caretaker_profile",   CaretakerProfile),
     ("researcher_profile",  ResearcherProfile),
     ("admin_profile",       AdminProfile),
+    ("groups",              Group),
+    ("signup_invites",      SignupInvite),
     ("data_elements",       DataElement),
     ("survey_forms",        SurveyForm),
     ("form_fields",         FormField),
     ("field_options",       FieldOption),
-    ("groups",              Group),
     ("group_members",       GroupMember),
     ("field_element_map",   FieldElementMap),
     ("form_deployments",    FormDeployment),
@@ -233,25 +243,86 @@ async def delete_group(
     group_name = group.name
 
     members_result = await db.execute(
-        select(GroupMember.participant_id).where(GroupMember.group_id == group_id)
+        select(GroupMember.participant_id)
+        .where(GroupMember.group_id == group_id)
+        .where(GroupMember.left_at == None)
     )
     ungrouped = [str(row[0]) for row in members_result.all()]
 
-    await db.execute(
-        update(FormDeployment).where(FormDeployment.group_id == group_id).values(group_id=None)
-    )
-    await db.execute(
-        update(FormSubmission).where(FormSubmission.group_id == group_id).values(group_id=None)
-    )
+    try:
+        # Some DBs have form_deployments.group_id as NOT NULL.
+        # Deleting deployments is the correct behavior for a deleted group:
+        # the group no longer has active deployments, while participant submissions remain preserved.
+        await db.execute(
+            sa_delete(FormDeployment).where(FormDeployment.group_id == group_id)
+        )
+        await db.execute(
+            update(FormSubmission).where(FormSubmission.group_id == group_id).values(group_id=None)
+        )
+        await db.execute(
+            update(Report).where(Report.group_id == group_id).values(group_id=None)
+        )
 
-    await db.delete(group)
-    await db.commit()
+        await db.delete(group)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Group cannot be deleted because it is still referenced by related records.",
+        )
 
     return DeleteGroupResponse(
         group_id=group_id,
         message=f"Group '{group_name}' has been deleted.",
         ungrouped_participants=ungrouped,
     )
+
+
+async def update_group(group_id: UUID, payload: GroupUpdateRequest, db: AsyncSession) -> GroupItem:
+    """Rename or update the description of a group."""
+    group = await db.scalar(select(Group).where(Group.group_id == group_id))
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if payload.name is not None:
+        group.name = payload.name
+    if payload.description is not None:
+        group.description = payload.description
+    await db.commit()
+    await db.refresh(group)
+    return GroupItem(
+        group_id=group.group_id,
+        name=group.name,
+        description=group.description,
+        caretaker_id=group.caretaker_id,
+    )
+
+
+async def move_participant_group(user_id: UUID, new_group_id: UUID, db: AsyncSession) -> dict:
+    """Move a participant to a new group — closes current membership and opens a new one."""
+    participant = await db.scalar(
+        select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
+    )
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    group = await db.scalar(select(Group).where(Group.group_id == new_group_id))
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    # Close current active membership
+    await db.execute(
+        update(GroupMember)
+        .where(GroupMember.participant_id == participant.participant_id)
+        .where(GroupMember.left_at == None)
+        .values(left_at=datetime.now(timezone.utc))
+    )
+
+    # Open new membership
+    db.add(GroupMember(group_id=new_group_id, participant_id=participant.participant_id))
+    await db.commit()
+
+    return {"detail": f"Participant moved to '{group.name}'"}
 
 
 async def unassign_caretaker_from_group(
@@ -283,7 +354,7 @@ async def backup_database(created_by: UUID, db: AsyncSession) -> tuple[str, str]
     Returns (json_content, snapshot_name).
     """
 
-    snapshot_name = f"backup_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+    snapshot_name = f"backup_{datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M-%S')}"
     tables = {}
     row_counts = {}
 
@@ -296,7 +367,7 @@ async def backup_database(created_by: UUID, db: AsyncSession) -> tuple[str, str]
 
     data = {
         "snapshot_name": snapshot_name,
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "table_row_counts": row_counts,
         "tables": tables,
     }
@@ -311,7 +382,11 @@ async def backup_database(created_by: UUID, db: AsyncSession) -> tuple[str, str]
     return content, snapshot_name
 
 
-async def restore_database(raw_content: bytes, db: AsyncSession) -> RestoreResponse:
+async def restore_database(
+    raw_content: bytes,
+    db: AsyncSession,
+    restored_by: UUID | None = None,
+) -> RestoreResponse:
     """Verify checksum, wipe all tables, and restore from a backup JSON file."""
 
     # Normalize line endings before hashing — prevents mismatch if file was
@@ -339,9 +414,8 @@ async def restore_database(raw_content: bytes, db: AsyncSession) -> RestoreRespo
 
     # Everything below runs in a single transaction.
     # If any insert fails, the truncate is also rolled back — DB stays intact.
-    await db.execute(text(
-        "TRUNCATE TABLE roles, permissions, users, data_elements RESTART IDENTITY CASCADE"
-    ))
+    managed_tables = ", ".join(name for name, _ in TABLE_ORDER)
+    await db.execute(text(f"TRUNCATE TABLE {managed_tables} RESTART IDENTITY CASCADE"))
 
     # Re-insert in dependency order
     for table_name, model_class in TABLE_ORDER:
@@ -358,7 +432,7 @@ async def restore_database(raw_content: bytes, db: AsyncSession) -> RestoreRespo
 
     # restored_by is set to None — the restoring admin may not exist in the backup
     restore_record = RestoreEvent(
-        restored_by=None,
+        restored_by=restored_by,
         notes=f"Restored from snapshot: {snapshot_name}",
     )
     db.add(restore_record)
@@ -376,6 +450,21 @@ async def restore_database(raw_content: bytes, db: AsyncSession) -> RestoreRespo
 async def list_users(db: AsyncSession) -> list[UserListItem]:
     """Return all users with their role, group, and caretaker info."""
     CaretakerUser = aliased(User)
+    self_deactivated_logs = (
+        await db.execute(
+            select(AuditLog.entity_id, AuditLog.details, AuditLog.created_at)
+            .where(AuditLog.action == "USER_SELF_DEACTIVATED")
+            .where(AuditLog.entity_type == "user")
+            .order_by(AuditLog.created_at.desc())
+        )
+    ).all()
+    deactivation_map: dict[UUID, dict] = {}
+    for entity_id, details, created_at in self_deactivated_logs:
+        if entity_id and entity_id not in deactivation_map:
+            deactivation_map[entity_id] = {
+                "details": details or {},
+                "created_at": created_at,
+            }
 
     result = await db.execute(
         select(
@@ -385,6 +474,7 @@ async def list_users(db: AsyncSession) -> list[UserListItem]:
             User.email,
             User.phone,
             User.status,
+            User.locked_until,
             User.created_at,
             Role.role_name,
             Group.group_id,
@@ -397,7 +487,7 @@ async def list_users(db: AsyncSession) -> list[UserListItem]:
         .outerjoin(UserRole, UserRole.user_id == User.user_id)
         .outerjoin(Role, Role.role_id == UserRole.role_id)
         .outerjoin(ParticipantProfile, ParticipantProfile.user_id == User.user_id)
-        .outerjoin(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+        .outerjoin(GroupMember, (GroupMember.participant_id == ParticipantProfile.participant_id) & (GroupMember.left_at == None))
         .outerjoin(Group, Group.group_id == GroupMember.group_id)
         .outerjoin(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
         .outerjoin(CaretakerUser, CaretakerUser.user_id == CaretakerProfile.user_id)
@@ -414,6 +504,7 @@ async def list_users(db: AsyncSession) -> list[UserListItem]:
             phone=row.phone,
             role=row.role_name,
             status=row.status,
+            locked_until=row.locked_until,
             joined_at=row.created_at,
             group_id=row.group_id,
             group=row.group_name,
@@ -421,9 +512,189 @@ async def list_users(db: AsyncSession) -> list[UserListItem]:
             caretaker=row.caretaker_name.strip() if row.caretaker_name else None,
             dob=row.dob,
             gender=row.gender,
+            anonymized_from=(deactivation_map.get(row.user_id, {}).get("details", {}) or {}).get("original_email"),
+            self_deactivated_at=deactivation_map.get(row.user_id, {}).get("created_at"),
         )
         for row in rows
     ]
+
+
+async def get_onboarding_stats(db: AsyncSession) -> dict:
+    """Return participant onboarding funnel counts."""
+    total_participants = (
+        await db.execute(select(func.count()).select_from(ParticipantProfile))
+    ).scalar_one()
+
+    status_rows = (
+        await db.execute(
+            select(ParticipantProfile.onboarding_status, func.count())
+            .group_by(ParticipantProfile.onboarding_status)
+        )
+    ).all()
+    status_map = {
+        (status or "PENDING").upper(): count
+        for status, count in status_rows
+    }
+
+    intake_form_id = await db.scalar(
+        select(SurveyForm.form_id).where(SurveyForm.title == "Intake Form")
+    )
+    intake_submitted = 0
+    if intake_form_id:
+        intake_submitted = (
+            await db.execute(
+                select(func.count(func.distinct(FormSubmission.participant_id)))
+                .where(FormSubmission.form_id == intake_form_id)
+                .where(FormSubmission.submitted_at.is_not(None))
+                .where(FormSubmission.participant_id.is_not(None))
+            )
+        ).scalar_one()
+
+    return {
+        "total_participants": int(total_participants or 0),
+        "pending": int(status_map.get("PENDING", 0)),
+        "background_read": int(status_map.get("BACKGROUND_READ", 0)),
+        "consent_given": int(status_map.get("CONSENT_GIVEN", 0)),
+        "intake_submitted": int(intake_submitted or 0),
+        "complete": int(status_map.get("COMPLETED", 0) + status_map.get("COMPLETE", 0)),
+    }
+
+
+async def get_survey_completion_stats(db: AsyncSession) -> dict:
+    """Return daily participant survey fill-rate and recent fill frequency metrics."""
+    now_utc = datetime.now(timezone.utc)
+    day_start = datetime(now_utc.year, now_utc.month, now_utc.day, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+    seven_days_ago = day_start - timedelta(days=6)
+
+    deployments = (
+        await db.execute(
+            select(
+                FormDeployment.form_id,
+                FormDeployment.group_id,
+                Group.name.label("group_name"),
+            )
+            .join(Group, Group.group_id == FormDeployment.group_id, isouter=True)
+            .where(FormDeployment.group_id.is_not(None))
+            .where(FormDeployment.revoked_at.is_(None))
+        )
+    ).all()
+
+    active_members = (
+        await db.execute(
+            select(GroupMember.group_id, GroupMember.participant_id)
+            .where(GroupMember.left_at.is_(None))
+        )
+    ).all()
+    participants_by_group = {}
+    for row in active_members:
+        gid = row.group_id
+        if gid not in participants_by_group:
+            participants_by_group[gid] = set()
+        participants_by_group[gid].add(row.participant_id)
+
+    submitted_today_rows = (
+        await db.execute(
+            select(
+                FormSubmission.group_id,
+                FormSubmission.form_id,
+                FormSubmission.participant_id,
+            )
+            .where(FormSubmission.group_id.is_not(None))
+            .where(FormSubmission.participant_id.is_not(None))
+            .where(FormSubmission.submitted_at.is_not(None))
+            .where(FormSubmission.submitted_at >= day_start)
+            .where(FormSubmission.submitted_at < day_end)
+            .distinct()
+        )
+    ).all()
+    submitted_today_keyset = {
+        (row.group_id, row.form_id, row.participant_id) for row in submitted_today_rows
+    }
+
+    submitted_7d_rows = (
+        await db.execute(
+            select(
+                FormSubmission.group_id,
+                FormSubmission.form_id,
+                FormSubmission.participant_id,
+            )
+            .where(FormSubmission.group_id.is_not(None))
+            .where(FormSubmission.participant_id.is_not(None))
+            .where(FormSubmission.submitted_at.is_not(None))
+            .where(FormSubmission.submitted_at >= seven_days_ago)
+            .where(FormSubmission.submitted_at < day_end)
+        )
+    ).all()
+
+    group_stats = {}
+    overall_expected_today = 0
+    overall_completed_today = 0
+
+    for dep in deployments:
+        gid = dep.group_id
+        group_id = str(gid)
+        group_name = dep.group_name or "Unknown Group"
+        participants = participants_by_group.get(gid, set())
+
+        if group_id not in group_stats:
+            group_stats[group_id] = {
+                "group_id": group_id,
+                "group_name": group_name,
+                "active_deployments": 0,
+                "active_participants": len(participants),
+                "expected_today": 0,
+                "completed_today": 0,
+                "submissions_last_7d": 0,
+            }
+
+        group_stats[group_id]["active_deployments"] += 1
+        expected_for_deployment = len(participants)
+        group_stats[group_id]["expected_today"] += expected_for_deployment
+        overall_expected_today += expected_for_deployment
+
+        completed_for_deployment = 0
+        for pid in participants:
+            if (gid, dep.form_id, pid) in submitted_today_keyset:
+                completed_for_deployment += 1
+        group_stats[group_id]["completed_today"] += completed_for_deployment
+        overall_completed_today += completed_for_deployment
+
+    for row in submitted_7d_rows:
+        gid = row.group_id
+        group_id = str(gid)
+        if group_id in group_stats:
+            group_stats[group_id]["submissions_last_7d"] += 1
+
+    per_group = []
+    for item in group_stats.values():
+        expected_today = item["expected_today"]
+        completed_today = item["completed_today"]
+        daily_rate = (completed_today / expected_today * 100.0) if expected_today else 0.0
+        avg_daily_submissions_7d = item["submissions_last_7d"] / 7.0
+        per_group.append(
+            {
+                **item,
+                "daily_completion_rate": round(daily_rate, 1),
+                "avg_daily_submissions_7d": round(avg_daily_submissions_7d, 1),
+            }
+        )
+
+    per_group.sort(key=lambda x: x["group_name"].lower())
+    overall_daily_rate = (overall_completed_today / overall_expected_today * 100.0) if overall_expected_today else 0.0
+    overall_submissions_7d = sum(g["submissions_last_7d"] for g in per_group)
+    overall_avg_daily_submissions_7d = overall_submissions_7d / 7.0
+
+    return {
+        "overall": {
+            "expected_today": overall_expected_today,
+            "completed_today": overall_completed_today,
+            "daily_completion_rate": round(overall_daily_rate, 1),
+            "submissions_last_7d": overall_submissions_7d,
+            "avg_daily_submissions_7d": round(overall_avg_daily_submissions_7d, 1),
+        },
+        "per_group": per_group,
+    }
 
 
 async def update_user(user_id: UUID, payload: AdminUserUpdate, db: AsyncSession) -> User:
@@ -468,18 +739,74 @@ async def update_user_status(user_id: UUID, status: str, actor_id: UUID, db: Asy
     return user
 
 
+async def reactivate_user_access(user_id: UUID, payload: UserReactivateRequest, actor_id: UUID, db: AsyncSession) -> dict:
+    """
+    Reactivate a user and send a password-reset link so they can access the account again.
+    For anonymized users, admin must provide a real email in payload.email.
+    """
+    user = await db.scalar(select(User).where(User.user_id == user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    candidate_email = (payload.email or "").strip().lower() if payload.email else None
+    current_email = (user.email or "").strip().lower()
+    is_anonymized_email = current_email.startswith("deleted_")
+
+    if is_anonymized_email and not candidate_email:
+        raise HTTPException(
+            status_code=400,
+            detail="An anonymized account requires a real email to reactivate.",
+        )
+
+    if candidate_email and candidate_email != current_email:
+        existing = await db.scalar(select(User).where(User.email == candidate_email))
+        if existing and existing.user_id != user.user_id:
+            raise HTTPException(status_code=409, detail="Email already in use")
+        user.email = candidate_email
+
+    user.status = True
+    raw_token = generate_reset_token()
+    user.reset_token_hash = hash_reset_token(raw_token)
+    user.reset_token_expires_at = reset_token_expiry(15)
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    await db.commit()
+
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    reset_link = f"{frontend_url}/reset-password?token={raw_token}"
+    send_reset_email(user.email, reset_link)
+
+    from app.services.audit_service import write_audit_log
+    await write_audit_log(
+        db,
+        action="USER_REACTIVATED",
+        actor_user_id=actor_id,
+        entity_type="user",
+        entity_id=user_id,
+        details={"email": user.email},
+    )
+
+    return {
+        "detail": "User reactivated. Password reset email sent.",
+        "email": user.email,
+    }
+
+
 async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession) -> dict:
     """Delete or anonymize a user. mode='anonymize' or mode='delete'."""
     user = await db.scalar(select(User).where(User.user_id == user_id))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    if user.status is not False:
+        raise HTTPException(status_code=400, detail="User must be deactivated before deletion.")
+
     from app.services.audit_service import write_audit_log
 
     if mode == "anonymize":
-        user.first_name = "Anonymized"
-        user.last_name = "User"
-        user.email = f"anonymized_{user_id}@deleted.local"
+        user.first_name = "Deleted"
+        user.last_name = f"User #{str(user_id)[:8]}"
+        user.email = f"deleted_{user_id}@deleted.local"
         user.phone = None
         user.Address = None
         user.status = False
@@ -494,7 +821,7 @@ async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession
         )
         return {"detail": "User anonymized successfully"}
 
-    elif mode == "delete":
+    elif mode in ("delete", "permanent"):
         await db.delete(user)
         await db.commit()
         await write_audit_log(
@@ -598,5 +925,89 @@ async def delete_backup(backup_id: UUID, db: AsyncSession) -> dict:
     await db.delete(backup)
     await db.commit()
     return {"detail": "Backup deleted successfully"}
+
+
+# ── Participant Data (for admin drawer) ────────────────────────────────────────
+
+async def get_user_submissions(user_id: UUID, db: AsyncSession) -> list:
+    """Return form submissions for a participant, looked up by user_id."""
+    participant = await db.scalar(
+        select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
+    )
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    rows = await CaretakersQuery(db).get_participant_submissions(participant.participant_id)
+    return [
+        {
+            "id": str(row.submission_id),
+            "form_name": row.form_name,
+            "submitted_at": row.submitted_at.isoformat() if row.submitted_at else None,
+            "status": "submitted",
+            "answers": [],
+        }
+        for row in rows
+    ]
+
+
+async def get_user_goals(user_id: UUID, db: AsyncSession) -> list:
+    """Return health goals for a participant, looked up by user_id."""
+    participant = await db.scalar(
+        select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
+    )
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    goals = await ParticipantQuery(db).get_goals(participant.participant_id)
+
+    result = []
+    for g in goals:
+        element = g.get("element")
+        unit = element.unit if element else None
+        target_value = g.get("target_value")
+        target_str = (
+            f"{target_value} {unit}" if target_value is not None and unit
+            else str(target_value) if target_value is not None
+            else "—"
+        )
+
+        # Recent log entries (last 10)
+        log_rows = (await db.execute(
+            select(HealthDataPoint.observed_at, HealthDataPoint.value_number, HealthDataPoint.value_text)
+            .where(HealthDataPoint.participant_id == participant.participant_id)
+            .where(HealthDataPoint.element_id == g.get("element_id"))
+            .where(HealthDataPoint.source_type == "goal")
+            .order_by(HealthDataPoint.observed_at.desc())
+            .limit(10)
+        )).all()
+
+        result.append({
+            "id": str(g["goal_id"]),
+            "name": g.get("name"),
+            "status": g.get("status", "active"),
+            "target_value": float(target_value) if target_value is not None else 0,
+            "current": g.get("current_value"),
+            "target": target_str,
+            "unit": unit,
+            "is_completed": bool(g.get("is_completed", False)),
+            "completion_context": g.get("completion_context", {}),
+            "goal_mode": g.get("goal_mode"),
+            "progress_mode": g.get("progress_mode"),
+            "direction": g.get("direction"),
+            "window": g.get("window"),
+            "logs": [
+                {
+                    "date": str(r.observed_at)[:10] if r.observed_at else None,
+                    "value": (
+                        float(r.value_number)
+                        if r.value_number is not None
+                        else r.value_text
+                    ),
+                }
+                for r in log_rows
+            ],
+        })
+
+    return result
 
 

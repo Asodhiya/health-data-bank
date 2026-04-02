@@ -3,13 +3,12 @@ import { useState, useEffect } from "react";
 import api from "../utils/axiosInstance";
 import { api as authApi } from "../services/api";
 import { PARTICIPANT_NAV } from "../config/navigation";
+import NotificationBell from "../components/NotificationBell";
 
 export default function NoSidebarDashboardLayout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
-  const role = "Participant"; // Hardcoded since this layout is exclusive to them
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  const [isNotificationMenuOpen, setIsNotificationMenuOpen] = useState(false);
   const navigate = useNavigate();
 
   const [user, setUser] = useState(null);
@@ -100,71 +99,7 @@ export default function NoSidebarDashboardLayout() {
         </nav>
         {/* RIGHT: Notifications & Profile Settings */}
         <div className="flex items-center gap-4 relative">
-          {/* 1. Notifications Dropdown Container */}
-          <div className="relative">
-            {/* The Bell Button */}
-            <button
-              onClick={() => {
-                setIsNotificationMenuOpen(!isNotificationMenuOpen);
-                setIsProfileMenuOpen(false); // Close profile if open
-              }}
-              className="relative w-8 h-8 rounded-full bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 flex items-center justify-center transition-colors"
-            >
-              <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-rose-500 rounded-full border-2 border-white"></span>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                className="w-5 h-5"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M5.25 9a6.75 6.75 0 0113.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 01-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 11-7.48 0 24.585 24.585 0 01-4.831-1.244.75.75 0 01-.298-1.205A8.217 8.217 0 005.25 9.75V9zm4.502 8.9a2.25 2.25 0 104.496 0 25.057 25.057 0 01-4.496 0z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </button>
-
-            {/* The Notifications Dropdown Menu */}
-            {isNotificationMenuOpen && (
-              <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-slate-100 z-50 overflow-hidden">
-                {/* Header */}
-                <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                  <h3 className="font-bold text-slate-800">Notifications</h3>
-                  <span className="text-xs bg-rose-100 text-rose-600 font-bold px-2 py-0.5 rounded-full">
-                    2 New
-                  </span>
-                </div>
-
-                {/* Notification List */}
-                <div className="max-h-80 overflow-y-auto">
-                  <div className="px-4 py-3 hover:bg-slate-50 border-b border-slate-50 cursor-pointer transition-colors">
-                    <p className="text-sm text-slate-800 font-medium">
-                      Time for your daily survey!
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">2 hours ago</p>
-                  </div>
-                  <div className="px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors">
-                    <p className="text-sm text-slate-800 font-medium">
-                      You hit your water goal! 💧
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">Yesterday</p>
-                  </div>
-                </div>
-
-                {/* Footer Link to Full Page */}
-                <div className="border-t border-slate-100">
-                  <Link
-                    to="/participant/messages"
-                    onClick={() => setIsNotificationMenuOpen(false)}
-                    className="block text-center px-4 py-3 text-sm text-blue-600 hover:text-blue-700 font-bold hover:bg-slate-50 transition-colors"
-                  >
-                    View all notifications
-                  </Link>
-                </div>
-              </div>
-            )}
-          </div>
+          <NotificationBell role="participant" />
 
           {/* 2. Profile Dropdown Container */}
           <div className="relative">
@@ -172,7 +107,6 @@ export default function NoSidebarDashboardLayout() {
             <button
               onClick={() => {
                 setIsProfileMenuOpen(!isProfileMenuOpen);
-                setIsNotificationMenuOpen(false); // Close notifications if open
               }}
               className="w-8 h-8 rounded-full bg-green-600 hover:bg-green-700 text-white flex items-center justify-center font-bold transition-colors"
             >

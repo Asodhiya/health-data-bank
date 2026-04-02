@@ -8,12 +8,19 @@ pre-loaded profile — no extra DB lookup required.
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import User
+from app.db.models import User, GroupMember, Group, CaretakerProfile
+from sqlalchemy import select
 from app.db.session import get_db
 from app.core.dependency import require_permissions
 from app.core.permissions import GOAL_VIEW_ALL, GOAL_ADD, GOAL_EDIT, GOAL_DELETE
 from app.db.queries.Queries import ParticipantQuery, GoalTemplateQuery, get_participant_id
 from app.schemas.schemas import HealthGoalUpdate, GoalProgressLog
+from app.schemas.notification_schema import NotificationItem
+from app.services.notification_service import (
+    list_notifications_for_user,
+    mark_notification_read_for_user,
+    create_notification,
+)
 import uuid
 
 router = APIRouter()
@@ -136,9 +143,77 @@ async def log_goal_progress(
     """
     Log a progress entry against a health goal.
 
-    Creates a HealthDataPoint with source_type='manual' for the goal's element.
-    Use this to record actual observations, e.g. 'drank 1 glass of water'.
+    Creates/updates a HealthDataPoint with source_type='goal' for the goal's element.
+    Use this to record actual progress, e.g. completed reps or journal text for today.
     observed_at defaults to now if not provided.
     """
     participant_id = get_participant_id(current_user)
-    return await ParticipantQuery(db).log_progress(goal_id, participant_id, payload)
+    data_point = await ParticipantQuery(db).log_progress(goal_id, participant_id, payload)
+
+    progress = await ParticipantQuery(db).get_goal_progress(goal_id, participant_id)
+    if progress.get("completed"):
+        caretaker_user_id = await db.scalar(
+            select(CaretakerProfile.user_id)
+            .join(Group, Group.caretaker_id == CaretakerProfile.caretaker_id)
+            .join(
+                GroupMember,
+                (GroupMember.group_id == Group.group_id)
+                & (GroupMember.participant_id == participant_id)
+                & (GroupMember.left_at.is_(None)),
+            )
+            .limit(1)
+        )
+        if caretaker_user_id:
+            await create_notification(
+                db=db,
+                user_id=caretaker_user_id,
+                notification_type="goal",
+                title="Participant completed a goal",
+                message="A participant in your group completed a goal target.",
+                link="/caretaker/participants",
+                role_target="caretaker",
+                source_type="goal_completion",
+                source_id=goal_id,
+            )
+
+    return data_point
+
+
+@router.get("/notifications", response_model=list[NotificationItem])
+async def list_notifications(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
+):
+    rows = await list_notifications_for_user(db, current_user.user_id)
+    return [
+        NotificationItem(
+            notification_id=n.notification_id,
+            type=n.type,
+            title=n.title,
+            message=n.message,
+            link=n.link,
+            role_target=n.role_target,
+            created_at=n.created_at,
+            is_read=(n.status == "read"),
+        )
+        for n in rows
+    ]
+
+
+@router.patch("/notifications/{notification_id}", response_model=NotificationItem)
+async def mark_notification_read(
+    notification_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
+):
+    n = await mark_notification_read_for_user(db, notification_id, current_user.user_id)
+    return NotificationItem(
+        notification_id=n.notification_id,
+        type=n.type,
+        title=n.title,
+        message=n.message,
+        link=n.link,
+        role_target=n.role_target,
+        created_at=n.created_at,
+        is_read=(n.status == "read"),
+    )

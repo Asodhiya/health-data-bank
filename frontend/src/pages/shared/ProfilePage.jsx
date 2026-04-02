@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 
 /*
@@ -839,7 +839,25 @@ function NotificationsSection({ role }) {
   );
 }
 
-function DangerZoneSection() {
+function DangerZoneSection({ role, onDeactivate }) {
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const selfDeleteAllowed = role === 'participant' || role === 'researcher';
+
+  async function handleDeactivate() {
+    if (!selfDeleteAllowed || loading) return;
+    setLoading(true);
+    setMessage('');
+    try {
+      await onDeactivate?.();
+      setMessage('Account deactivated successfully. Redirecting to login...');
+    } catch (err) {
+      setMessage(err?.message || 'Could not deactivate account.');
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm border border-rose-200 mb-5">
       <div className="flex items-center gap-2 mb-3">
@@ -847,12 +865,20 @@ function DangerZoneSection() {
         <h2 className="text-base font-bold text-rose-600">Danger Zone</h2>
       </div>
       <p className="text-sm text-slate-500 mb-4">
-        Deactivating your account will remove access to all health data and reports.
-        This action requires administrator approval and may not be reversible.
+        Deactivating your account will anonymize your identity and disable login access.
+        Your research/survey records remain in the system for data continuity.
       </p>
-      <button className="px-4 py-2.5 text-sm font-medium text-rose-600 border border-rose-200 rounded-xl hover:bg-rose-50 transition-colors">
-        Request Account Deactivation
+      <button
+        onClick={handleDeactivate}
+        disabled={!selfDeleteAllowed || loading}
+        className="px-4 py-2.5 text-sm font-medium text-rose-600 border border-rose-200 rounded-xl hover:bg-rose-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {loading ? 'Deactivating…' : 'Deactivate & Anonymize Account'}
       </button>
+      {!selfDeleteAllowed && (
+        <p className="text-xs text-slate-400 mt-2">Self-deactivation is available for participant and researcher accounts only.</p>
+      )}
+      {!!message && <p className="text-xs text-slate-500 mt-2">{message}</p>}
     </div>
   );
 }
@@ -864,6 +890,7 @@ function DangerZoneSection() {
    ══════════════════════════════════════════════ */
 export default function ProfilePage({ role = 'participant' }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [tab, setTab] = useState(location.hash === '#settings' ? 'settings' : 'profile');
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState({ ...EMPTY_PROFILE });
@@ -1006,9 +1033,14 @@ export default function ProfilePage({ role = 'participant' }) {
           <ChangePasswordSection />
           <SecuritySection />
           <NotificationsSection role={role} />
-          <DangerZoneSection />
+          <DangerZoneSection role={role} onDeactivate={handleSelfDeactivate} />
         </>
       )}
     </div>
   );
 }
+  const handleSelfDeactivate = async () => {
+    await api.selfDeactivateAccount();
+    await api.logout();
+    navigate('/login');
+  };

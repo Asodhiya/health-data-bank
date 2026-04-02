@@ -37,6 +37,8 @@ function fmtTime(d) { if (!d) return "—"; return new Date(d).toLocaleDateStrin
 function timeUntil(iso) { const ms = new Date(iso) - Date.now(); if (ms < 0) return "Expired"; const h = Math.floor(ms / 3600000); if (h < 1) return `${Math.floor(ms / 60000)}m`; if (h < 24) return `${h}h`; return `${Math.floor(h / 24)}d`; }
 
 // ── Backend → Frontend user transform ────────────────────────────────────────
+// Backend UserListItem uses snake_case + boolean status.
+// Frontend components use camelCase + string status ("active" / "inactive").
 function transformUser(u) {
   return {
     id: u.id,
@@ -53,6 +55,8 @@ function transformUser(u) {
     caretaker: u.caretaker || null,
     dob: u.dob || null,
     gender: u.gender || null,
+    anonymizedFrom: u.anonymized_from || null,
+    selfDeactivatedAt: u.self_deactivated_at || null,
   };
 }
 

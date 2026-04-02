@@ -10,8 +10,12 @@ from typing import List, Optional
 import time
 import asyncio
 
-from app.db.models import SurveyForm, FormField, FieldOption, FormDeployment, Group, FieldElementMap, FormSubmission
+from app.db.models import (
+    SurveyForm, FormField, FieldOption, FormDeployment, Group, FieldElementMap,
+    FormSubmission, GroupMember, ParticipantProfile
+)
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
+from app.services.notification_service import create_notifications_bulk
 
 # Simple in-memory cache for the forms list
 _forms_cache: dict = {"data": None, "ts": 0.0}
@@ -253,6 +257,28 @@ async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: 
         deployed_by=user_id
     )
     db.add(deployment)
+    await db.flush()
+
+    participant_user_rows = await db.execute(
+        select(ParticipantProfile.user_id)
+        .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+        .where(GroupMember.group_id == group_id)
+        .where(GroupMember.left_at.is_(None))
+    )
+    participant_user_ids = [row[0] for row in participant_user_rows.all()]
+    if participant_user_ids:
+        await create_notifications_bulk(
+            db=db,
+            user_ids=participant_user_ids,
+            notification_type="submission",
+            title="New survey available",
+            message=f"A new survey '{form.title}' is now assigned to your group.",
+            link="/participant/survey",
+            role_target="participant",
+            source_type="form_deployment",
+            source_id=deployment.deployment_id,
+            deployment_id=deployment.deployment_id,
+        )
 
     form.status = "PUBLISHED"
     await db.commit()

@@ -10,6 +10,7 @@ from app.schemas.data_element_schema import DataElementCreate
 from app.services.participant_survey_service import _get_deployed_forms
 from datetime import date, datetime, timezone, timedelta, time
 from app.db.models import FormField
+from types import SimpleNamespace
 
 def get_participant_id(current_user: User) -> uuid.UUID:
     """
@@ -119,6 +120,156 @@ class ParticipantQuery:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    @staticmethod
+    def _normalize_datatype(datatype: str | None) -> str:
+        normalized = (datatype or "number").strip().lower()
+        if normalized == "string":
+            return "text"
+        if normalized == "bool":
+            return "boolean"
+        if normalized in {"int", "integer", "float", "double", "decimal", "numeric"}:
+            return "number"
+        if normalized not in {"text", "number", "boolean"}:
+            return "number"
+        return normalized
+
+    @staticmethod
+    def _window_bounds(window: str | None, as_of: datetime | None = None):
+        current = as_of or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+
+        mode = (window or "daily").lower()
+        if mode == "none":
+            return None, None
+
+        if mode == "daily":
+            start = datetime.combine(current.date(), time.min).replace(tzinfo=timezone.utc)
+            end = start + timedelta(days=1)
+            return start, end
+
+        if mode == "weekly":
+            start_date = current.date() - timedelta(days=current.weekday())
+            start = datetime.combine(start_date, time.min).replace(tzinfo=timezone.utc)
+            end = start + timedelta(days=7)
+            return start, end
+
+        if mode == "monthly":
+            month_start_date = current.date().replace(day=1)
+            start = datetime.combine(month_start_date, time.min).replace(tzinfo=timezone.utc)
+            if month_start_date.month == 12:
+                next_month_date = month_start_date.replace(
+                    year=month_start_date.year + 1, month=1
+                )
+            else:
+                next_month_date = month_start_date.replace(month=month_start_date.month + 1)
+            end = datetime.combine(next_month_date, time.min).replace(tzinfo=timezone.utc)
+            return start, end
+
+        # Safe fallback.
+        start = datetime.combine(current.date(), time.min).replace(tzinfo=timezone.utc)
+        return start, start + timedelta(days=1)
+
+    @staticmethod
+    def _is_numeric_datatype(datatype: str | None) -> bool:
+        return ParticipantQuery._normalize_datatype(datatype) != "text"
+
+    @staticmethod
+    def _goal_completed(goal: HealthGoal, current_value) -> bool:
+        if goal.target_value is None or not isinstance(current_value, (int, float)):
+            return False
+
+        target = float(goal.target_value)
+        direction = (goal.direction or "at_least").lower()
+        if direction == "at_most":
+            return current_value <= target
+        return current_value >= target
+
+    async def _compute_goal_current_value(
+        self,
+        goal: HealthGoal,
+        datatype: str | None,
+        participant_id: uuid.UUID,
+        as_of: datetime | None = None,
+    ):
+        start, end = self._window_bounds(goal.window, as_of)
+
+        points_stmt = (
+            select(
+                HealthDataPoint.value_number.label("value_number"),
+                HealthDataPoint.value_text.label("value_text"),
+                HealthDataPoint.observed_at.label("observed_at"),
+            )
+            .where(HealthDataPoint.participant_id == participant_id)
+            .where(HealthDataPoint.element_id == goal.element_id)
+            .where(HealthDataPoint.source_type == "goal")
+        )
+        if start is not None:
+            points_stmt = points_stmt.where(HealthDataPoint.observed_at >= start)
+        if end is not None:
+            points_stmt = points_stmt.where(HealthDataPoint.observed_at < end)
+        points_sq = points_stmt.subquery()
+
+        progress_mode = (goal.progress_mode or "incremental").lower()
+        numeric = self._is_numeric_datatype(datatype)
+
+        if progress_mode == "incremental" and numeric:
+            total_result = await self.db.execute(
+                select(
+                    func.count(points_sq.c.value_number).label("n"),
+                    func.coalesce(func.sum(points_sq.c.value_number), 0).label("s"),
+                )
+            )
+            row = total_result.one_or_none()
+            if not row or row.n == 0:
+                return None
+            return float(row.s or 0)
+
+        latest_result = await self.db.execute(
+            select(points_sq.c.value_number, points_sq.c.value_text)
+            .order_by(points_sq.c.observed_at.desc())
+            .limit(1)
+        )
+        latest = latest_result.one_or_none()
+        if not latest:
+            return None
+
+        value_number, value_text = latest
+        if value_number is not None:
+            return float(value_number)
+        return value_text
+
+    async def _serialize_goal(
+        self,
+        goal: HealthGoal,
+        element: DataElement,
+        participant_id: uuid.UUID,
+        as_of: datetime | None = None,
+    ):
+        current_value = await self._compute_goal_current_value(
+            goal,
+            element.datatype,
+            participant_id,
+            as_of=as_of,
+        )
+        is_completed = self._goal_completed(goal, current_value)
+        window_start, window_end = self._window_bounds(goal.window, as_of)
+
+        return {
+            **goal.__dict__,
+            "name": element.label,
+            "element": element,
+            "current_value": current_value,
+            "is_completed": bool(is_completed),
+            "completion_context": {
+                "window": goal.window or "daily",
+                "progress_mode": goal.progress_mode or "incremental",
+                "direction": goal.direction or "at_least",
+                "window_start": window_start.isoformat() if window_start else None,
+                "window_end": window_end.isoformat() if window_end else None,
+            },
+        }
+
         
     async def get_goals(self, participant_id: uuid.UUID):
         result = await self.db.execute(
@@ -126,10 +277,12 @@ class ParticipantQuery:
             .join(DataElement, DataElement.element_id == HealthGoal.element_id)
             .where(HealthGoal.participant_id == participant_id)
         )
-        return [
-            {**goal.__dict__, "name": element.label, "element": element}
-            for goal, element in result.all()
+        rows = result.all()
+        goals = [
+            await self._serialize_goal(goal, element, participant_id)
+            for goal, element in rows
         ]
+        return goals
 
     async def get_goal(self, goal_id: uuid.UUID, participant_id: uuid.UUID):
         result = await self.db.execute(
@@ -144,19 +297,7 @@ class ParticipantQuery:
         if not row:
             return None
         goal, element = row
-        return {**goal.__dict__, "name": element.label, "element": element}
-    
-    def _goal_data_point(self, participant_id: uuid.UUID, goal: HealthGoal) -> HealthDataPoint:
-        """Create a HealthDataPoint snapshot representing the goal's target value."""
-        return HealthDataPoint(
-            participant_id=participant_id,
-            element_id=goal.element_id,
-            observed_at=datetime.now(timezone.utc),
-            source_type="goal",
-            source_submission_id=None,
-            source_field_id=None,
-            value_number=float(goal.target_value) if goal.target_value is not None else None,
-        )
+        return await self._serialize_goal(goal, element, participant_id)
 
     async def add_goal_from_template(self, participant_id: uuid.UUID, template_id: uuid.UUID, target_value: float | None = None):
         participants_goal = await self.get_goals(participant_id)
@@ -165,6 +306,18 @@ class ParticipantQuery:
         template = await self.db.get(GoalTemplate, template_id)
         if not template or not template.is_active:
             raise HTTPException(status_code=404, detail="Goal template not found")
+        existing_active = await self.db.execute(
+            select(HealthGoal.goal_id)
+            .where(HealthGoal.participant_id == participant_id)
+            .where(HealthGoal.element_id == template.element_id)
+            .where(HealthGoal.status == "active")
+            .limit(1)
+        )
+        if existing_active.scalar_one_or_none():
+            raise HTTPException(
+                status_code=409,
+                detail="An active goal for this metric already exists.",
+            )
 
         goal = HealthGoal(
             participant_id=participant_id,
@@ -178,8 +331,6 @@ class ParticipantQuery:
         except IntegrityError:
             raise HTTPException(status_code=409, detail="Goal already exists")
         await self.db.refresh(goal)
-        self.db.add(self._goal_data_point(participant_id, goal))
-        await self.db.flush()
         return goal
 
     async def update_goal(self, goal_id: uuid.UUID, participant_id: uuid.UUID, update_data: HealthGoalUpdate):
@@ -193,20 +344,11 @@ class ParticipantQuery:
         if not goal:
             raise HTTPException(status_code=404, detail="Goal not found")
 
-        target_changed = (
-            update_data.target_value is not None
-            and update_data.target_value != goal.target_value
-        )
-
         for field, value in update_data.model_dump(exclude_none=True).items():
             setattr(goal, field, value)
 
         await self.db.flush()
         await self.db.refresh(goal)
-
-        if target_changed:
-            self.db.add(self._goal_data_point(participant_id, goal))
-            await self.db.flush()
 
         return goal
 
@@ -226,77 +368,110 @@ class ParticipantQuery:
 
     async def get_goal_progress(self, goal_id: uuid.UUID, participant_id: uuid.UUID):
         result = await self.db.execute(
-            select(HealthGoal).where(
+            select(HealthGoal, DataElement).join(
+                DataElement, DataElement.element_id == HealthGoal.element_id
+            ).where(
                 HealthGoal.goal_id == goal_id,
                 HealthGoal.participant_id == participant_id
             )
         )
-        goal = result.scalar_one_or_none()
-        if not goal:
+        row = result.one_or_none()
+        if not row:
             raise HTTPException(status_code=404, detail="Goal not found")
+        goal, element = row
 
-        today = datetime.now(timezone.utc).date()
-        entry_result = await self.db.execute(
-            select(HealthDataPoint).where(
-                HealthDataPoint.participant_id == participant_id,
-                HealthDataPoint.element_id == goal.element_id,
-                HealthDataPoint.source_type == "goal",
-                HealthDataPoint.observed_at >= datetime.combine(today, time.min).replace(tzinfo=timezone.utc),
-                HealthDataPoint.observed_at < datetime.combine(today + timedelta(days=1), time.min).replace(tzinfo=timezone.utc),
-            ).limit(1)
+        now = datetime.now(timezone.utc)
+        current_value = await self._compute_goal_current_value(
+            goal, element.datatype, participant_id, as_of=now
         )
-        entry = entry_result.scalar_one_or_none()
-
-        current_value = float(entry.value_number) if entry and entry.value_number is not None else 0.0
         target = float(goal.target_value) if goal.target_value is not None else None
+        completed = self._goal_completed(goal, current_value)
+        start, end = self._window_bounds(goal.window, now)
         return {
             "goal_id": goal_id,
-            "date": today,
+            "date": now.date(),
             "current_value": current_value,
             "target_value": target,
-            "completed": (current_value >= target) if target is not None else False,
+            "completed": completed,
+            "completion_context": {
+                "window": goal.window or "daily",
+                "progress_mode": goal.progress_mode or "incremental",
+                "direction": goal.direction or "at_least",
+                "window_start": start.isoformat() if start else None,
+                "window_end": end.isoformat() if end else None,
+            },
         }
 
     async def log_progress(self, goal_id: uuid.UUID, participant_id: uuid.UUID, payload: GoalProgressLog):
         result = await self.db.execute(
-            select(HealthGoal).where(
+            select(HealthGoal, DataElement.datatype).join(
+                DataElement, DataElement.element_id == HealthGoal.element_id
+            ).where(
                 HealthGoal.goal_id == goal_id,
                 HealthGoal.participant_id == participant_id
             )
         )
-        goal = result.scalar_one_or_none()
-        if not goal:
+        row = result.one_or_none()
+        if not row:
             raise HTTPException(status_code=404, detail="Goal not found")
+        goal, datatype = row
 
-        log_date = (payload.observed_at or datetime.now(timezone.utc)).date()
+        legacy_value = payload.value
+        numeric_value = payload.value_number
+        text_value = payload.value_text
+        bool_value = payload.value_bool
 
-        # Look for an existing goal data point for this element today
-        existing_result = await self.db.execute(
-            select(HealthDataPoint).where(
-                HealthDataPoint.participant_id == participant_id,
-                HealthDataPoint.element_id == goal.element_id,
-                HealthDataPoint.source_type == "goal",
-                HealthDataPoint.observed_at >= datetime.combine(log_date, time.min).replace(tzinfo=timezone.utc),
-                HealthDataPoint.observed_at < datetime.combine(log_date + timedelta(days=1), time.min).replace(tzinfo=timezone.utc),
-            ).order_by(HealthDataPoint.observed_at.desc()).limit(1)
-        )
-        data_point = existing_result.scalar_one_or_none()
+        if isinstance(legacy_value, bool):
+            bool_value = legacy_value if bool_value is None else bool_value
+        elif isinstance(legacy_value, (int, float)):
+            numeric_value = float(legacy_value) if numeric_value is None else numeric_value
+        elif isinstance(legacy_value, str):
+            text_value = legacy_value if text_value is None else text_value
 
-        if data_point:
-            data_point.value_number = float(data_point.value_number or 0) + payload.value
-            if payload.notes:
-                data_point.notes = payload.notes
-        else:
+        observed_at = payload.observed_at or datetime.now(timezone.utc)
+        progress_mode = (goal.progress_mode or "incremental").lower()
+        if self._normalize_datatype(datatype) == "text":
+            if text_value is None or str(text_value).strip() == "":
+                raise HTTPException(
+                    status_code=422,
+                    detail="Text goals require a non-empty text value.",
+                )
+            text_value = str(text_value).strip()
             data_point = HealthDataPoint(
                 participant_id=participant_id,
                 element_id=goal.element_id,
-                observed_at=payload.observed_at or datetime.now(timezone.utc),
+                observed_at=observed_at,
                 source_type="goal",
-                value_number=payload.value,
+                value_text=text_value,
                 notes=payload.notes,
             )
-            self.db.add(data_point)
+        else:
+            delta = None
+            if numeric_value is not None:
+                delta = float(numeric_value)
+            elif bool_value is not None:
+                delta = 1.0 if bool_value else 0.0
+            if delta is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Numeric/boolean goals require a numeric value.",
+                )
+            value_number = delta
+            # For absolute goals, each log is the new measured value.
+            # For incremental goals, each log is an additive delta.
+            if progress_mode == "absolute":
+                value_number = delta
 
+            data_point = HealthDataPoint(
+                participant_id=participant_id,
+                element_id=goal.element_id,
+                observed_at=observed_at,
+                source_type="goal",
+                value_number=value_number,
+                notes=payload.notes,
+            )
+
+        self.db.add(data_point)
         await self.db.flush()
         await self.db.refresh(data_point)
         return data_point
@@ -700,6 +875,47 @@ class CaretakersQuery:
             counts[row.activity] = row.cnt
         return counts
 
+    async def _compute_goal_progress_map(self, participant_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+        if not participant_ids:
+            return {}
+
+        result = await self.db.execute(
+            select(HealthGoal, DataElement.datatype)
+            .join(DataElement, DataElement.element_id == HealthGoal.element_id)
+            .where(HealthGoal.participant_id.in_(participant_ids))
+            .where(HealthGoal.status == "active")
+        )
+        rows = result.all()
+
+        grouped: dict[uuid.UUID, list[tuple[HealthGoal, str | None]]] = {}
+        for goal, datatype in rows:
+            grouped.setdefault(goal.participant_id, []).append((goal, datatype))
+
+        participant_query = ParticipantQuery(self.db)
+        progress_map: dict[uuid.UUID, str] = {}
+        for pid in participant_ids:
+            goals = grouped.get(pid, [])
+            if not goals:
+                progress_map[pid] = "not_started"
+                continue
+
+            completed_count = 0
+            for goal, datatype in goals:
+                current = await participant_query._compute_goal_current_value(
+                    goal, datatype, pid, as_of=datetime.now(timezone.utc)
+                )
+                if participant_query._goal_completed(goal, current):
+                    completed_count += 1
+
+            if completed_count == 0:
+                progress_map[pid] = "in_progress"
+            elif completed_count == len(goals):
+                progress_map[pid] = "completed"
+            else:
+                progress_map[pid] = "in_progress"
+
+        return progress_map
+
     async def get_participants(
         self,
         user_id: uuid.UUID,
@@ -748,33 +964,6 @@ class CaretakersQuery:
             submissions_stmt = submissions_stmt.where(FormSubmission.submitted_at < datetime.combine(submission_date_to + timedelta(days=1), time.min).replace(tzinfo=timezone.utc))
         submissions_sq = submissions_stmt.group_by(FormSubmission.participant_id).subquery()
 
-        # Goals reset daily — progress is based on today's HealthDataPoint vs target
-        # target_date = goal_date_from or date.today()
-        # goals_stmt = (
-        #     select(
-        #         HealthGoal.participant_id,
-        #         func.count(HealthGoal.goal_id).label("total_goals"),
-        #         func.count(
-        #             case(
-        #                 (and_(
-        #                     HealthDataPoint.value_number != None,
-        #                     HealthDataPoint.value_number >= HealthGoal.target_value,
-        #                 ), HealthGoal.goal_id),
-        #                 else_=None,
-        #             )
-        #         ).label("completed_goals"),
-        #     )
-        #     .outerjoin(HealthDataPoint, and_(
-        #         HealthDataPoint.participant_id == HealthGoal.participant_id,
-        #         HealthDataPoint.element_id == HealthGoal.element_id,
-        #         HealthDataPoint.source_type == "goal",
-        #         func.cast(HealthDataPoint.observed_at, date) == target_date,
-        #     ))
-        #     .where(HealthGoal.status == "active")
-        #)
-        # goals_sq = goals_stmt.group_by(HealthGoal.participant_id).subquery()
-
-
         age_expr = func.date_part("year", func.age(ParticipantProfile.dob))
 
         survey_progress_expr = case(
@@ -782,12 +971,6 @@ class CaretakersQuery:
             (submissions_sq.c.submitted_count >= deployed_sq.c.deployed_count, "completed"),
             else_="in_progress",
         )
-
-        # goal_progress_expr = case(
-        #     (or_(goals_sq.c.total_goals == None, goals_sq.c.total_goals == 0), "not_started"),
-        #     (goals_sq.c.completed_goals == goals_sq.c.total_goals, "completed"),
-        #     else_="in_progress",
-        # )
 
         today = date.today()
         status_expr = case(
@@ -808,7 +991,6 @@ class CaretakersQuery:
                 status_expr.label("status"),
                 GroupMember.group_id,
                 survey_progress_expr.label("survey_progress"),
-                # goal_progress_expr.label("goal_progress"),
                 User.last_login_at,
                 submissions_sq.c.last_submission_at,
             )
@@ -818,7 +1000,6 @@ class CaretakersQuery:
             .join(User, User.user_id == ParticipantProfile.user_id)
             .outerjoin(deployed_sq, deployed_sq.c.group_id == GroupMember.group_id)
             .outerjoin(submissions_sq, submissions_sq.c.participant_id == ParticipantProfile.participant_id)
-            # .outerjoin(goals_sq, goals_sq.c.participant_id == ParticipantProfile.participant_id)
             .where(CaretakerProfile.user_id == user_id)
         )
 
@@ -837,8 +1018,6 @@ class CaretakersQuery:
             stmt = stmt.where(submissions_sq.c.submitted_count < deployed_sq.c.deployed_count)
         if survey_progress:
             stmt = stmt.where(survey_progress_expr == survey_progress)
-        # if goal_progress:
-        #     stmt = stmt.where(goal_progress_expr == goal_progress)
 
         # ── Sorting ───────────────────────────────────────────────────────────
         if sort_by == "name":
@@ -851,8 +1030,6 @@ class CaretakersQuery:
             stmt = stmt.order_by(ParticipantProfile.gender)
         elif sort_by == "surveys":
             stmt = stmt.order_by(survey_progress_expr)
-        # elif sort_by == "goals":
-        #     stmt = stmt.order_by(goal_progress_expr)
         elif sort_by == "last_active":
             stmt = stmt.order_by(User.last_login_at.desc())
         elif sort_by == "enrolled":
@@ -861,7 +1038,33 @@ class CaretakersQuery:
             stmt = stmt.order_by(submissions_sq.c.last_submission_at.desc())
 
         result = await self.db.execute(stmt)
-        return result.all()
+        rows = result.all()
+
+        participant_ids = [row.participant_id for row in rows]
+        progress_map = await self._compute_goal_progress_map(participant_ids)
+        output_rows = []
+        for row in rows:
+            output_rows.append(
+                SimpleNamespace(
+                    participant_id=row.participant_id,
+                    first_name=row.first_name,
+                    last_name=row.last_name,
+                    gender=row.gender,
+                    age=row.age,
+                    status=row.status,
+                    group_id=row.group_id,
+                    survey_progress=row.survey_progress,
+                    goal_progress=progress_map.get(row.participant_id, "not_started"),
+                    last_login_at=row.last_login_at,
+                    last_submission_at=row.last_submission_at,
+                )
+            )
+
+        if sort_by == "goals":
+            order = {"not_started": 0, "in_progress": 1, "completed": 2}
+            output_rows.sort(key=lambda r: order.get(r.goal_progress, 0))
+
+        return output_rows
 
     async def get_participant_submissions(
         self,
@@ -1141,17 +1344,6 @@ class CaretakersQuery:
             message=message,
         )
         self.db.add(feedback)
-        await self.db.flush()
-
-        notification = Notification(
-            user_id=row.user_id,
-            type="feedback",
-            title="New feedback from your caretaker",
-            message=message[:200],
-            source_type="caretaker_feedback",
-            source_id=feedback.feedback_id,
-        )
-        self.db.add(notification)
         await self.db.flush()
 
         return feedback

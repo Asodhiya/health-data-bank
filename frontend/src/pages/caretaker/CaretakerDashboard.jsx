@@ -162,10 +162,20 @@ function QuickActions({ groups, navigate }) {
 
 // ─── Stat Cards ─────────────────────────────────────────────────────────────────
 
-function StatCards({ totalMembers, activeCount, lowCount, inactiveCount, activePct, lowPct, inactivePct }) {
+function StatCards({
+  totalMembers,
+  activeCount,
+  lowCount,
+  inactiveCount,
+  activePct,
+  lowPct,
+  inactivePct,
+  selectedStatusFilter,
+  onSelectStatusFilter,
+}) {
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+      <button onClick={() => onSelectStatusFilter("all")} className={`text-left bg-white rounded-2xl shadow-sm border p-4 transition-colors ${selectedStatusFilter === "all" ? "border-blue-200 ring-1 ring-blue-100" : "border-slate-100 hover:border-slate-200"}`}>
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center shrink-0"><UsersIco /></div>
           <div className="flex-1 min-w-0">
@@ -174,9 +184,9 @@ function StatCards({ totalMembers, activeCount, lowCount, inactiveCount, activeP
           </div>
         </div>
         <p className="text-[11px] text-slate-400 mt-3 leading-relaxed">All participants across selected group(s)</p>
-      </div>
+      </button>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-emerald-100 p-4">
+      <button onClick={() => onSelectStatusFilter("active")} className={`text-left bg-white rounded-2xl shadow-sm border p-4 transition-colors ${selectedStatusFilter === "active" ? "border-emerald-300 ring-1 ring-emerald-100" : "border-emerald-100 hover:border-emerald-200"}`}>
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0"><ActivityIco /></div>
           <div className="flex-1 min-w-0">
@@ -193,9 +203,9 @@ function StatCards({ totalMembers, activeCount, lowCount, inactiveCount, activeP
           </div>
         )}
         <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">Submitted a survey within the last <span className="font-semibold text-slate-500">14 days</span></p>
-      </div>
+      </button>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-amber-100 p-4">
+      <button onClick={() => onSelectStatusFilter("low_active")} className={`text-left bg-white rounded-2xl shadow-sm border p-4 transition-colors ${selectedStatusFilter === "low_active" ? "border-amber-300 ring-1 ring-amber-100" : "border-amber-100 hover:border-amber-200"}`}>
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0"><AlertIco /></div>
           <div className="flex-1 min-w-0">
@@ -212,9 +222,9 @@ function StatCards({ totalMembers, activeCount, lowCount, inactiveCount, activeP
           </div>
         )}
         <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">Last submission was <span className="font-semibold text-slate-500">15–30 days</span> ago</p>
-      </div>
+      </button>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+      <button onClick={() => onSelectStatusFilter("inactive")} className={`text-left bg-white rounded-2xl shadow-sm border p-4 transition-colors ${selectedStatusFilter === "inactive" ? "border-slate-300 ring-1 ring-slate-100" : "border-slate-100 hover:border-slate-200"}`}>
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center shrink-0"><InactiveIco /></div>
           <div className="flex-1 min-w-0">
@@ -231,7 +241,7 @@ function StatCards({ totalMembers, activeCount, lowCount, inactiveCount, activeP
           </div>
         )}
         <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">No submissions in <span className="font-semibold text-slate-500">30+ days</span></p>
-      </div>
+      </button>
     </div>
   );
 }
@@ -239,10 +249,12 @@ function StatCards({ totalMembers, activeCount, lowCount, inactiveCount, activeP
 // ─── Main Dashboard ─────────────────────────────────────────────────────────────
 
 export default function CaretakerDashboard() {
-  const { user } = useOutletContext();
+  useOutletContext();
   const navigate = useNavigate();
   const [groups, setGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("all");
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState("all");
+  const [surveyFilter, setSurveyFilter] = useState(null);
   const [participants, setParticipants] = useState([]);
   const [activityCounts, setActivityCounts] = useState({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 });
   const [loading, setLoading] = useState(true);
@@ -285,6 +297,14 @@ export default function CaretakerDashboard() {
     return participants.filter(p => p.group_id === selectedGroupId);
   }, [participants, selectedGroupId]);
 
+  const statusFilteredParticipants = useMemo(() => {
+    if (selectedStatusFilter === "all") return filteredParticipants;
+    if (selectedStatusFilter === "active") {
+      return filteredParticipants.filter((p) => p.status === "highly_active" || p.status === "moderately_active");
+    }
+    return filteredParticipants.filter((p) => p.status === selectedStatusFilter);
+  }, [filteredParticipants, selectedStatusFilter]);
+
   const filteredCounts = useMemo(() => {
     if (selectedGroupId === "all") return activityCounts;
     const counts = { highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 };
@@ -304,19 +324,98 @@ export default function CaretakerDashboard() {
     { name: "Inactive", value: filteredCounts.inactive, color: "#94a3b8" },
   ].filter(d => d.value > 0), [activeCount, filteredCounts]);
 
+  const surveyFillStats = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let submittedToday = 0;
+    let submittedLast7d = 0;
+    let submittedLast30d = 0;
+    let neverSubmitted = 0;
+    let staleOver7d = 0;
+    let staleOver30d = 0;
+
+    const buckets = { today: [], last7d: [], stale7d: [], never: [] };
+
+    filteredParticipants.forEach((p) => {
+      const raw = p.last_submission_at;
+      const base = {
+        id: p.participant_id,
+        name: p.name,
+        status: p.status,
+        lastActive: p.last_login_at || p.last_submission_at || null,
+      };
+
+      if (!raw) {
+        neverSubmitted += 1;
+        staleOver30d += 1;
+        staleOver7d += 1;
+        const row = { ...base, lastSubmissionAt: null, daysAgo: null };
+        buckets.never.push(row);
+        buckets.stale7d.push(row);
+        return;
+      }
+
+      const d = new Date(raw);
+      d.setHours(0, 0, 0, 0);
+      const daysAgo = Math.max(0, Math.floor((today.getTime() - d.getTime()) / 86400000));
+
+      if (daysAgo === 0) submittedToday += 1;
+      if (daysAgo <= 7) submittedLast7d += 1;
+      if (daysAgo <= 30) submittedLast30d += 1;
+      if (daysAgo > 7) staleOver7d += 1;
+      if (daysAgo > 30) staleOver30d += 1;
+      const row = { ...base, lastSubmissionAt: raw, daysAgo };
+      if (daysAgo === 0) buckets.today.push(row);
+      if (daysAgo <= 7) buckets.last7d.push(row);
+      if (daysAgo > 7) buckets.stale7d.push(row);
+    });
+
+    return {
+      total: filteredParticipants.length,
+      submittedToday,
+      submittedLast7d,
+      submittedLast30d,
+      neverSubmitted,
+      staleOver7d,
+      staleOver30d,
+      buckets,
+    };
+  }, [filteredParticipants]);
+
   const membersList = useMemo(() => {
-    return [...filteredParticipants]
+    if (surveyFilter) {
+      return [...(surveyFillStats.buckets[surveyFilter] || [])].sort((a, b) => {
+        if (a.daysAgo === null && b.daysAgo === null) return a.name.localeCompare(b.name);
+        if (a.daysAgo === null) return -1;
+        if (b.daysAgo === null) return 1;
+        return b.daysAgo - a.daysAgo;
+      });
+    }
+
+    return [...statusFilteredParticipants]
       .map(p => ({
         id: p.participant_id,
         name: p.name,
         status: p.status,
         lastActive: p.last_login_at || p.last_submission_at || null,
+        lastSubmissionAt: p.last_submission_at || null,
+        daysAgo: p.last_submission_at ? Math.max(0, Math.floor((Date.now() - new Date(p.last_submission_at).getTime()) / 86400000)) : null,
       }))
       .sort((a, b) => {
         const order = { inactive: 0, low_active: 1, moderately_active: 2, highly_active: 3 };
         return (order[a.status] ?? 2) - (order[b.status] ?? 2);
       });
-  }, [filteredParticipants]);
+  }, [statusFilteredParticipants, surveyFilter, surveyFillStats]);
+
+  const participantPanelTitle = useMemo(() => {
+    if (!surveyFilter) return "Participant Status";
+    if (surveyFilter === "today") return "Submitted Today";
+    if (surveyFilter === "last7d") return "Submitted In Last 7 Days";
+    if (surveyFilter === "stale7d") return "Stale (>7 Days)";
+    if (surveyFilter === "never") return "Never Submitted";
+    return "Participant Status";
+  }, [surveyFilter]);
 
   if (loading) {
     return (
@@ -353,7 +452,20 @@ export default function CaretakerDashboard() {
 
       <QuickActions groups={groups} navigate={navigate} />
 
-      <StatCards totalMembers={totalMembers} activeCount={activeCount} lowCount={filteredCounts.low_active} inactiveCount={filteredCounts.inactive} activePct={activePct} lowPct={lowPct} inactivePct={inactivePct} />
+      <StatCards
+        totalMembers={totalMembers}
+        activeCount={activeCount}
+        lowCount={filteredCounts.low_active}
+        inactiveCount={filteredCounts.inactive}
+        activePct={activePct}
+        lowPct={lowPct}
+        inactivePct={inactivePct}
+        selectedStatusFilter={selectedStatusFilter}
+        onSelectStatusFilter={(next) => {
+          setSurveyFilter(null);
+          setSelectedStatusFilter(next);
+        }}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full">
@@ -362,9 +474,19 @@ export default function CaretakerDashboard() {
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
               </svg>
-              <h2 className="text-lg font-bold text-slate-800">Participant Status</h2>
+              <h2 className="text-lg font-bold text-slate-800">{participantPanelTitle}</h2>
             </div>
-            <span className="text-sm font-medium text-slate-400">{totalMembers} members</span>
+            <span className="text-sm font-medium text-slate-400">{membersList.length} shown</span>
+          </div>
+          <div className="px-6 pt-3 flex gap-2 flex-wrap">
+            <button onClick={() => { setSurveyFilter(null); setSelectedStatusFilter("all"); }} className={`text-xs px-2.5 py-1 rounded-full border ${selectedStatusFilter === "all" ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-white text-slate-600 border-slate-200"}`}>All ({totalMembers})</button>
+            <button onClick={() => { setSurveyFilter(null); setSelectedStatusFilter("active"); }} className={`text-xs px-2.5 py-1 rounded-full border ${selectedStatusFilter === "active" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-white text-slate-600 border-slate-200"}`}>Active ({activeCount})</button>
+            <button onClick={() => { setSurveyFilter(null); setSelectedStatusFilter("low_active"); }} className={`text-xs px-2.5 py-1 rounded-full border ${selectedStatusFilter === "low_active" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-white text-slate-600 border-slate-200"}`}>Low ({filteredCounts.low_active})</button>
+            <button onClick={() => { setSurveyFilter(null); setSelectedStatusFilter("inactive"); }} className={`text-xs px-2.5 py-1 rounded-full border ${selectedStatusFilter === "inactive" ? "bg-slate-100 text-slate-700 border-slate-300" : "bg-white text-slate-600 border-slate-200"}`}>Inactive ({filteredCounts.inactive})</button>
+          </div>
+          <div className="px-6 pt-2 pb-2 flex gap-2 flex-wrap">
+            <button onClick={() => setSurveyFilter((p) => (p === "today" ? null : "today"))} className={`text-xs px-2.5 py-1 rounded-full border ${surveyFilter === "today" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-white text-slate-600 border-slate-200"}`}>Today ({surveyFillStats.submittedToday})</button>
+            <button onClick={() => setSurveyFilter((p) => (p === "never" ? null : "never"))} className={`text-xs px-2.5 py-1 rounded-full border ${surveyFilter === "never" ? "bg-rose-50 text-rose-700 border-rose-200" : "bg-white text-slate-600 border-slate-200"}`}>Never ({surveyFillStats.neverSubmitted})</button>
           </div>
 
           {membersList.length === 0 ? (
@@ -379,12 +501,19 @@ export default function CaretakerDashboard() {
                 {membersList.map(member => (
                   <div key={member.id} onClick={() => navigate(`/caretaker/participants/${member.id}`)}
                     className="p-4 flex justify-between items-center hover:bg-slate-50 rounded-lg transition-colors cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <span className={`w-2.5 h-2.5 rounded-full ${getDotColor(member.status)}`} />
-                      <p className="font-bold text-slate-800">{member.name}</p>
-                      <p className="text-sm text-slate-500">— {getStatusLabel(member.status)}</p>
+                    <div className="flex items-start gap-3">
+                      <span className={`w-2.5 h-2.5 rounded-full mt-1.5 ${getDotColor(member.status)}`} />
+                      <div>
+                        <p className="font-bold text-slate-800">{member.name}</p>
+                        <p className="text-xs text-slate-500">{getStatusLabel(member.status)}</p>
+                      </div>
                     </div>
-                    {member.lastActive && <span className="text-xs text-slate-400">{daysSince(member.lastActive)}</span>}
+                    <div className="text-right">
+                      <p className={`text-xs font-semibold ${member.daysAgo === null ? "text-rose-600" : "text-slate-600"}`}>
+                        {member.daysAgo === null ? "Survey: Never submitted" : `Survey: ${member.daysAgo}d ago`}
+                      </p>
+                      <p className="text-xs text-slate-400">{member.lastActive ? `Last active: ${daysSince(member.lastActive)}` : "Last active: —"}</p>
+                    </div>
                   </div>
                 ))}
               </div>

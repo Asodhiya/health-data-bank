@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin Dashboard Release Notes</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --line: #e2e8f0;
+      --ok: #065f46;
+      --ok-bg: #d1fae5;
+    }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap { max-width: 980px; margin: 24px auto; padding: 0 16px 32px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    h1, h2 { margin: 0 0 10px; }
+    h1 { font-size: 1.55rem; }
+    h2 { font-size: 1.05rem; }
+    .meta { color: var(--muted); font-size: 0.95rem; }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      background: var(--ok-bg);
+      color: var(--ok);
+      margin-right: 8px;
+    }
+    ul { margin: 8px 0 0 18px; }
+    li { margin: 6px 0; }
+    code {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      padding: 10px;
+      font-size: 0.95rem;
+    }
+    th { background: #f1f5f9; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Admin Dashboard Release Notes</h1>
+      <p class="meta">Release date: 2026-03-30</p>
+      <p class="meta">Project: <code>C:\Users\nbkka\health-data-bank</code></p>
+      <p><span class="badge">Implemented</span> Requested batch completed (excluding Security Gauge expansion #4 and System Metrics #8).</p>
+    </div>
+
+    <div class="card">
+      <h2>What’s New</h2>
+      <ul>
+        <li>Real User Stats Summary added (active/inactive, new users, locked accounts).</li>
+        <li>Invite Funnel panel added (pending, accepted, acceptance rate, expired/revoked).</li>
+        <li>Groups Overview added (no-caretaker and no-participant flags).</li>
+        <li>Quick Assign Caretaker action added directly on dashboard group cards.</li>
+        <li>Hardcoded “Server Load / Uptime” removed and replaced with real product metrics (including backup freshness).</li>
+        <li>Onboarding Funnel data now powered by backend stats endpoint.</li>
+        <li>Survey Completion data now powered by backend stats endpoint.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>New Backend Endpoints</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Endpoint</th>
+            <th>Purpose</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET /api/v1/admin_only/stats/onboarding</code></td>
+            <td>Returns onboarding funnel counts: pending, background_read, consent_given, intake_submitted, complete, total_participants.</td>
+          </tr>
+          <tr>
+            <td><code>GET /api/v1/admin_only/stats/surveys</code></td>
+            <td>Returns survey completion metrics overall and per group (deployed, completed, completion_rate).</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>API Response Enrichment</h2>
+      <ul>
+        <li><code>GET /api/v1/admin_only/users</code> now includes <code>locked_until</code> in user rows.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Frontend Wiring Added</h2>
+      <ul>
+        <li><code>api.adminGetOnboardingStats()</code></li>
+        <li><code>api.adminGetSurveyStats()</code></li>
+        <li>Dashboard data loading now includes invites + onboarding stats + survey stats.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Notes</h2>
+      <ul>
+        <li>No GitHub/remote actions performed.</li>
+        <li>Changes are local only in your workspace.</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

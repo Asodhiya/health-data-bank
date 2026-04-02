@@ -30,6 +30,11 @@ async def authenticate_user(identifier: str, password: str, db: AsyncSession):
             status_code=401,
             detail="Incorrect email or password"
         )
+    if user.status is False:
+        raise HTTPException(
+            status_code=403,
+            detail="Account is inactive."
+        )
 
     now = datetime.now(timezone.utc)
 
