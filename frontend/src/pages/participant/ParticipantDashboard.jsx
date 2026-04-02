@@ -51,7 +51,6 @@ export default function ParticipantDashboard() {
         setGoals(goalData || []);
         setStats(statsData);
 
-        console.log("📊 Stats Data Loaded:", statsData);
       } catch (err) {
         console.error("Dashboard Sync Error:", err);
       } finally {

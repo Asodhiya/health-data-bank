@@ -93,8 +93,6 @@ export default function GoalTemplates() {
     e.preventDefault();
     try {
       if (editingId) {
-        // Double check: are we sending element_id in this object?
-        console.log("Updating template with data:", formData);
         await api.updateGoalTemplate(editingId, formData);
       } else {
         await api.createGoalTemplate(formData);
