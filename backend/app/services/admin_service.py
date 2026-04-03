@@ -445,17 +445,13 @@ async def update_group(group_id: UUID, payload: GroupUpdateRequest, db: AsyncSes
     )
 
 
-async def move_participant_group(user_id: UUID, new_group_id: UUID, db: AsyncSession) -> dict:
-    """Move a participant to a new group — closes current membership and opens a new one."""
+async def move_participant_group(user_id: UUID, new_group_id: UUID | None, db: AsyncSession) -> dict:
+    """Move a participant to a new group, or unassign from all groups if new_group_id is None."""
     participant = await db.scalar(
         select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
     )
     if not participant:
         raise HTTPException(status_code=404, detail="Participant not found")
-
-    group = await db.scalar(select(Group).where(Group.group_id == new_group_id))
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
 
     # Close current active membership
     await db.execute(
@@ -464,6 +460,14 @@ async def move_participant_group(user_id: UUID, new_group_id: UUID, db: AsyncSes
         .where(GroupMember.left_at == None)
         .values(left_at=datetime.now(timezone.utc))
     )
+
+    if new_group_id is None:
+        await db.commit()
+        return {"detail": "Participant removed from group"}
+
+    group = await db.scalar(select(Group).where(Group.group_id == new_group_id))
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
 
     # Open new membership
     db.add(GroupMember(group_id=new_group_id, participant_id=participant.participant_id))
@@ -1374,16 +1378,35 @@ async def get_user_submissions(user_id: UUID, db: AsyncSession) -> list:
         raise HTTPException(status_code=404, detail="Participant not found")
 
     rows = await CaretakersQuery(db).get_participant_submissions(participant.participant_id)
-    return [
-        {
+    result = []
+    for row in rows:
+        # Fetch answers for this submission
+        answer_rows = (await db.execute(
+            select(SubmissionAnswer, FormField.label)
+            .join(FormField, FormField.field_id == SubmissionAnswer.field_id)
+            .where(SubmissionAnswer.submission_id == row.submission_id)
+        )).all()
+
+        answers = []
+        for ans, field_label in answer_rows:
+            value = (
+                ans.value_text if ans.value_text is not None
+                else str(ans.value_number) if ans.value_number is not None
+                else str(ans.value_date) if ans.value_date is not None
+                else str(ans.value_json) if ans.value_json is not None
+                else ""
+            )
+            answers.append({"field": field_label or "Unknown", "value": value})
+
+        result.append({
             "id": str(row.submission_id),
             "form_name": row.form_name,
             "submitted_at": row.submitted_at.isoformat() if row.submitted_at else None,
             "status": "submitted",
-            "answers": [],
-        }
-        for row in rows
-    ]
+            "answers": answers,
+        })
+
+    return result
 
 
 async def get_user_goals(user_id: UUID, db: AsyncSession) -> list:

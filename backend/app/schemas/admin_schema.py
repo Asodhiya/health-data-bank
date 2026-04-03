@@ -135,7 +135,7 @@ class UserDeleteRequest(BaseModel):
 
 
 class MoveParticipantRequest(BaseModel):
-    group_id: UUID
+    group_id: UUID | None = None
 
 
 # ── Invite Management schemas ────────────────────────────────────────────────
