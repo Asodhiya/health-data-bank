@@ -14,12 +14,14 @@ import uuid as uuid_module
 import hashlib
 import json
 import os
+from zoneinfo import ZoneInfo
 
 from app.db.models import (
-    AdminProfile, AuditLog, Backup, CaretakerFeedback, CaretakerProfile,
+    AdminProfile, AuditLog, Backup, BackupScheduleSettings, CaretakerFeedback, CaretakerProfile,
     DataElement, Device, FieldElementMap, FieldOption, FormDeployment,
     FormField, FormSubmission, GoalTemplate, Group, GroupMember,
     HealthDataPoint, HealthGoal, MFAChallenge, MFAMethod, Notification,
+    SystemFeedback,
     ParticipantConsent, ConsentFormTemplate, BackgroundInfoTemplate,
     ParticipantProfile, Permission, Report, ReportFile,
     Reminder, ResearcherProfile, RestoreEvent, Role, RolePermission, Session,
@@ -28,6 +30,9 @@ from app.db.models import (
 from app.schemas.admin_schema import (
     AssignCaretakerRequest,
     AssignCaretakerResponse,
+    BackupScheduleSettingsOut,
+    BackupScheduleSettingsPayload,
+    BackupPreviewResponse,
     RestoreResponse,
     UnassignCaretakerResponse,
     CaretakerItem,
@@ -41,7 +46,9 @@ from app.schemas.admin_schema import (
 from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem, GroupUpdateRequest
 from app.db.queries.Queries import CaretakersQuery, ParticipantQuery
 from typing import List
+from app.core.config import settings
 from app.core.security import generate_reset_token, hash_reset_token, reset_token_expiry
+from app.core.security import PasswordHash
 from app.services.email_sender import send_reset_email
 
 # ── Backup helpers ─────────────────────────────────────────────────────────────
@@ -82,11 +89,141 @@ TABLE_ORDER = [
     ("reports",             Report),
     ("report_files",        ReportFile),
     ("notifications",       Notification),
+    ("system_feedback",     SystemFeedback),
     ("reminders",           Reminder),
     ("audit_log",           AuditLog),
+    ("backup_schedule_settings", BackupScheduleSettings),
     ("backups",             Backup),
     ("restore_events",      RestoreEvent),
 ]
+
+SANITIZED_USER_FIELDS = {
+    "password_hash",
+    "reset_token_hash",
+    "reset_token_expires_at",
+    "failed_login_attempts",
+    "locked_until",
+}
+
+_WEEKDAY_TO_INDEX = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+
+def _default_backup_schedule() -> BackupScheduleSettingsOut:
+    return BackupScheduleSettingsOut(
+        enabled=settings.SCHEDULED_BACKUPS_ENABLED,
+        frequency="daily",
+        time=f"{settings.SCHEDULED_BACKUP_HOUR_UTC:02d}:{settings.SCHEDULED_BACKUP_MINUTE_UTC:02d}",
+        day_of_week="sunday",
+        day_of_month=None,
+        timezone="UTC",
+        scope="full",
+        retention_count=5,
+        notify_on_success=True,
+        notify_on_failure=True,
+        next_run_at=None,
+    )
+
+
+def _schedule_time_parts(time_local: str) -> tuple[int, int]:
+    hour, minute = time_local.split(":")
+    return int(hour), int(minute)
+
+
+def _compute_next_backup_run(
+    *,
+    enabled: bool,
+    frequency: str,
+    time_local: str,
+    day_of_week: str | None,
+    day_of_month: int | None,
+    timezone_name: str,
+    anchor_at_utc: datetime | None = None,
+    reference_utc: datetime | None = None,
+) -> datetime | None:
+    if not enabled:
+        return None
+
+    reference_utc = reference_utc or datetime.now(timezone.utc)
+    tz = ZoneInfo(timezone_name)
+    reference_local = reference_utc.astimezone(tz)
+    hour, minute = _schedule_time_parts(time_local)
+
+    if frequency == "daily":
+        candidate = reference_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if candidate <= reference_local:
+            candidate += timedelta(days=1)
+        return candidate.astimezone(timezone.utc)
+
+    if frequency == "monthly":
+        target_day = day_of_month or 1
+        candidate = reference_local.replace(
+            day=target_day,
+            hour=hour,
+            minute=minute,
+            second=0,
+            microsecond=0,
+        )
+        if candidate <= reference_local:
+            year = candidate.year + (1 if candidate.month == 12 else 0)
+            month = 1 if candidate.month == 12 else candidate.month + 1
+            candidate = candidate.replace(year=year, month=month, day=target_day)
+        return candidate.astimezone(timezone.utc)
+
+    if frequency == "biweekly" and anchor_at_utc is not None:
+        candidate = anchor_at_utc
+        while candidate <= reference_utc:
+            candidate += timedelta(weeks=2)
+        return candidate
+
+    target_weekday = _WEEKDAY_TO_INDEX[day_of_week or "sunday"]
+    days_ahead = (target_weekday - reference_local.weekday()) % 7
+    candidate = (reference_local + timedelta(days=days_ahead)).replace(
+        hour=hour,
+        minute=minute,
+        second=0,
+        microsecond=0,
+    )
+    if candidate <= reference_local:
+        candidate += timedelta(days=7)
+    return candidate.astimezone(timezone.utc)
+
+
+def _schedule_to_schema(schedule: BackupScheduleSettings | None) -> BackupScheduleSettingsOut:
+    if not schedule:
+        return _default_backup_schedule()
+
+    return BackupScheduleSettingsOut(
+        schedule_id=schedule.schedule_id,
+        enabled=schedule.enabled,
+        frequency=schedule.frequency,
+        time=schedule.time_local,
+        day_of_week=schedule.day_of_week,
+        day_of_month=schedule.day_of_month,
+        timezone=schedule.timezone,
+        scope=schedule.scope,
+        retention_count=schedule.retention_count,
+        notify_on_success=schedule.notify_on_success,
+        notify_on_failure=schedule.notify_on_failure,
+        next_run_at=_compute_next_backup_run(
+            enabled=schedule.enabled,
+            frequency=schedule.frequency,
+            time_local=schedule.time_local,
+            day_of_week=schedule.day_of_week,
+            day_of_month=schedule.day_of_month,
+            timezone_name=schedule.timezone,
+            anchor_at_utc=schedule.anchor_at_utc,
+        ),
+        updated_at=schedule.updated_at,
+        updated_by=schedule.updated_by,
+    )
 
 
 def _serialize_value(val):
@@ -102,16 +239,26 @@ def _serialize_value(val):
 
 
 def _serialize_row(obj, model_class) -> dict:
-    return {
-        col.name: _serialize_value(getattr(obj, col.name))
-        for col in model_class.__table__.columns
-    }
+    result = {}
+    for col in model_class.__table__.columns:
+        if model_class is User and col.name in SANITIZED_USER_FIELDS:
+            continue
+        result[col.name] = _serialize_value(getattr(obj, col.name))
+    return result
 
 
 def _deserialize_row(row: dict, model_class) -> dict:
     result = {}
     for col in model_class.__table__.columns:
         val = row.get(col.name)
+        if model_class is User and col.name in SANITIZED_USER_FIELDS:
+            if col.name == "password_hash":
+                result[col.name] = None
+            elif col.name == "failed_login_attempts":
+                result[col.name] = 0
+            else:
+                result[col.name] = None
+            continue
         if val is None:
             result[col.name] = None
             continue
@@ -349,7 +496,11 @@ async def unassign_caretaker_from_group(
     )
 
 
-async def backup_database(created_by: UUID, db: AsyncSession) -> tuple[str, str]:
+async def backup_database(
+    created_by: UUID | None,
+    db: AsyncSession,
+    source: str = "manual",
+) -> tuple[str, str]:
     """Export all tables to a JSON string and record the snapshot (with checksum) in the backups table.
     Returns (json_content, snapshot_name).
     """
@@ -368,6 +519,7 @@ async def backup_database(created_by: UUID, db: AsyncSession) -> tuple[str, str]
     data = {
         "snapshot_name": snapshot_name,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "auth_fields_sanitized": True,
         "table_row_counts": row_counts,
         "tables": tables,
     }
@@ -375,29 +527,90 @@ async def backup_database(created_by: UUID, db: AsyncSession) -> tuple[str, str]
     content = json.dumps(data, indent=2, default=str)
     checksum = hashlib.sha256(content.encode()).hexdigest()
 
-    record = Backup(created_by=created_by, storage_path=snapshot_name, checksum=checksum)
+    record = Backup(
+        created_by=created_by,
+        storage_path=snapshot_name,
+        checksum=checksum,
+        snapshot_content=content,
+        source=source,
+    )
     db.add(record)
     await db.commit()
 
     return content, snapshot_name
 
 
-async def restore_database(
-    raw_content: bytes,
+async def _build_backup_preview(
+    backup_data: dict,
+    db: AsyncSession,
+    *,
+    uploaded_checksum: str | None = None,
+    backup_record: Backup | None = None,
+) -> BackupPreviewResponse:
+    if not isinstance(backup_data, dict):
+        raise HTTPException(status_code=400, detail="Backup file must contain a JSON object.")
+    if not isinstance(backup_data.get("tables"), dict):
+        raise HTTPException(status_code=400, detail="Backup file is missing a valid 'tables' object.")
+
+    snapshot_name = backup_data.get("snapshot_name", "unknown")
+    if not isinstance(snapshot_name, str) or not snapshot_name.strip():
+        raise HTTPException(status_code=400, detail="Backup file is missing a valid snapshot name.")
+
+    table_row_counts = backup_data.get("table_row_counts")
+    if not isinstance(table_row_counts, dict):
+        table_row_counts = {
+            table_name: len(rows) if isinstance(rows, list) else 0
+            for table_name, rows in backup_data["tables"].items()
+        }
+
+    if backup_record is None:
+        backup_record = await db.scalar(
+            select(Backup).where(Backup.storage_path == snapshot_name)
+        )
+
+    checksum_verified = False
+    can_inline_restore = False
+    matched_backup_id = None
+    checksum = uploaded_checksum or (backup_record.checksum if backup_record else None)
+
+    if backup_record is not None:
+        matched_backup_id = backup_record.backup_id
+        can_inline_restore = bool(backup_record.snapshot_content)
+        if uploaded_checksum is not None:
+            checksum_verified = backup_record.checksum == uploaded_checksum
+        else:
+            checksum_verified = True
+            checksum = backup_record.checksum
+
+    return BackupPreviewResponse(
+        snapshot_name=snapshot_name,
+        created_at=datetime.fromisoformat(backup_data["created_at"]) if isinstance(backup_data.get("created_at"), str) else None,
+        table_count=len(table_row_counts),
+        total_rows=sum(int(v or 0) for v in table_row_counts.values()),
+        table_row_counts=table_row_counts,
+        auth_fields_sanitized=bool(backup_data.get("auth_fields_sanitized")),
+        checksum=checksum,
+        checksum_verified=checksum_verified,
+        matched_backup_id=matched_backup_id,
+        can_inline_restore=can_inline_restore,
+    )
+
+
+async def _restore_backup_payload(
+    backup_data: dict,
+    uploaded_checksum: str,
     db: AsyncSession,
     restored_by: UUID | None = None,
 ) -> RestoreResponse:
-    """Verify checksum, wipe all tables, and restore from a backup JSON file."""
+    if not isinstance(backup_data, dict):
+        raise HTTPException(status_code=400, detail="Backup file must contain a JSON object.")
+    if not isinstance(backup_data.get("tables"), dict):
+        raise HTTPException(status_code=400, detail="Backup file is missing a valid 'tables' object.")
 
-    # Normalize line endings before hashing — prevents mismatch if file was
-    # opened and saved on Windows (which converts \n to \r\n)
-    normalized_content = raw_content.replace(b"\r\n", b"\n")
-    uploaded_checksum = hashlib.sha256(normalized_content).hexdigest()
-    backup_data = json.loads(raw_content)
     snapshot_name = backup_data.get("snapshot_name", "unknown")
+    if not isinstance(snapshot_name, str) or not snapshot_name.strip():
+        raise HTTPException(status_code=400, detail="Backup file is missing a valid snapshot name.")
 
-    # Checksum verification — reject if record exists and checksum doesn't match.
-    # Also reject if no record found (prevents restoring files with no known origin).
     stored_backup = await db.scalar(
         select(Backup).where(Backup.storage_path == snapshot_name)
     )
@@ -412,25 +625,29 @@ async def restore_database(
             detail="Checksum mismatch — the backup file may be corrupted or tampered with.",
         )
 
-    # Everything below runs in a single transaction.
-    # If any insert fails, the truncate is also rolled back — DB stays intact.
     managed_tables = ", ".join(name for name, _ in TABLE_ORDER)
     await db.execute(text(f"TRUNCATE TABLE {managed_tables} RESTART IDENTITY CASCADE"))
 
-    # Re-insert in dependency order
     for table_name, model_class in TABLE_ORDER:
         rows = backup_data.get("tables", {}).get(table_name, [])
         if not rows:
             continue
 
-        # form_fields has a self-referencing parent_id — insert parents first
         if table_name == "form_fields":
             rows = sorted(rows, key=lambda r: (r.get("parent_id") is not None))
 
         deserialized = [_deserialize_row(row, model_class) for row in rows]
+        if model_class is User:
+            for user_row in deserialized:
+                user_row["password_hash"] = PasswordHash.from_password(
+                    os.urandom(32).hex()
+                ).to_str()
+                user_row["reset_token_hash"] = None
+                user_row["reset_token_expires_at"] = None
+                user_row["failed_login_attempts"] = 0
+                user_row["locked_until"] = None
         await db.execute(insert(model_class).values(deserialized))
 
-    # restored_by is set to None — the restoring admin may not exist in the backup
     restore_record = RestoreEvent(
         restored_by=restored_by,
         notes=f"Restored from snapshot: {snapshot_name}",
@@ -442,6 +659,107 @@ async def restore_database(
         restored_from=snapshot_name,
         tables_restored=len(TABLE_ORDER),
         message=f"Database successfully restored from '{snapshot_name}'.",
+    )
+
+
+async def restore_database(
+    raw_content: bytes,
+    db: AsyncSession,
+    restored_by: UUID | None = None,
+) -> RestoreResponse:
+    """Verify checksum, wipe all tables, and restore from a backup JSON file."""
+
+    # Normalize line endings before hashing — prevents mismatch if file was
+    # opened and saved on Windows (which converts \n to \r\n)
+    if not raw_content or not raw_content.strip():
+        raise HTTPException(status_code=400, detail="Backup file is empty.")
+
+    normalized_content = raw_content.replace(b"\r\n", b"\n")
+    uploaded_checksum = hashlib.sha256(normalized_content).hexdigest()
+    try:
+        backup_data = json.loads(raw_content)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Backup file must be valid JSON.") from exc
+    return await _restore_backup_payload(
+        backup_data=backup_data,
+        uploaded_checksum=uploaded_checksum,
+        db=db,
+        restored_by=restored_by,
+    )
+
+
+async def preview_restore_file(
+    raw_content: bytes,
+    db: AsyncSession,
+) -> BackupPreviewResponse:
+    if not raw_content or not raw_content.strip():
+        raise HTTPException(status_code=400, detail="Backup file is empty.")
+
+    normalized_content = raw_content.replace(b"\r\n", b"\n")
+    uploaded_checksum = hashlib.sha256(normalized_content).hexdigest()
+    try:
+        backup_data = json.loads(raw_content)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Backup file must be valid JSON.") from exc
+
+    return await _build_backup_preview(
+        backup_data=backup_data,
+        uploaded_checksum=uploaded_checksum,
+        db=db,
+    )
+
+
+async def restore_backup_by_id(
+    backup_id: UUID,
+    db: AsyncSession,
+    restored_by: UUID | None = None,
+) -> RestoreResponse:
+    backup = await db.scalar(select(Backup).where(Backup.backup_id == backup_id))
+    if not backup:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    if not backup.snapshot_content:
+        raise HTTPException(
+            status_code=400,
+            detail="This older backup predates one-click restore support. Use the Restore from Backup upload panel with its downloaded JSON file instead.",
+        )
+
+    uploaded_checksum = hashlib.sha256(backup.snapshot_content.encode()).hexdigest()
+    try:
+        backup_data = json.loads(backup.snapshot_content)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail="Stored backup snapshot is invalid.") from exc
+
+    return await _restore_backup_payload(
+        backup_data=backup_data,
+        uploaded_checksum=uploaded_checksum,
+        db=db,
+        restored_by=restored_by,
+    )
+
+
+async def preview_backup_by_id(
+    backup_id: UUID,
+    db: AsyncSession,
+) -> BackupPreviewResponse:
+    backup = await db.scalar(select(Backup).where(Backup.backup_id == backup_id))
+    if not backup:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    if not backup.snapshot_content:
+        raise HTTPException(
+            status_code=400,
+            detail="This older backup does not contain embedded snapshot data for one-click preview.",
+        )
+
+    try:
+        backup_data = json.loads(backup.snapshot_content)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail="Stored backup snapshot is invalid.") from exc
+
+    return await _build_backup_preview(
+        backup_data=backup_data,
+        uploaded_checksum=backup.checksum,
+        backup_record=backup,
+        db=db,
     )
 
 
@@ -724,7 +1042,6 @@ async def update_user_status(user_id: UUID, status: str, actor_id: UUID, db: Asy
 
     new_status = status.lower() == "active"
     user.status = new_status
-    await db.commit()
 
     from app.services.audit_service import write_audit_log
     await write_audit_log(
@@ -734,7 +1051,9 @@ async def update_user_status(user_id: UUID, status: str, actor_id: UUID, db: Asy
         entity_type="user",
         entity_id=user_id,
         details={"new_status": status, "email": user.email},
+        commit=False,
     )
+    await db.commit()
 
     return user
 
@@ -770,11 +1089,6 @@ async def reactivate_user_access(user_id: UUID, payload: UserReactivateRequest, 
     user.reset_token_expires_at = reset_token_expiry(15)
     user.failed_login_attempts = 0
     user.locked_until = None
-    await db.commit()
-
-    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    reset_link = f"{frontend_url}/reset-password?token={raw_token}"
-    send_reset_email(user.email, reset_link)
 
     from app.services.audit_service import write_audit_log
     await write_audit_log(
@@ -784,10 +1098,43 @@ async def reactivate_user_access(user_id: UUID, payload: UserReactivateRequest, 
         entity_type="user",
         entity_id=user_id,
         details={"email": user.email},
+        commit=False,
     )
+    await db.commit()
+
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    reset_link = f"{frontend_url}/reset-password?token={raw_token}"
+    send_reset_email(user.email, reset_link)
 
     return {
         "detail": "User reactivated. Password reset email sent.",
+        "email": user.email,
+    }
+
+
+async def unlock_user_access(user_id: UUID, actor_id: UUID, db: AsyncSession) -> dict:
+    """Clear failed login lock state without reactivating or emailing the user."""
+    user = await db.scalar(select(User).where(User.user_id == user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.failed_login_attempts = 0
+    user.locked_until = None
+
+    from app.services.audit_service import write_audit_log
+    await write_audit_log(
+        db,
+        action="USER_UNLOCKED",
+        actor_user_id=actor_id,
+        entity_type="user",
+        entity_id=user_id,
+        details={"email": user.email},
+        commit=False,
+    )
+    await db.commit()
+
+    return {
+        "detail": "User account unlocked.",
         "email": user.email,
     }
 
@@ -810,7 +1157,6 @@ async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession
         user.phone = None
         user.Address = None
         user.status = False
-        await db.commit()
         await write_audit_log(
             db,
             action="USER_ANONYMIZED",
@@ -818,12 +1164,13 @@ async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession
             entity_type="user",
             entity_id=user_id,
             details={"mode": "anonymize"},
+            commit=False,
         )
+        await db.commit()
         return {"detail": "User anonymized successfully"}
 
     elif mode in ("delete", "permanent"):
         await db.delete(user)
-        await db.commit()
         await write_audit_log(
             db,
             action="USER_DELETED",
@@ -831,7 +1178,9 @@ async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession
             entity_type="user",
             entity_id=user_id,
             details={"mode": "delete"},
+            commit=False,
         )
+        await db.commit()
         return {"detail": "User deleted successfully"}
 
     else:
@@ -911,9 +1260,28 @@ async def list_backups(db: AsyncSession) -> list[BackupListItem]:
             created_at=b.created_at,
             checksum=b.checksum,
             created_by=b.created_by,
+            can_inline_restore=bool(b.snapshot_content),
         )
         for b in backups
     ]
+
+
+async def prune_old_backups(retention_count: int, db: AsyncSession) -> int:
+    """Keep only the newest N backup records when retention is enabled."""
+    if retention_count <= 0:
+        return 0
+
+    rows = await db.execute(
+        select(Backup.backup_id)
+        .order_by(Backup.created_at.desc(), Backup.backup_id.desc())
+        .offset(retention_count)
+    )
+    backup_ids = [backup_id for (backup_id,) in rows.all()]
+    if not backup_ids:
+        return 0
+
+    await db.execute(sa_delete(Backup).where(Backup.backup_id.in_(backup_ids)))
+    return len(backup_ids)
 
 
 async def delete_backup(backup_id: UUID, db: AsyncSession) -> dict:
@@ -925,6 +1293,74 @@ async def delete_backup(backup_id: UUID, db: AsyncSession) -> dict:
     await db.delete(backup)
     await db.commit()
     return {"detail": "Backup deleted successfully"}
+
+
+async def get_backup_schedule_settings(db: AsyncSession) -> BackupScheduleSettingsOut:
+    schedule = await db.scalar(select(BackupScheduleSettings).limit(1))
+    return _schedule_to_schema(schedule)
+
+
+async def update_backup_schedule_settings(
+    payload: BackupScheduleSettingsPayload,
+    actor_id: UUID,
+    db: AsyncSession,
+) -> BackupScheduleSettingsOut:
+    if payload.scope != "full":
+        raise HTTPException(
+            status_code=400,
+            detail="Automatic backup scope is limited to Full Backup right now.",
+        )
+
+    schedule = await db.scalar(select(BackupScheduleSettings).limit(1))
+    if not schedule:
+        schedule = BackupScheduleSettings()
+        db.add(schedule)
+
+    anchor_at_utc = schedule.anchor_at_utc
+    if payload.frequency == "biweekly":
+        anchor_at_utc = _compute_next_backup_run(
+            enabled=payload.enabled,
+            frequency=payload.frequency,
+            time_local=payload.time,
+            day_of_week=payload.day_of_week,
+            day_of_month=payload.day_of_month,
+            timezone_name=payload.timezone,
+        )
+    elif payload.frequency != "biweekly":
+        anchor_at_utc = None
+
+    schedule.enabled = payload.enabled
+    schedule.frequency = payload.frequency
+    schedule.time_local = payload.time
+    schedule.day_of_week = payload.day_of_week
+    schedule.day_of_month = payload.day_of_month if payload.frequency == "monthly" else None
+    schedule.timezone = payload.timezone
+    schedule.scope = payload.scope
+    schedule.retention_count = payload.retention_count
+    schedule.notify_on_success = payload.notify_on_success
+    schedule.notify_on_failure = payload.notify_on_failure
+    schedule.anchor_at_utc = anchor_at_utc
+    schedule.updated_at = datetime.now(timezone.utc)
+    schedule.updated_by = actor_id
+    await db.flush()
+
+    from app.services.audit_service import write_audit_log
+    await write_audit_log(
+        db,
+        action="BACKUP_SCHEDULE_UPDATED",
+        actor_user_id=actor_id,
+        entity_type="backup_schedule",
+        entity_id=schedule.schedule_id,
+        details=payload.model_dump(),
+        commit=False,
+    )
+    await db.commit()
+    await db.refresh(schedule)
+
+    from app.services.notification_scheduler import refresh_backup_schedule_job
+
+    await refresh_backup_schedule_job(schedule)
+    return _schedule_to_schema(schedule)
 
 
 # ── Participant Data (for admin drawer) ────────────────────────────────────────

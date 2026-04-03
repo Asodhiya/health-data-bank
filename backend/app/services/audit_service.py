@@ -28,6 +28,7 @@ async def write_audit_log(
     entity_type: str = "user",
     entity_id: uuid.UUID | None = None,
     details: dict | None = None,
+    commit: bool = True,
 ) -> None:
     """
     Insert one audit log row.
@@ -41,6 +42,8 @@ async def write_audit_log(
         entity_type:    The kind of object affected (default "user").
         entity_id:      UUID of the affected object.
         details:        Any extra context stored as JSONB (email attempted, role, etc.).
+        commit:         When True, persist immediately. When False, leave commit control
+                        to the caller so the audit row can participate in a larger transaction.
     """
     stmt = insert(AuditLog).values(
         actor_user_id=actor_user_id,
@@ -51,4 +54,7 @@ async def write_audit_log(
         details=details or {},
     )
     await db.execute(stmt)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()

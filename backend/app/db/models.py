@@ -480,6 +480,33 @@ class Backup(Base):
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)
     checksum: Mapped[str | None] = mapped_column(Text)
+    snapshot_content: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'manual'"))
+
+
+class BackupScheduleSettings(Base):
+    __tablename__ = "backup_schedule_settings"
+
+    schedule_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    frequency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'weekly'"))
+    time_local: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'03:00'"))
+    day_of_week: Mapped[str | None] = mapped_column(Text)
+    day_of_month: Mapped[int | None] = mapped_column(Integer)
+    timezone: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'UTC'"))
+    scope: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'full'"))
+    retention_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("5"))
+    notify_on_success: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("TRUE"))
+    notify_on_failure: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("TRUE"))
+    anchor_at_utc: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL")
+    )
 
 
 class RestoreEvent(Base):
@@ -576,6 +603,29 @@ class Notification(Base):
     source_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     read_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
+
+
+class SystemFeedback(Base):
+    __tablename__ = "system_feedback"
+
+    feedback_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL")
+    )
+    category: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'general'"))
+    subject: Mapped[str | None] = mapped_column(Text)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    page_path: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'new'"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
 
 
 class ConsentFormTemplate(Base):

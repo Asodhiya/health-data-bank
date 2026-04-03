@@ -12,7 +12,18 @@ from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import FORM_VIEW, FORM_CREATE, FORM_GET, FORM_UPDATE, FORM_DELETE, FORM_PUBLISH, FORM_UNPUBLISH
 from app.db.models import User, Group
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
-from app.services.form_management_service import list_researcher_forms, create_survey_form, get_form_by_id, update_survey_form, delete_survey_form, publish_survey_form, unpublish_survey_form, unpublish_survey_form_all
+from app.services.form_management_service import (
+    list_researcher_forms,
+    create_survey_form,
+    get_form_by_id,
+    update_survey_form,
+    delete_survey_form,
+    publish_survey_form,
+    unpublish_survey_form,
+    unpublish_survey_form_all,
+    archive_survey_form,
+    unarchive_survey_form,
+)
 
 router = APIRouter()
 
@@ -46,19 +57,28 @@ async def get_form_detail(form_id: UUID, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=str(e))
 
 @router.put("/update/{form_id}", dependencies=[Depends(require_permissions(FORM_UPDATE))])
-async def update_form(form_id: UUID, form_data: SurveyCreate, db: AsyncSession = Depends(get_db)):
+async def update_form(
+    form_id: UUID,
+    form_data: SurveyCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
     """Update existing form"""
     try:
-        updated_form = await update_survey_form(form_id, form_data, db)
+        updated_form = await update_survey_form(form_id, form_data, current_user.user_id, db)
         return updated_form
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=str(e))
 
 @router.delete("/delete/{form_id}", status_code=status.HTTP_200_OK, dependencies=[Depends(require_permissions(FORM_DELETE))])
-async def delete_form(form_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_form(
+    form_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
     """Delete form"""
     try:
-        delete = await delete_survey_form(form_id, db)
+        delete = await delete_survey_form(form_id, current_user.user_id, db)
         return delete
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=str(e))
@@ -75,15 +95,44 @@ async def publish_form(form_id: UUID, group_id: UUID, db: AsyncSession = Depends
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=str(e))
 
 @router.post("/{form_id}/unpublish/{group_id}", dependencies=[Depends(require_permissions(FORM_UNPUBLISH))])
-async def unpublish_form(form_id: UUID, group_id: UUID, db: AsyncSession = Depends(get_db)):
+async def unpublish_form(
+    form_id: UUID,
+    group_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
     """Unpublish a form from a specific group. Reverts to DRAFT if no deployments remain."""
-    return await unpublish_survey_form(form_id, group_id, db)
+    return await unpublish_survey_form(form_id, group_id, current_user.user_id, db)
 
 
 @router.post("/{form_id}/unpublish-all", dependencies=[Depends(require_permissions(FORM_UNPUBLISH))])
-async def unpublish_form_all(form_id: UUID, db: AsyncSession = Depends(get_db)):
+async def unpublish_form_all(
+    form_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
     """Unpublish a form from all groups and revert to DRAFT."""
-    return await unpublish_survey_form_all(form_id, db)
+    return await unpublish_survey_form_all(form_id, current_user.user_id, db)
+
+
+@router.post("/{form_id}/archive", dependencies=[Depends(require_permissions(FORM_UPDATE))])
+async def archive_form(
+    form_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Archive a draft form so it no longer appears as active work."""
+    return await archive_survey_form(form_id, current_user.user_id, db)
+
+
+@router.post("/{form_id}/unarchive", dependencies=[Depends(require_permissions(FORM_UPDATE))])
+async def unarchive_form(
+    form_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Restore an archived form back to draft status."""
+    return await unarchive_survey_form(form_id, current_user.user_id, db)
 
 @router.get("/groups", dependencies=[Depends(require_permissions(FORM_PUBLISH))])
 async def list_groups_for_publish(db: AsyncSession = Depends(get_db)):

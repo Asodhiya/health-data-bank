@@ -240,17 +240,25 @@ function ToggleSwitch({ checked, onChange }) {
 function SearchableSelect({ value, onChange, options, placeholder = 'Search...' }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const inputRef = useRef(null);
 
-  const filtered = query
-    ? options.filter((o) => o.toLowerCase().includes(query.toLowerCase()))
-    : options;
+  const filtered = (() => {
+    if (!query) return options;
+    const normalized = query.toLowerCase();
+    const startsWith = options.filter((o) => o.toLowerCase().startsWith(normalized));
+    const contains = options.filter(
+      (o) => !o.toLowerCase().startsWith(normalized) && o.toLowerCase().includes(normalized),
+    );
+    return [...startsWith, ...contains];
+  })();
 
   const handleSelect = (val) => {
     onChange(val);
     setQuery('');
     setOpen(false);
+    setHighlightedIndex(0);
   };
 
   const handleFocus = () => {
@@ -259,6 +267,41 @@ function SearchableSelect({ value, onChange, options, placeholder = 'Search...' 
       setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
     }
     setOpen(true);
+    setHighlightedIndex(0);
+  };
+
+  const handleKeyDown = (e) => {
+    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      handleFocus();
+      e.preventDefault();
+      return;
+    }
+
+    if (!open) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((idx) => Math.min(idx + 1, Math.max(filtered.length - 1, 0)));
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((idx) => Math.max(idx - 1, 0));
+      return;
+    }
+
+    if (e.key === 'Enter' && filtered[highlightedIndex]) {
+      e.preventDefault();
+      handleSelect(filtered[highlightedIndex]);
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+      setQuery('');
+    }
   };
 
   return (
@@ -268,12 +311,13 @@ function SearchableSelect({ value, onChange, options, placeholder = 'Search...' 
         className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         placeholder={placeholder}
         value={open ? query : value || ''}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); setHighlightedIndex(0); }}
         onFocus={handleFocus}
+        onKeyDown={handleKeyDown}
       />
       {open && (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setQuery(''); }} />
           <ul
             className="fixed z-20 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"
             style={{ top: `${dropdownPos.top}px`, left: `${dropdownPos.left}px`, width: `${dropdownPos.width}px` }}
@@ -281,9 +325,16 @@ function SearchableSelect({ value, onChange, options, placeholder = 'Search...' 
             {filtered.length === 0 ? (
               <li className="px-3 py-2.5 text-sm text-slate-400">No results</li>
             ) : (
-              filtered.map((opt) => (
+              filtered.map((opt, index) => (
                 <li key={opt}
-                  className={`px-3 py-2 text-sm cursor-pointer transition-colors ${opt === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}
+                  className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
+                    index === highlightedIndex
+                      ? 'bg-blue-50 text-blue-700 font-medium'
+                      : opt === value
+                        ? 'text-blue-700 font-medium'
+                        : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                  onMouseEnter={() => setHighlightedIndex(index)}
                   onClick={() => handleSelect(opt)}
                 >{opt}</li>
               ))

@@ -18,6 +18,7 @@ from app.api.routes import (
     Caretakers,
     onboarding,
     researcher,
+    feedback,
 )
 
 router = APIRouter()
@@ -37,3 +38,4 @@ router.include_router(goal_templates.router, prefix="/goal-templates", tags=["Go
 router.include_router(Caretakers.router, prefix="/caretaker", tags=["Caretaker"])
 router.include_router(onboarding.router, prefix="/onboarding", tags=["Onboarding"])
 router.include_router(researcher.router, prefix="/researcher", tags=["Researcher"])
+router.include_router(feedback.router, prefix="/feedback", tags=["Feedback"])

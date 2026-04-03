@@ -1,10 +1,16 @@
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import func, select
+from sqlalchemy.exc import ProgrammingError
+from zoneinfo import ZoneInfo
 
+from app.core.config import settings
 from app.db.models import (
     Backup,
+    BackupScheduleSettings,
     CaretakerProfile,
     FormSubmission,
     GoalTemplate,
@@ -17,6 +23,7 @@ from app.db.models import (
     UserRole,
 )
 from app.db.session import AsyncSessionLocal
+from app.services.admin_service import backup_database, prune_old_backups
 from app.services.notification_service import (
     create_notification,
     notification_exists_recent,
@@ -24,11 +31,185 @@ from app.services.notification_service import (
 
 _scheduler: AsyncIOScheduler | None = None
 
+_WEEKDAY_TO_CRON = {
+    "sunday": "sun",
+    "monday": "mon",
+    "tuesday": "tue",
+    "wednesday": "wed",
+    "thursday": "thu",
+    "friday": "fri",
+    "saturday": "sat",
+}
+
+_WEEKDAY_TO_INDEX = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+
+def _get_default_backup_schedule():
+    return {
+        "enabled": settings.SCHEDULED_BACKUPS_ENABLED,
+        "frequency": "daily",
+        "time_local": f"{settings.SCHEDULED_BACKUP_HOUR_UTC:02d}:{settings.SCHEDULED_BACKUP_MINUTE_UTC:02d}",
+        "day_of_week": "sunday",
+        "day_of_month": None,
+        "timezone": "UTC",
+        "scope": "full",
+        "retention_count": 5,
+        "notify_on_success": True,
+        "notify_on_failure": True,
+        "anchor_at_utc": None,
+    }
+
+
+def _as_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+async def _load_backup_schedule(db) -> BackupScheduleSettings | dict | None:
+    try:
+        schedule = await db.scalar(select(BackupScheduleSettings).limit(1))
+    except ProgrammingError:
+        await db.rollback()
+        return _get_default_backup_schedule()
+    if schedule is not None:
+        return schedule
+    return _get_default_backup_schedule()
+
+
+def _get_schedule_attr(schedule, field: str):
+    if isinstance(schedule, dict):
+        return schedule.get(field)
+    return getattr(schedule, field)
+
+
+def _compute_next_biweekly_anchor(
+    *,
+    timezone_name: str,
+    day_of_week: str,
+    time_local: str,
+    now_utc: datetime | None = None,
+) -> datetime:
+    now_utc = now_utc or datetime.now(timezone.utc)
+    local_now = now_utc.astimezone(ZoneInfo(timezone_name))
+    hour, minute = (int(part) for part in time_local.split(":"))
+    target_weekday = _WEEKDAY_TO_INDEX[day_of_week]
+    days_ahead = (target_weekday - local_now.weekday()) % 7
+    candidate = (local_now + timedelta(days=days_ahead)).replace(
+        hour=hour,
+        minute=minute,
+        second=0,
+        microsecond=0,
+    )
+    if candidate <= local_now:
+        candidate += timedelta(days=7)
+    return candidate.astimezone(timezone.utc)
+
+
+def _build_backup_trigger(schedule) -> CronTrigger | IntervalTrigger | None:
+    if not _get_schedule_attr(schedule, "enabled"):
+        return None
+
+    timezone_name = _get_schedule_attr(schedule, "timezone") or "UTC"
+    time_local = _get_schedule_attr(schedule, "time_local")
+    hour, minute = (int(part) for part in time_local.split(":"))
+    frequency = _get_schedule_attr(schedule, "frequency")
+
+    if frequency == "daily":
+        return CronTrigger(hour=hour, minute=minute, timezone=timezone_name)
+
+    if frequency == "weekly":
+        return CronTrigger(
+            day_of_week=_WEEKDAY_TO_CRON[_get_schedule_attr(schedule, "day_of_week") or "sunday"],
+            hour=hour,
+            minute=minute,
+            timezone=timezone_name,
+        )
+
+    if frequency == "monthly":
+        return CronTrigger(
+            day=_get_schedule_attr(schedule, "day_of_month") or 1,
+            hour=hour,
+            minute=minute,
+            timezone=timezone_name,
+        )
+
+    if frequency == "biweekly":
+        anchor_at_utc = _as_utc(_get_schedule_attr(schedule, "anchor_at_utc"))
+        if anchor_at_utc is None:
+            anchor_at_utc = _compute_next_biweekly_anchor(
+                timezone_name=timezone_name,
+                day_of_week=_get_schedule_attr(schedule, "day_of_week") or "sunday",
+                time_local=time_local,
+            )
+        return IntervalTrigger(weeks=2, start_date=anchor_at_utc, timezone=timezone.utc)
+
+    return None
+
+
+async def _notify_admins_of_scheduled_backup(db, *, success: bool, message: str) -> None:
+    rows = await db.execute(
+        select(User.user_id)
+        .join(UserRole, UserRole.user_id == User.user_id)
+        .join(Role, Role.role_id == UserRole.role_id)
+        .where(Role.role_name == "admin")
+    )
+    title = "Scheduled backup completed" if success else "Scheduled backup failed"
+    notification_type = "success" if success else "flag"
+    source_type = "scheduled_backup_success" if success else "scheduled_backup_failure"
+
+    for (admin_id,) in rows.all():
+        await create_notification(
+            db=db,
+            user_id=admin_id,
+            notification_type=notification_type,
+            title=title,
+            message=message,
+            link="/admin/backup",
+            role_target="admin",
+            source_type=source_type,
+        )
+
+
+async def refresh_backup_schedule_job(schedule: BackupScheduleSettings | dict | None = None) -> None:
+    global _scheduler
+    if _scheduler is None:
+        return
+
+    existing_job = _scheduler.get_job("scheduled_backup")
+    if existing_job is not None:
+        _scheduler.remove_job("scheduled_backup")
+
+    if schedule is None:
+        async with AsyncSessionLocal() as db:
+            schedule = await _load_backup_schedule(db)
+
+    trigger = _build_backup_trigger(schedule)
+    if trigger is None:
+        return
+
+    _scheduler.add_job(
+        _run_scheduled_backup,
+        trigger=trigger,
+        id="scheduled_backup",
+        replace_existing=True,
+    )
+
 
 async def _notify_backup_overdue() -> None:
     async with AsyncSessionLocal() as db:
         now = datetime.now(timezone.utc)
-        latest_backup = await db.scalar(select(func.max(Backup.created_at)))
+        latest_backup = _as_utc(await db.scalar(select(func.max(Backup.created_at))))
         overdue = not latest_backup or latest_backup < (now - timedelta(days=7))
         if not overdue:
             return
@@ -63,6 +244,53 @@ async def _notify_backup_overdue() -> None:
         await db.commit()
 
 
+async def _run_scheduled_backup() -> None:
+    async with AsyncSessionLocal() as db:
+        schedule = await _load_backup_schedule(db)
+        if not _get_schedule_attr(schedule, "enabled"):
+            return
+
+        now = datetime.now(timezone.utc)
+        latest_backup = _as_utc(
+            await db.scalar(
+                select(func.max(Backup.created_at)).where(Backup.source == "scheduled")
+            )
+        )
+        if latest_backup and latest_backup >= (now - timedelta(hours=23)):
+            return
+
+        try:
+            _, snapshot_name = await backup_database(
+                created_by=None,
+                db=db,
+                source="scheduled",
+            )
+
+            retention_count = int(_get_schedule_attr(schedule, "retention_count") or 0)
+            if retention_count > 0:
+                deleted = await prune_old_backups(retention_count, db)
+                if deleted:
+                    await db.commit()
+
+            if _get_schedule_attr(schedule, "notify_on_success"):
+                await _notify_admins_of_scheduled_backup(
+                    db,
+                    success=True,
+                    message=f"Scheduled backup '{snapshot_name}' completed successfully.",
+                )
+                await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            if _get_schedule_attr(schedule, "notify_on_failure"):
+                async with AsyncSessionLocal() as notify_db:
+                    await _notify_admins_of_scheduled_backup(
+                        notify_db,
+                        success=False,
+                        message=f"Scheduled backup failed: {exc}",
+                    )
+                    await notify_db.commit()
+
+
 async def _notify_goal_deadlines() -> None:
     async with AsyncSessionLocal() as db:
         now = datetime.now(timezone.utc)
@@ -83,6 +311,7 @@ async def _notify_goal_deadlines() -> None:
             .where(HealthGoal.end_date <= soon)
         )
         for goal_id, user_id, goal_name, end_date in rows.all():
+            end_date = _as_utc(end_date)
             exists = await notification_exists_recent(
                 db,
                 user_id=user_id,
@@ -140,6 +369,7 @@ async def _notify_inactivity() -> None:
         )
 
         for participant_id, participant_user_id, last_submitted_at, caretaker_id in rows.all():
+            last_submitted_at = _as_utc(last_submitted_at)
             inactive = (last_submitted_at is None) or (last_submitted_at < threshold)
             if not inactive:
                 continue
@@ -194,7 +424,7 @@ async def _notify_inactivity() -> None:
         await db.commit()
 
 
-def start_notification_scheduler() -> None:
+async def start_notification_scheduler() -> None:
     global _scheduler
     if _scheduler and _scheduler.running:
         return
@@ -203,6 +433,7 @@ def start_notification_scheduler() -> None:
     _scheduler.add_job(_notify_inactivity, "cron", hour=2, minute=10, id="notify_inactivity", replace_existing=True)
     _scheduler.add_job(_notify_goal_deadlines, "cron", hour=2, minute=20, id="notify_goal_deadlines", replace_existing=True)
     _scheduler.add_job(_notify_backup_overdue, "cron", hour=2, minute=30, id="notify_backup_overdue", replace_existing=True)
+    await refresh_backup_schedule_job()
     _scheduler.start()
 
 

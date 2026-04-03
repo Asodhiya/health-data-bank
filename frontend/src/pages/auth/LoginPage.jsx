@@ -21,7 +21,15 @@ export default function LoginPage() {
     try {
       await api.login(identifier.trim(), password);
       const me = await refetch(); 
-      const role = me?.Role?.[0] ?? null;
+      const roles = Array.from(
+        new Set(
+          (Array.isArray(me?.Role) ? me.Role : [])
+            .map((value) => String(value || "").trim().toLowerCase())
+            .filter(Boolean),
+        ),
+      );
+      const savedRole = window.localStorage.getItem("hdb:active-role");
+      const role = savedRole && roles.includes(savedRole) ? savedRole : (roles[0] ?? null);
       if (role) {
         navigate(`/${role}`, { replace: true });
       } else {

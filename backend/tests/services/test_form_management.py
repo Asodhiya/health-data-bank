@@ -23,6 +23,7 @@ def make_db():
     db.commit = AsyncMock()
     db.delete = AsyncMock()
     db.execute = AsyncMock()
+    db.scalar = AsyncMock(return_value=None)
     return db
 
 

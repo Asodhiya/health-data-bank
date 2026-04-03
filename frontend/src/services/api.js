@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
+const API_BASE = import.meta.env.VITE_API_URL || "/api/v1";
 
 function normalizeNotificationRole(role) {
   const normalized = String(role || "").toLowerCase();
@@ -7,6 +7,73 @@ function normalizeNotificationRole(role) {
   if (normalized === "caretaker") return "caretaker";
   if (normalized === "researcher") return "researcher";
   return normalized;
+}
+
+function formatRetryAfter(secondsHeader) {
+  const seconds = Number(secondsHeader);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? "" : "s"}`;
+
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+function formatRateLimitMessage(detail, retryAfter) {
+  const waitTime = formatRetryAfter(retryAfter);
+  const waitSuffix = waitTime ? ` Please wait ${waitTime} and try again.` : " Please try again later.";
+
+  if (detail.includes("auth:login:identifier")) {
+    return `Too many login attempts for this account.${waitSuffix}`;
+  }
+
+  if (detail.includes("auth:login:ip")) {
+    return `Too many login attempts from this network.${waitSuffix}`;
+  }
+
+  if (detail.includes("auth:forgot-password:email")) {
+    return `Too many password reset requests for this email.${waitSuffix}`;
+  }
+
+  if (detail.includes("auth:forgot-password:ip")) {
+    return `Too many password reset requests from this network.${waitSuffix}`;
+  }
+
+  if (detail.includes("auth:register")) {
+    return `Too many registration attempts.${waitSuffix}`;
+  }
+
+  if (detail.includes("auth:reset-password")) {
+    return `Too many password reset attempts.${waitSuffix}`;
+  }
+
+  if (detail.includes("auth:signup_invite")) {
+    return `Too many invite requests.${waitSuffix}`;
+  }
+
+  return `Too many requests.${waitSuffix}`;
+}
+
+function getErrorMessage(res, data) {
+  const detail =
+    typeof data?.detail === "string"
+      ? data.detail
+      : Array.isArray(data?.detail)
+        ? data.detail.map((d) => d.msg).join(", ")
+        : "Something went wrong";
+
+  if (res.status === 429) {
+    return formatRateLimitMessage(detail, res.headers.get("Retry-After"));
+  }
+
+  return detail;
+}
+
+async function parseJsonSafely(res) {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 async function request(endpoint, options = {}) {
@@ -25,13 +92,7 @@ async function request(endpoint, options = {}) {
   }
 
   if (!res.ok) {
-    const msg =
-      typeof data.detail === "string"
-        ? data.detail
-        : Array.isArray(data.detail)
-          ? data.detail.map((d) => d.msg).join(", ")
-          : "Something went wrong";
-    throw new Error(msg);
+    throw new Error(getErrorMessage(res, data));
   }
 
   return data;
@@ -125,8 +186,8 @@ export const api = {
       credentials: "include",
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || "Failed to create backup");
+      const err = await parseJsonSafely(res);
+      throw new Error(getErrorMessage(res, err));
     }
     const blob = await res.blob();
     const disposition = res.headers.get("Content-Disposition") || "";
@@ -152,8 +213,21 @@ export const api = {
       credentials: "include",
       body: form,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Restore failed");
+    const data = await parseJsonSafely(res);
+    if (!res.ok) throw new Error(getErrorMessage(res, data));
+    return data;
+  },
+
+  previewRestoreBackup: async (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/admin_only/restore/preview`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    const data = await parseJsonSafely(res);
+    if (!res.ok) throw new Error(getErrorMessage(res, data));
     return data;
   },
 
@@ -163,6 +237,20 @@ export const api = {
   // TODO (backend): Add DELETE /admin_only/backups/{backup_id} endpoint
   deleteBackup: (backupId) =>
     request(`/admin_only/backups/${backupId}`, { method: "DELETE" }),
+
+  restoreBackupFromHistory: (backupId) =>
+    request(`/admin_only/backups/${backupId}/restore`, { method: "POST" }),
+
+  previewBackupFromHistory: (backupId) =>
+    request(`/admin_only/backups/${backupId}/preview`),
+
+  adminGetBackupSchedule: () => request("/admin_only/backup-schedule"),
+
+  adminUpdateBackupSchedule: (payload) =>
+    request("/admin_only/backup-schedule", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
 
   // ── Admin: Groups (REAL — backed by /admin_only/groups) ──
 
@@ -237,6 +325,11 @@ export const api = {
     request(`/admin_only/users/${userId}/reactivate`, {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+
+  adminUnlockUser: (userId) =>
+    request(`/admin_only/users/${userId}/unlock`, {
+      method: "POST",
     }),
 
   adminDeleteUser: (userId, mode) =>
@@ -401,6 +494,9 @@ export const api = {
   // Feedback
   caretakerListFeedback: (participantId) =>
     request(`/caretaker/participants/${participantId}/feedback`),
+
+  participantListFeedback: () =>
+    request("/participant/feedback"),
 
   caretakerCreateFeedback: (participantId, submissionId, message) =>
     request(`/caretaker/participants/${participantId}/submissions/${submissionId}/feedback`, {

@@ -3,7 +3,8 @@ Auth Schemas
 """
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, EmailStr, Field, model_validator
+import re
+from pydantic import BaseModel, EmailStr, Field, model_validator, field_validator
 from typing import Optional, Dict, Any, Literal
 
 
@@ -37,6 +38,52 @@ class UserSignup(BaseModel):
     confirm_password: str
     phone: str
     address: str
+
+    @field_validator("first_name", "last_name", "username", "password", "confirm_password", "phone", "address")
+    @classmethod
+    def validate_not_empty(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("Field cannot be left empty or whitespace")
+        return value.strip()
+
+    @field_validator("username")
+    @classmethod
+    def validate_username_format(cls, value: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9_]+$", value):
+            raise ValueError("Username must contain only alphanumeric characters and underscores")
+        return value
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, value: str) -> str:
+        errors = []
+        if len(value) < 8:
+            errors.append("Password must be at least 8 characters long.")
+        if not re.search(r"[A-Z]", value):
+            errors.append("Password must contain at least one uppercase letter.")
+        if not re.search(r"[a-z]", value):
+            errors.append("Password must contain at least one lowercase letter.")
+        if not re.search(r"[0-9]", value):
+            errors.append("Password must contain at least one digit.")
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", value):
+            errors.append("Password must contain at least one special character.")
+        if errors:
+            raise ValueError(" ".join(errors))
+        return value
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: str) -> str:
+        digits_only = re.sub(r"\D", "", value)
+        if len(digits_only) != 10:
+            raise ValueError("phone number must contain exactly 10 digits")
+        return digits_only
+
+    @model_validator(mode="after")
+    def validate_passwords_match(self):
+        if self.password != self.confirm_password:
+            raise ValueError("Passwords do not match")
+        return self
 
 class SurveyRequest(BaseModel):
     # If empty, sets default value to a dictionary
@@ -230,5 +277,70 @@ class ParticipantVsGroupOut(BaseModel):
     """
     participant_id: UUID
     comparisons: list[GroupComparisonElementOut]
+
+
+FeedbackCategory = Literal[
+    "general",
+    "bug",
+    "issue",
+    "feature",
+    "accessibility",
+    "support",
+    "account",
+    "performance",
+]
+FeedbackStatus = Literal["new", "in_review", "in_progress", "resolved", "dismissed"]
+
+
+class SystemFeedbackCreate(BaseModel):
+    category: FeedbackCategory = "general"
+    subject: Optional[str] = None
+    message: str
+    page_path: Optional[str] = None
+
+    @field_validator("subject", "page_path")
+    @classmethod
+    def normalize_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) < 5:
+            raise ValueError("Message must be at least 5 characters long.")
+        if len(cleaned) > 5000:
+            raise ValueError("Message must be 5000 characters or fewer.")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_issue_subject(self):
+        if self.category in {"bug", "issue", "support", "account", "performance"}:
+            if not self.subject:
+                raise ValueError("Subject is required when reporting an issue.")
+        return self
+
+
+class SystemFeedbackStatusUpdate(BaseModel):
+    status: FeedbackStatus
+
+
+class SystemFeedbackItem(BaseModel):
+    feedback_id: UUID
+    user_id: Optional[UUID]
+    category: str
+    subject: Optional[str]
+    message: str
+    page_path: Optional[str]
+    status: str
+    reviewed_at: Optional[datetime]
+    reviewed_by: Optional[UUID]
+    created_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
 
 

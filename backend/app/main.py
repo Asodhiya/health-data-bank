@@ -20,7 +20,7 @@ async def lifespan(app: FastAPI):
     async for db in get_db():
         await seed_onboarding_data(db)
         break
-    start_notification_scheduler()
+    await start_notification_scheduler()
     yield
     stop_notification_scheduler()
 

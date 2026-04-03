@@ -90,6 +90,67 @@ client = TestClient(test_app)
 
 
 class TestParticipantUpdatesHealthGoals:
+    def test_caretaker_participant_detail_returns_group_memberships(self):
+        group_id = uuid.uuid4()
+        joined_at = datetime(2026, 4, 1, 9, 0, tzinfo=timezone.utc)
+        participant_row = (
+            SimpleNamespace(participant_id=TEST_PARTICIPANT_ID),
+            "Test",
+            "User",
+            joined_at,
+        )
+        memberships = [
+            {
+                "group_id": group_id,
+                "name": "North Cohort",
+                "description": "Primary care group",
+                "joined_at": joined_at,
+            }
+        ]
+
+        with (
+            patch(
+                "app.api.routes.Caretakers.CaretakersQuery.get_group_participant",
+                AsyncMock(return_value=participant_row),
+            ),
+            patch(
+                "app.api.routes.Caretakers.CaretakersQuery.get_participant_group_memberships",
+                AsyncMock(return_value=memberships),
+            ),
+        ):
+            res = client.get(
+                f"/api/v1/caretaker/participants/{TEST_PARTICIPANT_ID}?group_id={group_id}"
+            )
+
+        assert res.status_code == 200
+        body = res.json()
+        assert body["participant_id"] == str(TEST_PARTICIPANT_ID)
+        assert body["groups"][0]["group_id"] == str(group_id)
+        assert body["groups"][0]["name"] == "North Cohort"
+
+    def test_list_my_feedback_uses_authenticated_participant_id(self):
+        feedback_id = uuid.uuid4()
+        caretaker_id = uuid.uuid4()
+        row = SimpleNamespace(
+            feedback_id=feedback_id,
+            caretaker_id=caretaker_id,
+            participant_id=TEST_PARTICIPANT_ID,
+            submission_id=None,
+            message="Keep it up",
+            created_at=datetime(2026, 3, 30, 12, 0, tzinfo=timezone.utc),
+        )
+
+        with patch(
+            "app.api.routes.participants_only.CaretakersQuery.list_feedback",
+            AsyncMock(return_value=[row]),
+        ) as mock_list:
+            res = client.get("/api/v1/participant/feedback")
+
+        assert res.status_code == 200
+        assert res.json()[0]["participant_id"] == str(TEST_PARTICIPANT_ID)
+        assert res.json()[0]["message"] == "Keep it up"
+        assert mock_list.await_args.args[0] == TEST_PARTICIPANT_ID
+
     def test_patch_goal_target_success(self):
         goal_id = uuid.uuid4()
         expected = {"goal_id": str(goal_id), "target_value": 55}
@@ -132,9 +193,15 @@ class TestParticipantUpdatesHealthGoals:
             "logged_at": "2026-03-30T12:00:00+00:00",
             "value": 2,
         }
-        with patch(
-            "app.api.routes.participants_only.ParticipantQuery.log_progress",
-            AsyncMock(return_value=expected),
+        with (
+            patch(
+                "app.api.routes.participants_only.ParticipantQuery.log_progress",
+                AsyncMock(return_value=expected),
+            ),
+            patch(
+                "app.api.routes.participants_only.ParticipantQuery.get_goal_progress",
+                AsyncMock(return_value={"completed": False, "entries": [expected]}),
+            ),
         ):
             res = client.post(
                 f"/api/v1/participant/goals/{goal_id}/log",
@@ -165,11 +232,16 @@ class TestParticipantUpdatesHealthGoals:
 class TestAuditLoggingSecurityCriticalActions:
     def test_login_success_writes_audit(self):
         user = _make_user(email="login@test.com")
+        session = SimpleNamespace(session_id=uuid.uuid4())
         with (
             patch(
                 "app.api.routes.auth.authenticate_user",
                 AsyncMock(return_value=user),
             ),
+            patch(
+                "app.api.routes.auth.create_user_session",
+                AsyncMock(return_value=session),
+            ) as mock_session,
             patch("app.api.routes.auth.write_audit_log", AsyncMock()) as mock_audit,
             patch("app.api.routes.auth.create_access_token", return_value="token"),
             patch("app.api.routes.auth._set_cookie"),
@@ -180,8 +252,16 @@ class TestAuditLoggingSecurityCriticalActions:
             )
         assert res.status_code == 200
         assert mock_audit.await_args.kwargs["action"] == "LOGIN_SUCCESS"
+        assert mock_session.await_args.args[0] == user.user_id
 
     def test_login_failure_writes_audit(self):
+        fake_db = AsyncMock()
+        fake_db.scalar = AsyncMock(return_value=0)
+        fake_db.execute = AsyncMock(return_value=MagicMock(all=lambda: []))
+
+        async def fake_db_dep():
+            return fake_db
+
         with (
             patch(
                 "app.api.routes.auth.authenticate_user",
@@ -189,19 +269,78 @@ class TestAuditLoggingSecurityCriticalActions:
             ),
             patch("app.api.routes.auth.write_audit_log", AsyncMock()) as mock_audit,
         ):
-            res = client.post(
-                "/api/v1/auth/login",
-                json={"identifier": "wrong@test.com", "password": "bad"},
-            )
+            test_app.dependency_overrides[get_db] = fake_db_dep
+            try:
+                res = client.post(
+                    "/api/v1/auth/login",
+                    json={"identifier": "wrong@test.com", "password": "bad"},
+                )
+            finally:
+                test_app.dependency_overrides.pop(get_db, None)
         assert res.status_code == 401
         assert mock_audit.await_args.kwargs["action"] == "LOGIN_FAILED"
         assert mock_audit.await_args.kwargs["actor_user_id"] is None
+
+    def test_locked_login_writes_account_lock_audit_and_admin_flag(self):
+        locked_user = _make_user(email="locked@test.com")
+        fake_db = AsyncMock()
+        fake_db.scalar = AsyncMock(side_effect=[locked_user, 0])
+        fake_db.execute = AsyncMock(return_value=MagicMock(all=lambda: [(uuid.uuid4(),)]))
+
+        async def fake_db_dep():
+            return fake_db
+
+        with (
+            patch(
+                "app.api.routes.auth.authenticate_user",
+                AsyncMock(side_effect=HTTPException(status_code=423, detail="locked")),
+            ),
+            patch("app.api.routes.auth.write_audit_log", AsyncMock()) as mock_audit,
+            patch("app.api.routes.auth._notify_admins_about_locked_account", AsyncMock()) as mock_notify,
+        ):
+            test_app.dependency_overrides[get_db] = fake_db_dep
+            try:
+                res = client.post(
+                    "/api/v1/auth/login",
+                    json={"identifier": "locked@test.com", "password": "bad"},
+                )
+            finally:
+                test_app.dependency_overrides[get_db] = _fake_db
+
+        assert res.status_code == 423
+        actions = [call.kwargs["action"] for call in mock_audit.await_args_list]
+        assert "LOGIN_FAILED" in actions
+        assert "ACCOUNT_LOCKED" in actions
+        assert mock_notify.await_count == 1
 
     def test_logout_writes_audit(self):
         with patch("app.api.routes.auth.write_audit_log", AsyncMock()) as mock_audit:
             res = client.post("/api/v1/auth/logout")
         assert res.status_code == 200
         assert mock_audit.await_args.kwargs["action"] == "LOGOUT"
+
+    def test_self_deactivate_writes_audit_in_same_transaction(self):
+        fake_db = AsyncMock()
+        fake_db.execute = AsyncMock(return_value=MagicMock(all=lambda: []))
+
+        async def fake_db_dep():
+            return fake_db
+
+        with (
+            patch("app.api.routes.auth.UserQuery.get_user_roles", AsyncMock(return_value=["participant"])),
+            patch("app.api.routes.auth.create_notifications_bulk", AsyncMock()),
+            patch("app.api.routes.auth.write_audit_log", AsyncMock()) as mock_audit,
+        ):
+            test_app.dependency_overrides[get_db] = fake_db_dep
+            try:
+                res = client.post("/api/v1/auth/self-deactivate")
+            finally:
+                test_app.dependency_overrides[get_db] = _fake_db
+
+        assert res.status_code == 200
+        assert mock_audit.await_args.kwargs["action"] == "USER_SELF_DEACTIVATED"
+        assert mock_audit.await_args.kwargs["commit"] is False
+        fake_db.commit.assert_awaited_once()
 
     def test_forgot_password_writes_audit(self):
         with (
@@ -226,6 +365,128 @@ class TestAuditLoggingSecurityCriticalActions:
 
 
 class TestAuthenticationApiEndpoints:
+    def test_submit_feedback_delegates_to_service(self):
+        feedback_id = uuid.uuid4()
+        returned = {
+            "feedback_id": str(feedback_id),
+            "user_id": str(TEST_USER_ID),
+            "category": "issue",
+            "subject": "Broken form",
+            "message": "Submitting the form throws an error.",
+            "page_path": "/participant/survey",
+            "status": "new",
+            "reviewed_at": None,
+            "reviewed_by": None,
+            "created_at": "2026-04-03T10:00:00+00:00",
+        }
+
+        with patch(
+            "app.api.routes.feedback.submit_system_feedback",
+            AsyncMock(return_value=returned),
+        ) as mock_submit:
+            res = client.post(
+                "/api/v1/feedback",
+                json={
+                    "category": "issue",
+                    "subject": "Broken form",
+                    "message": "Submitting the form throws an error.",
+                    "page_path": "/participant/survey",
+                },
+            )
+
+        assert res.status_code == 201
+        assert res.json()["feedback_id"] == str(feedback_id)
+        assert mock_submit.await_args.args[1] == TEST_USER_ID
+
+    def test_list_my_system_feedback_delegates_to_service(self):
+        feedback_id = uuid.uuid4()
+        returned = [
+            {
+                "feedback_id": str(feedback_id),
+                "user_id": str(TEST_USER_ID),
+                "category": "feature",
+                "subject": "Need export",
+                "message": "Please add export support.",
+                "page_path": "/participant",
+                "status": "new",
+                "reviewed_at": None,
+                "reviewed_by": None,
+                "created_at": "2026-04-03T10:00:00+00:00",
+            }
+        ]
+
+        with patch(
+            "app.api.routes.feedback.list_my_feedback",
+            AsyncMock(return_value=returned),
+        ) as mock_list:
+            res = client.get("/api/v1/feedback/me")
+
+        assert res.status_code == 200
+        assert res.json()[0]["feedback_id"] == str(feedback_id)
+        assert mock_list.await_args.args[0] == TEST_USER_ID
+
+    def test_admin_unlock_user_delegates_to_service(self):
+        target_user_id = uuid.uuid4()
+        returned = {"detail": "User account unlocked.", "email": "locked@test.com"}
+
+        with patch(
+            "app.api.routes.admin_only.unlock_user_access",
+            AsyncMock(return_value=returned),
+        ) as mock_unlock:
+            res = client.post(f"/api/v1/admin_only/users/{target_user_id}/unlock")
+
+        assert res.status_code == 200
+        assert res.json() == returned
+        assert mock_unlock.await_args.args[0] == target_user_id
+
+    def test_register_delegates_to_auth_service(self):
+        returned = {"detail": "registered"}
+
+        with patch(
+            "app.api.routes.auth.register_user_from_invite",
+            AsyncMock(return_value=returned),
+        ) as mock_register:
+            res = client.post(
+                "/api/v1/auth/register?token=test-token",
+                json={
+                    "first_name": "Pat",
+                    "last_name": "User",
+                    "username": "pat_user",
+                    "email": "pat@example.com",
+                    "password": "StrongPass1!",
+                    "confirm_password": "StrongPass1!",
+                    "phone": "1234567890",
+                    "address": "123 Main St",
+                },
+            )
+
+        assert res.status_code == 200
+        assert res.json() == returned
+        assert mock_register.await_args.args[0] == "test-token"
+
+    def test_validate_invite_delegates_to_auth_service(self):
+        returned = {
+            "email": "invite@example.com",
+            "role": "participant",
+            "expires_at": "2026-04-10T10:00:00+00:00",
+        }
+
+        with patch(
+            "app.api.routes.auth.validate_signup_invite_token",
+            AsyncMock(
+                return_value={
+                    "email": returned["email"],
+                    "expires_at": returned["expires_at"],
+                    "role": SimpleNamespace(role_name=returned["role"]),
+                }
+            ),
+        ) as mock_validate:
+            res = client.get("/api/v1/auth/validate-invite?token=good-token")
+
+        assert res.status_code == 200
+        assert res.json() == returned
+        assert mock_validate.await_args.args[0] == "good-token"
+
     def test_login_validation_fails_when_payload_missing_fields(self):
         res = client.post("/api/v1/auth/login", json={"identifier": "only-id"})
         assert res.status_code == 422
@@ -266,8 +527,8 @@ class TestAuthenticationApiEndpoints:
 
     def test_validate_invite_invalid_token(self):
         with patch(
-            "app.api.routes.auth.InviteQuery.get_invite_by_token_hash",
-            AsyncMock(return_value=None),
+            "app.api.routes.auth.validate_signup_invite_token",
+            AsyncMock(side_effect=HTTPException(status_code=400, detail="Invalid invite token")),
         ):
             res = client.get("/api/v1/auth/validate-invite?token=bad")
 

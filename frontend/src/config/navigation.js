@@ -117,4 +117,9 @@ export const PARTICIPANT_NAV = [
     to: "/participant/healthgoals",
     roles: ["participant"],
   },
+  {
+    label: "Messages",
+    to: "/participant/messages",
+    roles: ["participant"],
+  },
 ];
