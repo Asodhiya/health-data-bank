@@ -3,8 +3,10 @@ import { useState, useEffect } from "react";
 import { api } from "../services/api";
 import { DASHBOARD_NAV } from "../config/navigation";
 import NotificationBell from "../components/NotificationBell";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function DashboardLayout({ role }) {
+  const { logout } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [user, setUser] = useState(null);
@@ -94,8 +96,8 @@ export default function DashboardLayout({ role }) {
                 <button
                   onClick={async () => {
                     setIsProfileMenuOpen(false);
-                    await api.logout();
-                    navigate("/login");
+                    await logout();
+                    navigate("/login", { replace: true });
                   }}
                   className="block w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-slate-50"
                 >

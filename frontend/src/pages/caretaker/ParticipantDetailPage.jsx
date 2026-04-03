@@ -948,8 +948,9 @@ export default function ParticipantDetailPage() {
         // Non-critical — enrolledAt will show "—"
       }
 
-      // 4. Transform and set participant
-      setParticipant(transformParticipant(thisParticipant, firstGroup.name, enrolledAt));
+      // 4. Transform and set participant — look up the correct group for this participant
+      const participantGroup = Array.isArray(groups) ? groups.find(g => String(g.group_id) === String(thisParticipant.group_id)) : null;
+      setParticipant(transformParticipant(thisParticipant, participantGroup?.name || firstGroup.name, enrolledAt));
 
       // 5. Fetch submissions
       try {
