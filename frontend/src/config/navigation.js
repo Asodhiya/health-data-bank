@@ -117,4 +117,14 @@ export const PARTICIPANT_NAV = [
     to: "/participant/healthgoals",
     roles: ["participant"],
   },
+  {
+    label: "Health Summary",
+    to: "/participant/health-summary",
+    roles: ["participant"],
+  },
+  {
+    label: "Feedback",
+    to: "/participant/feedback",
+    roles: ["participant"],
+  },
 ];

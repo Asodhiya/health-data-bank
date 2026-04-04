@@ -253,67 +253,82 @@ export default function ParticipantDashboard() {
           <div className="flex-1 flex flex-col sm:flex-row items-center justify-around gap-10 py-4">
             {loading ? (
               <div className="flex gap-10 w-full justify-around">
-                <div className="w-44 h-44 rounded-full bg-slate-100 animate-pulse" />
-                <div className="w-44 h-44 rounded-full bg-slate-100 animate-pulse" />
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-44 h-44 rounded-full bg-slate-100 animate-pulse" />
+                  <div className="h-3 w-24 bg-slate-100 rounded-full animate-pulse" />
+                </div>
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-44 h-44 rounded-full bg-slate-100 animate-pulse" />
+                  <div className="h-3 w-24 bg-slate-100 rounded-full animate-pulse" />
+                </div>
               </div>
-            ) : null}
-            {/* Survey ring — uses full assigned list for a stable denominator */}
-            <DonutRing
-              filled={completedSurveys}
-              total={totalSurveys}
-              color="#7dd3fc"
-              label="Assigned Surveys"
-              sublabel="completed overall"
-            >
-              <div className="flex justify-center gap-3 text-xs mt-1">
-                <span className="flex items-center gap-1 text-slate-500">
-                  <span className="inline-block w-2 h-2 rounded-full bg-sky-300" />
-                  {completedSurveys} Done
-                </span>
-                <span className="flex items-center gap-1 text-slate-500">
-                  <span className="inline-block w-2 h-2 rounded-full bg-blue-300" />
-                  {inProgressSurveys} In Progress
-                </span>
-                <span className="flex items-center gap-1 text-slate-500">
-                  <span className="inline-block w-2 h-2 rounded-full bg-slate-300" />
-                  {newSurveys} New
-                </span>
-              </div>
-            </DonutRing>
+            ) : (
+              <>
+                {/* Survey ring — uses full assigned list for a stable denominator */}
+                <DonutRing
+                  filled={completedSurveys}
+                  total={totalSurveys}
+                  color="#7dd3fc"
+                  label="Assigned Surveys"
+                  sublabel="completed overall"
+                >
+                  <div className="flex justify-center gap-3 text-xs mt-1">
+                    <span className="flex items-center gap-1 text-slate-500">
+                      <span className="inline-block w-2 h-2 rounded-full bg-sky-300" />
+                      {completedSurveys} Done
+                    </span>
+                    <span className="flex items-center gap-1 text-slate-500">
+                      <span className="inline-block w-2 h-2 rounded-full bg-blue-300" />
+                      {inProgressSurveys} In Progress
+                    </span>
+                    <span className="flex items-center gap-1 text-slate-500">
+                      <span className="inline-block w-2 h-2 rounded-full bg-slate-300" />
+                      {newSurveys} New
+                    </span>
+                  </div>
+                </DonutRing>
 
-            <div className="hidden sm:block h-32 w-px bg-slate-100" />
-            <div className="block sm:hidden w-32 h-px bg-slate-100" />
+                <div className="hidden sm:block h-32 w-px bg-slate-100" />
+                <div className="block sm:hidden w-32 h-px bg-slate-100" />
 
-            {/* Goals ring — today's target vs met */}
-            <DonutRing
-              filled={stats?.goals_met || 0}
-              total={stats?.active_goals || 0}
-              color="#86efac"
-              label="Health Goals"
-              sublabel="met today"
-            >
-              <div className="flex justify-center gap-3 text-xs mt-1">
-                <span className="flex items-center gap-1 text-slate-500">
-                  <span className="inline-block w-2 h-2 rounded-full bg-green-300" />
-                  {stats?.goals_met || 0} Met
-                </span>
-                <span className="flex items-center gap-1 text-slate-500">
-                  <span className="inline-block w-2 h-2 rounded-full bg-slate-300" />
-                  {stats?.goal_remaining || 0} Remaining
-                </span>
-              </div>
-            </DonutRing>
+                {/* Goals ring — today's target vs met */}
+                <DonutRing
+                  filled={stats?.goals_met || 0}
+                  total={stats?.active_goals || 0}
+                  color="#86efac"
+                  label="Health Goals"
+                  sublabel="met today"
+                >
+                  <div className="flex justify-center gap-3 text-xs mt-1">
+                    <span className="flex items-center gap-1 text-slate-500">
+                      <span className="inline-block w-2 h-2 rounded-full bg-green-300" />
+                      {stats?.goals_met || 0} Met
+                    </span>
+                    <span className="flex items-center gap-1 text-slate-500">
+                      <span className="inline-block w-2 h-2 rounded-full bg-slate-300" />
+                      {stats?.goal_remaining || 0} Remaining
+                    </span>
+                  </div>
+                </DonutRing>
+              </>
+            )}
           </div>
         </div>
 
         {/* Daily Success Card */}
-        <div className={`rounded-2xl p-6 shadow-md border flex flex-col justify-between h-full transition-colors duration-500 ${totalTarget === 0 ? "bg-emerald-50 border-emerald-100 shadow-emerald-100" : "bg-white border-slate-100 shadow-slate-100"}`}>
+        <div className={`rounded-2xl p-6 shadow-md border flex flex-col justify-between h-full transition-colors duration-500 ${!loading && totalTarget === 0 ? "bg-emerald-50 border-emerald-100 shadow-emerald-100" : "bg-white border-slate-100 shadow-slate-100"}`}>
           <div>
             <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Today's Progress</p>
             <h2 className="text-lg font-bold text-slate-800 mt-0.5">Daily Success</h2>
           </div>
 
-          {totalTarget === 0 ? (
+          {loading ? (
+            <div className="my-6 space-y-4">
+              <div className="h-12 w-24 bg-slate-100 rounded-xl animate-pulse mx-auto" />
+              <div className="h-3 w-40 bg-slate-100 rounded-full animate-pulse mx-auto" />
+              <div className="h-3 w-32 bg-slate-100 rounded-full animate-pulse mx-auto" />
+            </div>
+          ) : totalTarget === 0 ? (
             /* REST DAY / ALL CAUGHT UP EMPTY STATE */
             <div className="my-6 text-center space-y-3">
               <p className="text-2xl font-black text-emerald-600 tracking-tight">
@@ -351,7 +366,9 @@ export default function ParticipantDashboard() {
           )}
 
           <div className="space-y-4 pt-6 border-t border-slate-100">
-            {totalTarget === 0 ? (
+            {loading ? (
+              <div className="w-full bg-slate-100 h-2 rounded-full animate-pulse" />
+            ) : totalTarget === 0 ? (
               /* Full green bar for rest day */
               <div className="w-full bg-emerald-100 h-2.5 rounded-full overflow-hidden shadow-inner">
                 <div className="bg-gradient-to-r from-emerald-400 to-emerald-500 h-full w-full rounded-full shadow-sm" />

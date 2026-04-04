@@ -32,6 +32,8 @@ import FormListPage from "./pages/participant/FormListPage";
 import SurveyFillPage from "./pages/participant/SurveyFillPage";
 import HealthGoals from "./pages/participant/HealthGoals";
 import Messages from "./pages/participant/Message";
+import ParticipantFeedback from "./pages/participant/ParticipantFeedback";
+import ParticipantHealthSummary from "./pages/participant/ParticipantHealthSummary";
 
 // ── Admin pages ──
 import UserManagementPage from "./pages/admin/UserManagementPage";
@@ -111,6 +113,8 @@ function App() {
             />
             <Route path="/participant/healthgoals" element={<HealthGoals />} />
             <Route path="/participant/messages" element={<Messages />} />
+            <Route path="/participant/feedback" element={<ParticipantFeedback />} />
+            <Route path="/participant/health-summary" element={<ParticipantHealthSummary />} />
             <Route path="/participant/survey" element={<FormListPage />} />
             <Route
               path="/participant/surveys/:id"
