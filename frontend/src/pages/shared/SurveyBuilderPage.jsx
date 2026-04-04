@@ -79,7 +79,7 @@ const transformForSave = (form) => {
 const transformForEdit = (backendForm) => {
   return {
     ...backendForm,
-    fields: backendForm.fields.map(f => {
+    fields: (backendForm.fields || []).map(f => {
       if (f.field_type === 'likert') {
         const sortedOpts = f.options.sort((a, b) => a.value - b.value);
         const min = sortedOpts.length > 0 ? sortedOpts[0].value : 0;
@@ -140,7 +140,7 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
    FORM LIST VIEW
    #6 tab counts, #7 sort, #8 publish date, #9 empty state
    ══════════════════════════════════════════════ */
-function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, onUnpublish, onArchive, onUnarchive, groups, pageTitle = 'Survey Forms' }) {
+function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, onUnpublish, onArchive, groups, pageTitle = 'Survey Forms' }) {
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sort, setSort]                 = useState('edited');
@@ -247,7 +247,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
     const groupIds = [...publishGroups];
     modal.ids.forEach((id) => {
       const f = forms.find((x) => x.form_id === id);
-      if (f && f.status === 'DRAFT') onPublish(id, groupIds);
+      if (f && (f.status === 'DRAFT' || f.status === 'ARCHIVED')) onPublish(id, groupIds);
     });
     setSelected((prev) => { const n = new Set(prev); modal.ids.forEach((id) => n.delete(id)); return n; });
     setModal(null);
@@ -554,21 +554,15 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                     </>
                   )}
                   {form.status === 'DRAFT' && (
-                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition text-[10px] font-bold px-2" title="Archive"
-                      onClick={(e) => { e.stopPropagation(); setModal({ type: 'archive', ids: [form.form_id], formTitle: form.title, isPublished: false }); }}>
-                      Archive
-                    </button>
-                  )}
-                  {form.status === 'DRAFT' && (
                     <button className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition" title="Edit"
                       onClick={(e) => { e.stopPropagation(); onEdit(form); }}>
                       <EditIco />
                     </button>
                   )}
                   {form.status === 'ARCHIVED' && (
-                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition text-[10px] font-bold px-2" title="Restore to Draft"
-                      onClick={(e) => { e.stopPropagation(); onUnarchive(form.form_id); }}>
-                      Restore
+                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition text-[10px] font-bold px-2" title="Create new version"
+                      onClick={(e) => { e.stopPropagation(); onBranch(form); }}>
+                      New Version
                     </button>
                   )}
                   <button className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition" title="Delete"
@@ -755,12 +749,12 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
       {/* ── UNPUBLISH MODAL ── */}
       {modal?.type === 'unpublish' && (
         <ConfirmModal title={modal.formTitle ? `Unpublish "${modal.formTitle}"` : 'Unpublish Forms'}
-          message={modal.formTitle ? `Unpublish "${modal.formTitle}"? It will revert to draft status.` : `Unpublish ${selectedPublished.length} form${selectedPublished.length > 1 ? 's' : ''}?`}
+          message={modal.formTitle ? `Unpublish "${modal.formTitle}"? It will be archived.` : `Unpublish ${selectedPublished.length} form${selectedPublished.length > 1 ? 's' : ''}?`}
           confirmLabel="Unpublish" confirmClass="bg-amber-600 hover:bg-amber-700" onConfirm={handleConfirmUnpublish} onClose={() => setModal(null)}>
           <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600">
             <div className="flex items-start gap-2">
               <span className="shrink-0 mt-0.5"><InfoIco /></span>
-              <span>Unpublished forms revert to draft. Participants will lose access.</span>
+              <span>Unpublished forms are archived. Participants will lose access.</span>
             </div>
           </div>
         </ConfirmModal>
@@ -786,7 +780,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
             )}
             <div className="flex items-start gap-2 text-emerald-700">
               <span className="shrink-0 mt-0.5"><CheckIco /></span>
-              <span>You can restore it to draft at any time from the version history.</span>
+              <span>All existing responses are preserved. Use <strong>Update</strong> to create a new editable version.</span>
             </div>
           </div>
         </ConfirmModal>
@@ -1012,7 +1006,7 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
    BUILDER VIEW
    #1 unsaved changes, #2 auto-save, #3 drag reorder, #4 validation
    ══════════════════════════════════════════════ */
-function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onArchive, onUnarchive, dataElements, onDataElementCreated }) {
+function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onArchive, dataElements, onDataElementCreated }) {
   const [title, setTitle]       = useState(form?.title || '');
   const [desc, setDesc]         = useState(form?.description || '');
   const [fields, setFields]     = useState(form?.fields || []);
@@ -1028,6 +1022,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   const [lastSaved, setLastSaved]       = useState(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
 
   const isLocked = !!form?._locked;
   const isDraft = !isLocked && (!form?.status || form.status === 'DRAFT');
@@ -1061,8 +1056,10 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
 
   /* #1 — Unsaved changes warning */
   const handleBackClick = () => {
-    if (isDirtyRef.current) setShowUnsavedModal(true);
-    else onBack();
+    if (isDirtyRef.current) {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+      setShowUnsavedModal(true);
+    } else onBack();
   };
 
   /* #1 — beforeunload protection */
@@ -1227,15 +1224,9 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                     {form?.status === 'ARCHIVED' ? 'Archived — view only' : 'Published — view only'}
                   </span>
                   {onArchive && form?.status !== 'ARCHIVED' && (
-                    <button onClick={() => onArchive(form?.form_id)}
+                    <button onClick={() => setShowArchiveModal(true)}
                       className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 transition shadow-sm">
                       Archive
-                    </button>
-                  )}
-                  {onUnarchive && form?.status === 'ARCHIVED' && (
-                    <button onClick={() => onUnarchive(form?.form_id)}
-                      className="px-4 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl hover:bg-emerald-100 transition shadow-sm">
-                      Restore to Draft
                     </button>
                   )}
                   {onBranch && (
@@ -1374,6 +1365,48 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
 
 
       {/* #1 — Unsaved changes modal */}
+      {showArchiveModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowArchiveModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 pt-6 pb-4">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
+                  <Svg size={20} sw={2} stroke="#475569" d={<><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></>} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">Archive this form?</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">This action affects participants immediately.</p>
+                </div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5 text-xs text-slate-600">
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 font-bold text-[10px]">!</span>
+                  <span>The form will be removed from all groups — participants will lose access immediately.</span>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 font-bold text-[10px]">!</span>
+                  <span>Archived forms cannot be edited. Use <strong>Update</strong> to create a new editable version.</span>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-bold text-[10px]">✓</span>
+                  <span>All existing responses are preserved and remain accessible.</span>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+              <button onClick={() => setShowArchiveModal(false)}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
+                Cancel
+              </button>
+              <button onClick={() => { setShowArchiveModal(false); onArchive(form?.form_id); }}
+                className="px-4 py-2 text-sm font-semibold text-white bg-slate-700 hover:bg-slate-800 rounded-xl transition shadow-sm">
+                Archive
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showUnsavedModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowUnsavedModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
@@ -1491,12 +1524,11 @@ export default function SurveyBuilderPage() {
 
   const confirmBranch = async () => {
     const form = branchModal.form;
-    const nextVersion = (form.version || 1) + 1;
     setBranching(true);
     try {
       const result = await api.branchForm(form.form_id);
       setBranchModal(null);
-      showToast(`v${nextVersion} created — opening draft…`);
+      showToast(`v${result.version} created — opening draft…`);
       const fullForm = await api.getFormDetail(result.form_id);
       const transformed = transformForEdit(fullForm);
       localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: fullForm.form_id, form: transformed }));
@@ -1617,20 +1649,6 @@ export default function SurveyBuilderPage() {
     }
   };
 
-  const handleUnarchive = async (formId) => {
-    try {
-      await api.unarchiveForm(formId);
-      showToast('Form restored to draft');
-      if (view === 'builder' && editingForm?.form_id === formId) {
-        const updatedForm = { ...editingForm, status: 'DRAFT' };
-        setEditingForm(updatedForm);
-        localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: updatedForm.form_id, form: updatedForm }));
-      }
-      loadForms();
-    } catch (err) {
-      showToast(err.message || 'Error restoring form');
-    }
-  };
 
   if (loading) return (
     <div className="max-w-4xl mx-auto">
@@ -1660,7 +1678,6 @@ export default function SurveyBuilderPage() {
           onPublish={handlePublishFromList}
           onUnpublish={handleUnpublish}
           onArchive={handleArchive}
-          onUnarchive={handleUnarchive}
           pageTitle={pageTitle}
         />
       )}
@@ -1674,7 +1691,6 @@ export default function SurveyBuilderPage() {
           onDelete={handleDelete}
           onBranch={handleBranch}
           onArchive={handleArchive}
-            onUnarchive={handleUnarchive}
           dataElements={dataElements}
           onDataElementCreated={(el) => setDataElements((prev) => [...prev, el])}
         />
@@ -1682,7 +1698,7 @@ export default function SurveyBuilderPage() {
 
       {/* Branch confirmation modal */}
       {branchModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="px-6 pt-6 pb-4">
               <div className="flex items-start gap-3 mb-4">
@@ -1700,16 +1716,18 @@ export default function SurveyBuilderPage() {
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5 text-xs text-slate-600">
                 <div className="flex items-start gap-2.5">
                   <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-bold text-[10px]">✓</span>
-                  <span>The current published version and all its responses are preserved.</span>
+                  <span>{branchModal.form.status === 'ARCHIVED' ? 'The archived version and all its responses are preserved.' : 'The current published version and all its responses are preserved.'}</span>
                 </div>
                 <div className="flex items-start gap-2.5">
                   <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-bold text-[10px]">✓</span>
                   <span>A new draft copy is created — you can edit and publish it when ready.</span>
                 </div>
-                <div className="flex items-start gap-2.5">
-                  <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 font-bold text-[10px]">!</span>
-                  <span>Participants assigned to this survey will need to fill out the new version.</span>
-                </div>
+                {branchModal.form.status !== 'ARCHIVED' && (
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 font-bold text-[10px]">!</span>
+                    <span>Participants assigned to this survey will need to fill out the new version.</span>
+                  </div>
+                )}
               </div>
             </div>
 

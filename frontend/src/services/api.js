@@ -185,13 +185,7 @@ export const api = {
   archiveForm: (formId) =>
     request(`/form_management/${formId}/archive`, { method: "POST" }),
 
-  unarchiveForm: (formId) =>
-    request(`/form_management/${formId}/unarchive`, { method: "POST" }),
-
-  getFormDeployments: (formId) =>
-    request(`/form_management/${formId}/deployments`),
-
-  // ── Admin: Audit Logs ──
+// ── Admin: Audit Logs ──
   getAuditLogs: ({ limit = 20, offset = 0, action } = {}) => {
     const params = new URLSearchParams({ limit, offset });
     if (action) params.set("action", action);

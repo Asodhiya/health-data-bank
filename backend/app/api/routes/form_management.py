@@ -25,7 +25,6 @@ from app.services.form_management_service import (
     unpublish_survey_form,
     unpublish_survey_form_all,
     archive_survey_form,
-    unarchive_survey_form,
 )
 from typing import List as TypingList
 
@@ -123,7 +122,7 @@ async def unpublish_form(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_current_user),
 ):
-    """Unpublish a form from a specific group. Reverts to DRAFT if no deployments remain."""
+    """Unpublish a form from a specific group. Archives it if no deployments remain."""
     return await unpublish_survey_form(form_id, group_id, current_user.user_id, db)
 
 
@@ -133,7 +132,7 @@ async def unpublish_form_all(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_current_user),
 ):
-    """Unpublish a form from all groups and revert to DRAFT."""
+    """Unpublish a form from all groups and archive it."""
     return await unpublish_survey_form_all(form_id, current_user.user_id, db)
 
 
@@ -157,14 +156,6 @@ async def archive_form(
     return await archive_survey_form(form_id, current_user.user_id, db)
 
 
-@router.post("/{form_id}/unarchive", dependencies=[Depends(require_permissions(FORM_UPDATE))])
-async def unarchive_form(
-    form_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_current_user),
-):
-    """Restore an archived form back to draft status."""
-    return await unarchive_survey_form(form_id, current_user.user_id, db)
 
 @router.get("/groups", dependencies=[Depends(require_permissions(FORM_PUBLISH))])
 async def list_groups_for_publish(db: AsyncSession = Depends(get_db)):
