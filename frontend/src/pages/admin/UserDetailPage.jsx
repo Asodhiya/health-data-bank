@@ -57,6 +57,7 @@ function Toast({ message, onClose }) { if (!message) return null; return <div cl
 function fmt(d) { if (!d) return "—"; return new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" }); }
 function fmtTime(d) { if (!d) return "—"; return new Date(d).toLocaleString("en-CA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
 function timeAgo(d) { if (!d) return "—"; const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000); if (s < 60) return "Just now"; if (s < 3600) return `${Math.floor(s / 60)}m ago`; if (s < 86400) return `${Math.floor(s / 3600)}h ago`; return `${Math.floor(s / 86400)}d ago`; }
+function isLocked(user) { return !!user?.lockedUntil && new Date(user.lockedUntil).getTime() > Date.now(); }
 
 function ApiPendingBanner({ endpoint, description }) {
   return <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-6 text-center">
@@ -293,6 +294,7 @@ export default function UserDetailPage() {
 
   // ── Derived ──
   const isAnonymized = user?.email?.startsWith("deleted_");
+  const locked = isLocked(user);
   const filteredActivity = useMemo(() => {
     if (!activityLogs) return [];
     if (actFilter === "all") return activityLogs;
@@ -340,6 +342,16 @@ export default function UserDetailPage() {
     msg(user.status === "active" ? "User deactivated." : "User reactivated.");
   };
 
+  const handleUnlocked = async () => {
+    try {
+      await api.adminUnlockUser(user.id);
+      setUser(p => ({ ...p, lockedUntil: null, failedLoginAttempts: 0 }));
+      msg("User unlocked.");
+    } catch (err) {
+      msg(err.message || "Failed to unlock user.");
+    }
+  };
+
   const handleDeleted = () => {
     setShowDeleteModal(false);
     msg("User deleted.");
@@ -372,6 +384,7 @@ export default function UserDetailPage() {
               <RoleBadge role={user.role} />
               <StatusDot status={user.status} />
               <span className="text-sm text-slate-500 capitalize font-medium">{user.status}</span>
+              {locked && <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full uppercase">Locked</span>}
               {isAnonymized && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full uppercase">Anonymized</span>}
             </div>
             <p className="text-sm text-slate-400 mt-1">{user.email}</p>
@@ -391,6 +404,11 @@ export default function UserDetailPage() {
           {user.role === "participant" && (
             <button onClick={() => setShowChangeGroup(true)} className="px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 flex items-center gap-1.5">
               <Ic d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" c="h-3.5 w-3.5" /> Change Group
+            </button>
+          )}
+          {locked && (
+            <button onClick={handleUnlocked} className="px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100 flex items-center gap-1.5">
+              <Ic d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" c="h-3.5 w-3.5" /> Unlock
             </button>
           )}
           <div className="flex-1" />
@@ -417,7 +435,7 @@ export default function UserDetailPage() {
           <StatCard label="Account Status" value={user.status === "active" ? "Active" : "Inactive"} sub={`Failed logins: ${user.failedLoginAttempts}`} icon="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" color={user.status === "active" ? "emerald" : "amber"} />
           <StatCard label="Activity" value={activityLogs?.length ?? "—"} sub="Total events" icon="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" color="violet" />
         </>}
-        <StatCard label="Failed Logins" value={user.failedLoginAttempts} sub={user.lockedUntil ? `Locked until ${fmtTime(user.lockedUntil)}` : "Not locked"} icon="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" color={user.failedLoginAttempts > 3 ? "rose" : "amber"} />
+        <StatCard label="Failed Logins" value={user.failedLoginAttempts} sub={locked ? `Locked until ${fmtTime(user.lockedUntil)}` : "Not locked"} icon="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" color={user.failedLoginAttempts > 3 || locked ? "rose" : "amber"} />
       </div>
 
       {/* ═══ TABBED CONTENT ═══ */}
@@ -679,7 +697,7 @@ export default function UserDetailPage() {
                     </div>
                   } />
                   <InfoRow label="Failed Login Attempts" value={<span className={user.failedLoginAttempts > 3 ? "text-rose-600 font-semibold" : ""}>{user.failedLoginAttempts}</span>} />
-                  <InfoRow label="Account Locked" value={user.lockedUntil ? <span className="text-rose-600 font-semibold">Until {fmtTime(user.lockedUntil)}</span> : <span className="text-emerald-600">No</span>} />
+                  <InfoRow label="Account Locked" value={locked ? <span className="text-rose-600 font-semibold">Until {fmtTime(user.lockedUntil)}</span> : <span className="text-emerald-600">No</span>} />
                   <InfoRow label="Last Login" value={fmtTime(user.lastLoginAt)} />
                   <InfoRow label="MFA" value={<span className="text-amber-600 font-medium">Not implemented</span>} />
                 </div>

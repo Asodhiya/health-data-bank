@@ -13,9 +13,10 @@ from sqlalchemy import select
 from app.db.session import get_db
 from app.core.dependency import require_permissions
 from app.core.permissions import GOAL_VIEW_ALL, GOAL_ADD, GOAL_EDIT, GOAL_DELETE
-from app.db.queries.Queries import ParticipantQuery, GoalTemplateQuery, get_participant_id
+from app.db.queries.Queries import ParticipantQuery, GoalTemplateQuery, CaretakersQuery, get_participant_id
 from app.schemas.schemas import HealthGoalUpdate, GoalProgressLog
 from app.schemas.notification_schema import NotificationItem
+from app.schemas.caretaker_response_schema import FeedbackItem
 from app.services.notification_service import (
     list_notifications_for_user,
     mark_notification_read_for_user,
@@ -177,6 +178,27 @@ async def log_goal_progress(
             )
 
     return data_point
+
+
+@router.get("/feedback", response_model=list[FeedbackItem])
+async def list_my_feedback(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
+):
+    """Return caretaker feedback for the authenticated participant only."""
+    participant_id = get_participant_id(current_user)
+    rows = await CaretakersQuery(db).list_feedback(participant_id)
+    return [
+        FeedbackItem(
+            feedback_id=row.feedback_id,
+            caretaker_id=row.caretaker_id,
+            participant_id=row.participant_id,
+            submission_id=row.submission_id,
+            message=row.message,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
 
 
 @router.get("/notifications", response_model=list[NotificationItem])

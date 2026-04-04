@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, Query, UploadFile, File
+from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
 from fastapi.responses import Response
 from app.schemas.schemas import Role_schema, Permissions_schema, Role_user_link, Link_role_permission_schema
-from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResponse, UnassignCaretakerResponse, CaretakerItem, DeleteGroupResponse, RestoreResponse, AdminProfileUpdate, AdminProfileOut, UserListItem, AdminUserUpdate, UserStatusUpdate, UserReactivateRequest, UserDeleteRequest, MoveParticipantRequest, InviteListItem, BackupListItem
+from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResponse, UnassignCaretakerResponse, CaretakerItem, DeleteGroupResponse, RestoreResponse, BackupPreviewResponse, AdminProfileUpdate, AdminProfileOut, UserListItem, AdminUserUpdate, UserStatusUpdate, UserReactivateRequest, UserDeleteRequest, MoveParticipantRequest, InviteListItem, BackupListItem, BackupScheduleSettingsOut, BackupScheduleSettingsPayload
 from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem, GroupUpdateRequest
 from app.schemas.notification_schema import NotificationItem
 from app.services.role_service import addroles, viewroles, add_permissions, link_user_roles, link_role_permisson
-from app.services.admin_service import assign_caretaker_to_group, unassign_caretaker_from_group, create_group, delete_group, update_group, move_participant_group, list_groups, list_caretakers, backup_database, restore_database, list_users, update_user, update_user_status, reactivate_user_access, delete_user, list_invites, revoke_invite, list_backups, delete_backup, get_user_submissions, get_user_goals, get_onboarding_stats, get_survey_completion_stats
+from app.services.admin_service import assign_caretaker_to_group, unassign_caretaker_from_group, create_group, delete_group, update_group, move_participant_group, list_groups, list_caretakers, backup_database, restore_database, preview_restore_file, restore_backup_by_id, preview_backup_by_id, list_users, update_user, update_user_status, reactivate_user_access, unlock_user_access, delete_user, list_invites, revoke_invite, list_backups, delete_backup, get_backup_schedule_settings, update_backup_schedule_settings, get_user_submissions, get_user_goals, get_onboarding_stats, get_survey_completion_stats
 from typing import List
 from app.db.session import get_db
 from app.db.models import Role, AuditLog, User, AdminProfile
@@ -14,13 +14,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
 from typing import Optional
 from app.core.permissions import ROLE_READ_ALL, GROUP_READ, GROUP_WRITE, GROUP_DELETE, CARETAKER_READ, CARETAKER_ASSIGN, BACKUP_CREATE, USER_READ, USER_WRITE, USER_DELETE
+from app.core.config import settings
 from uuid import UUID
 from app.services.notification_service import (
     list_notifications_for_user,
     mark_notification_read_for_user,
 )
+from app.core.rate_limit import rate_limit
 
 router = APIRouter()
+
+backup_rate_limit = rate_limit(
+    scope="admin:backup",
+    limit=100 if settings.DEBUG else 5,
+    window_seconds=3600,
+)
+restore_rate_limit = rate_limit(
+    scope="admin:restore",
+    limit=30 if settings.DEBUG else 3,
+    window_seconds=3600,
+)
 
 
 # ── Existing role/permission endpoints ──────────────────────────────────────
@@ -190,7 +203,7 @@ async def unassign_caretaker(
 
 # ── Backup & Restore endpoints (SPRINT 6) ─────────────────────────────────────
 
-@router.get("/backup")
+@router.get("/backup", dependencies=[Depends(backup_rate_limit)])
 async def backup_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(BACKUP_CREATE)),
@@ -204,15 +217,49 @@ async def backup_endpoint(
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
-@router.post("/restore", response_model=RestoreResponse)
+@router.post("/restore", response_model=RestoreResponse, dependencies=[Depends(restore_rate_limit)])
 async def restore_endpoint(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(BACKUP_CREATE)),
 ):
     """Upload a backup JSON file to wipe and restore the database."""
+    allowed_content_types = {
+        "application/json",
+        "text/json",
+        "text/plain",
+        "application/octet-stream",
+    }
+    if file.content_type not in allowed_content_types:
+        raise HTTPException(status_code=400, detail="Backup upload must be a JSON file.")
+
     raw_content = await file.read()
+    if not raw_content.strip():
+        raise HTTPException(status_code=400, detail="Backup upload is empty.")
+
     return await restore_database(raw_content, db, restored_by=current_user.user_id)
+
+
+@router.post("/restore/preview", response_model=BackupPreviewResponse, dependencies=[Depends(backup_rate_limit)])
+async def preview_restore_endpoint(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(BACKUP_CREATE)),
+):
+    allowed_content_types = {
+        "application/json",
+        "text/json",
+        "text/plain",
+        "application/octet-stream",
+    }
+    if file.content_type not in allowed_content_types:
+        raise HTTPException(status_code=400, detail="Backup upload must be a JSON file.")
+
+    raw_content = await file.read()
+    if not raw_content.strip():
+        raise HTTPException(status_code=400, detail="Backup upload is empty.")
+
+    return await preview_restore_file(raw_content, db)
 
 
 # ── Admin Profile ────────────────────────────────────────────────────────────
@@ -295,6 +342,15 @@ async def reactivate_user(
     return await reactivate_user_access(user_id, payload, actor.user_id, db)
 
 
+@router.post("/users/{user_id}/unlock", dependencies=[Depends(require_permissions(USER_WRITE))])
+async def unlock_user(
+    user_id: UUID,
+    actor: User = Depends(check_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await unlock_user_access(user_id, actor.user_id, db)
+
+
 @router.delete("/users/{user_id}", dependencies=[Depends(require_permissions(USER_DELETE))])
 async def remove_user(
     user_id: UUID,
@@ -345,6 +401,47 @@ async def get_backups(db: AsyncSession = Depends(get_db)):
 @router.delete("/backups/{backup_id}", dependencies=[Depends(require_permissions(BACKUP_CREATE))])
 async def remove_backup(backup_id: UUID, db: AsyncSession = Depends(get_db)):
     return await delete_backup(backup_id, db)
+
+
+@router.post("/backups/{backup_id}/restore", response_model=RestoreResponse, dependencies=[Depends(require_permissions(BACKUP_CREATE))])
+async def restore_backup_from_history(
+    backup_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    return await restore_backup_by_id(backup_id, db, restored_by=current_user.user_id)
+
+
+@router.get("/backups/{backup_id}/preview", response_model=BackupPreviewResponse, dependencies=[Depends(require_permissions(BACKUP_CREATE))])
+async def preview_backup_from_history(
+    backup_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    return await preview_backup_by_id(backup_id, db)
+
+
+@router.get(
+    "/backup-schedule",
+    response_model=BackupScheduleSettingsOut,
+    dependencies=[Depends(require_permissions(BACKUP_CREATE))],
+)
+async def get_backup_schedule(
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_backup_schedule_settings(db)
+
+
+@router.put(
+    "/backup-schedule",
+    response_model=BackupScheduleSettingsOut,
+    dependencies=[Depends(require_permissions(BACKUP_CREATE))],
+)
+async def put_backup_schedule(
+    payload: BackupScheduleSettingsPayload,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    return await update_backup_schedule_settings(payload, current_user.user_id, db)
 
 
 # ── Notifications ─────────────────────────────────────────────────────────────

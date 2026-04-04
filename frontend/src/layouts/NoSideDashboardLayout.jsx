@@ -1,35 +1,19 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { api } from "../services/api";
 import { PARTICIPANT_NAV } from "../config/navigation";
 import NotificationBell from "../components/NotificationBell";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function NoSidebarDashboardLayout() {
-  const { logout } = useAuth();
+  const { user, roles, loading, logout, switchRole } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const navigate = useNavigate();
-
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api.me()
-      .then((data) => {
-        setUser({
-          firstName: data.first_name,
-          lastName: data.last_name,
-        });
-      })
-      .catch((error) => {
-        console.error("Error fetching user:", error);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, []);
+  const canSwitchRoles =
+    import.meta.env.DEV &&
+    roles.length > 1 &&
+    user?.email === "dev.allroles@healthdatabank.local";
 
   // BUG 12 fix: close profile dropdown on outside click
   useEffect(() => {
@@ -121,7 +105,7 @@ export default function NoSidebarDashboardLayout() {
               }}
               className="w-8 h-8 rounded-full bg-green-600 hover:bg-green-700 text-white flex items-center justify-center font-bold transition-colors"
             >
-              {user?.firstName?.charAt(0) ?? '?'}
+              {user?.first_name?.charAt(0) ?? "?"}
             </button>
 
             {/* The Profile Dropdown Menu */}
@@ -141,6 +125,38 @@ export default function NoSidebarDashboardLayout() {
                 >
                   Settings
                 </Link>
+                {canSwitchRoles && (
+                  <>
+                    <div className="border-t border-slate-100 my-1"></div>
+                    <div className="px-4 py-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                        Dev Role Switch
+                      </p>
+                      <div className="flex flex-col gap-1">
+                        {roles.map((availableRole) => {
+                          const active = availableRole === "participant";
+                          return (
+                            <button
+                              key={availableRole}
+                              onClick={() => {
+                                switchRole(availableRole);
+                                setIsProfileMenuOpen(false);
+                                navigate(`/${availableRole}`, { replace: true });
+                              }}
+                              className={`rounded-md px-2.5 py-1.5 text-left text-sm font-medium capitalize transition-colors ${
+                                active
+                                  ? "bg-blue-50 text-blue-700"
+                                  : "text-slate-600 hover:bg-slate-50"
+                              }`}
+                            >
+                              {availableRole}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
                 <div className="border-t border-slate-100 my-1"></div>
                 <button
                   onClick={async () => {

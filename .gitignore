@@ -45,6 +45,7 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+pytest-cache-files-*/
 backend/tests/**/*_report.html
 backend/tests/services/test_survey_bug_fixes.py
 

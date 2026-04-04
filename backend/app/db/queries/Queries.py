@@ -12,6 +12,17 @@ from datetime import date, datetime, timezone, timedelta, time
 from app.db.models import FormField
 from types import SimpleNamespace
 
+
+def _utc_today() -> date:
+    return datetime.now(timezone.utc).date()
+
+
+def _utc_day_bounds(target_date: date | None = None) -> tuple[datetime, datetime]:
+    current_date = target_date or _utc_today()
+    start = datetime.combine(current_date, time.min).replace(tzinfo=timezone.utc)
+    end = start + timedelta(days=1)
+    return start, end
+
 def get_participant_id(current_user: User) -> uuid.UUID:
     """
     Extract participant_id from the authenticated user's loaded profile.
@@ -648,8 +659,7 @@ class StatsQuery:
         active_forms = len(deployed)
 
         # Forms filled today + active goals count — combined into one round trip
-        today_start = datetime.combine(date.today(), time.min).replace(tzinfo=timezone.utc)
-        today_end = datetime.combine(date.today() + timedelta(days=1), time.min).replace(tzinfo=timezone.utc)
+        today_start, today_end = _utc_day_bounds()
         forms_filled_sq = (
             select(func.count(distinct(FormSubmission.form_id)))
             .where(
@@ -680,8 +690,8 @@ class StatsQuery:
             .where(
                 HealthDataPoint.participant_id == participant_id,
                 HealthDataPoint.source_type == "goal",
-                HealthDataPoint.observed_at >= datetime.combine(date.today(), time.min).replace(tzinfo=timezone.utc),
-                HealthDataPoint.observed_at < datetime.combine(date.today() + timedelta(days=1), time.min).replace(tzinfo=timezone.utc),
+                HealthDataPoint.observed_at >= today_start,
+                HealthDataPoint.observed_at < today_end,
             )
             .group_by(HealthDataPoint.element_id)
             .subquery()
@@ -830,8 +840,37 @@ class CaretakersQuery:
             raise HTTPException(status_code=404, detail="Participant not found in this group")
         return row
 
+    async def get_participant_group_memberships(
+        self,
+        participant_id: uuid.UUID,
+        caretaker_user_id: uuid.UUID,
+    ) -> list[dict]:
+        result = await self.db.execute(
+            select(
+                Group.group_id,
+                Group.name,
+                Group.description,
+                GroupMember.joined_at,
+            )
+            .join(GroupMember, GroupMember.group_id == Group.group_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(GroupMember.participant_id == participant_id)
+            .where(GroupMember.left_at == None)
+            .where(CaretakerProfile.user_id == caretaker_user_id)
+            .order_by(Group.name)
+        )
+        return [
+            {
+                "group_id": row.group_id,
+                "name": row.name,
+                "description": row.description,
+                "joined_at": row.joined_at,
+            }
+            for row in result.all()
+        ]
+
     async def get_participant_activity_counts(self, user_id: uuid.UUID, group_id: uuid.UUID | None = None):
-        today = date.today()
+        today = _utc_today()
         caretaker_participants_sq = (
             select(ParticipantProfile.participant_id)
             .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
@@ -972,7 +1011,7 @@ class CaretakersQuery:
             else_="in_progress",
         )
 
-        today = date.today()
+        today = _utc_today()
         status_expr = case(
             (func.cast(submissions_sq.c.last_submission_at, SADate) >= today - timedelta(days=7), "highly_active"),
             (func.cast(submissions_sq.c.last_submission_at, SADate) >= today - timedelta(days=14), "moderately_active"),

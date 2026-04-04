@@ -36,6 +36,7 @@ const BigSpinner = () => <svg className="animate-spin h-8 w-8 text-slate-300" xm
 function fmt(d) { if (!d) return "—"; return new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" }); }
 function fmtTime(d) { if (!d) return "—"; return new Date(d).toLocaleDateString("en-CA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
 function timeUntil(iso) { const ms = new Date(iso) - Date.now(); if (ms < 0) return "Expired"; const h = Math.floor(ms / 3600000); if (h < 1) return `${Math.floor(ms / 60000)}m`; if (h < 24) return `${h}h`; return `${Math.floor(h / 24)}d`; }
+function isLocked(user) { return !!user?.lockedUntil && new Date(user.lockedUntil).getTime() > Date.now(); }
 
 // ── Backend → Frontend user transform ────────────────────────────────────────
 // Backend UserListItem uses snake_case + boolean status.
@@ -213,7 +214,7 @@ function EditUserModal({ open, onClose, user, onSave }) {
 }
 
 // ── Other Modals ─────────────────────────────────────────────────────────────
-function ChangeGroupModal({ open, onClose, targets, groups, onConfirm }) { const [sel, setSel] = useState(""); const p = targets?.length > 1; return <Modal open={open} onClose={onClose}><h3 className="text-lg font-bold text-slate-800 mb-1">Change Group</h3><p className="text-sm text-slate-400 mb-4">{p ? `Move ${targets.length} participants` : `Move ${targets?.[0]?.firstName} ${targets?.[0]?.lastName}`}</p><div className="space-y-2 max-h-52 overflow-y-auto">{groups.map(g => <button key={g.group_id} onClick={() => setSel(g.group_id)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${sel === g.group_id ? "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-400" : "border-slate-200 hover:bg-slate-50"}`}><p className="text-sm font-semibold text-slate-700">{g.name}</p><p className="text-xs text-slate-400 mt-0.5">{g.caretaker_name || "No caretaker"}</p></button>)}</div><div className="flex gap-3 mt-6"><button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={() => sel && onConfirm(sel)} disabled={!sel} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 rounded-xl disabled:opacity-40">Move</button></div></Modal>; }
+function ChangeGroupModal({ open, onClose, targets, groups, onConfirm }) { const [sel, setSel] = useState(""); const [loading, setLoading] = useState(false); const p = targets?.length > 1; if (!open) return null; const handle = async () => { if (!sel) return; setLoading(true); await onConfirm(sel); setLoading(false); setSel(""); }; return <Modal open={open} onClose={() => { if (!loading) { setSel(""); onClose(); } }}><h3 className="text-lg font-bold text-slate-800 mb-1">Change Group</h3><p className="text-sm text-slate-400 mb-4">{p ? `Move ${targets.length} participants` : `Move ${targets?.[0]?.firstName} ${targets?.[0]?.lastName}`}</p><div className="space-y-2 max-h-52 overflow-y-auto"><button onClick={() => setSel("none")} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${sel === "none" ? "border-amber-400 bg-amber-50 ring-1 ring-amber-300 text-amber-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}><p className="text-sm font-semibold">No Group</p><p className="text-xs text-slate-400 mt-0.5">Remove from all groups</p></button>{groups.map(g => <button key={g.group_id} onClick={() => setSel(g.group_id)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${sel === g.group_id ? "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-400" : "border-slate-200 hover:bg-slate-50"}`}><p className="text-sm font-semibold text-slate-700">{g.name}</p><p className="text-xs text-slate-400 mt-0.5">{g.caretaker_name || "No caretaker"}</p></button>)}</div><div className="flex gap-3 mt-6"><button onClick={() => { setSel(""); onClose(); }} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={!sel || loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">{loading ? <><Spinner /> Moving…</> : sel === "none" ? "Unassign" : "Move"}</button></div></Modal>; }
 
 // ── Assign Caretaker Modal (REAL API) ────────────────────────────────────────
 function AssignCaretakerModal({ open, onClose, group, caretakers, onAssign }) {
@@ -319,7 +320,7 @@ function AddParticipantsModal({ open, onClose, group, users, groups, onConfirm }
 }
 
 // ── User Detail Drawer ───────────────────────────────────────────────────────
-function UserDrawer({ user, users, groups, caretakers, onClose, onEdit, onDeactivate, onReactivate, onDelete, onChangeGroup, onChangeRole }) {
+function UserDrawer({ user, users, groups, caretakers, onClose, onEdit, onDeactivate, onReactivate, onUnlock, onDelete, onChangeGroup, onChangeRole }) {
   const navigate = useNavigate();
   const [subExp, setSubExp] = useState(null);
   const [goalExp, setGoalExp] = useState(null);
@@ -349,6 +350,7 @@ function UserDrawer({ user, users, groups, caretakers, onClose, onEdit, onDeacti
 
   if (!user) return null;
   const isAnonymized = user.email?.startsWith("deleted_");
+  const locked = isLocked(user);
   const ct = user.role === "participant" && user.caretakerId ? (() => { const c = caretakers.find(c => String(c.caretaker_id) === String(user.caretakerId)); return c ? { firstName: c.name?.split(" ")[0], lastName: c.name?.split(" ").slice(1).join(" "), title: c.title, organization: c.organization } : null; })() : null;
   const managed = user.role === "caretaker" ? (() => { const ctId = caretakers.find(c => String(c.user_id) === String(user.id))?.caretaker_id; return ctId ? users.filter(u => u.role === "participant" && String(u.caretakerId) === String(ctId)) : []; })() : [];
   const grp = user.groupId ? groups.find(g => String(g.group_id) === String(user.groupId)) : null;
@@ -356,8 +358,8 @@ function UserDrawer({ user, users, groups, caretakers, onClose, onEdit, onDeacti
   return <div className="fixed inset-0 z-40 flex justify-end"><div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} /><div className="relative z-10 w-full sm:max-w-md bg-white h-full shadow-2xl flex flex-col overflow-hidden">
     <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0"><h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider">User Details</h2><button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100"><IconX /></button></div>
     <div className="flex-1 overflow-y-auto">
-      <div className="px-5 py-5 border-b border-slate-100 flex items-center gap-4"><Avatar name={`${user.firstName} ${user.lastName}`} size="lg" /><div className="min-w-0"><p className="text-lg font-bold text-slate-800">{user.firstName} {user.lastName}</p><p className="text-xs text-slate-400 truncate">{user.email}</p><div className="flex items-center gap-2 mt-1.5"><RoleBadge role={user.role} /><StatusDot status={user.status} /><span className="text-xs text-slate-400 capitalize">{user.status}</span>{isAnonymized && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full uppercase">Anonymized</span>}</div></div></div>
-      <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Account</p><InfoRow label="Phone" value={user.phone} /><InfoRow label="Joined" value={fmt(user.joinedAt)} /></div>
+      <div className="px-5 py-5 border-b border-slate-100 flex items-center gap-4"><Avatar name={`${user.firstName} ${user.lastName}`} size="lg" /><div className="min-w-0"><p className="text-lg font-bold text-slate-800">{user.firstName} {user.lastName}</p><p className="text-xs text-slate-400 truncate">{user.email}</p><div className="flex items-center gap-2 mt-1.5 flex-wrap"><RoleBadge role={user.role} /><StatusDot status={user.status} /><span className="text-xs text-slate-400 capitalize">{user.status}</span>{locked && <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full uppercase">Locked</span>}{isAnonymized && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full uppercase">Anonymized</span>}</div></div></div>
+      <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Account</p><InfoRow label="Phone" value={user.phone} /><InfoRow label="Joined" value={fmt(user.joinedAt)} /><InfoRow label="Lock status" value={locked ? `Locked until ${fmtTime(user.lockedUntil)}` : "Not locked"} /></div>
 
       {user.role === "participant" && <>
         <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Profile</p><InfoRow label="DOB" value={fmt(user.dob)} /><InfoRow label="Gender" value={user.gender} /></div>
@@ -367,14 +369,14 @@ function UserDrawer({ user, users, groups, caretakers, onClose, onEdit, onDeacti
         <div className="px-5 py-4 border-b border-slate-100">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Submissions</p>
           {submissions === null ? <div className="flex items-center justify-center py-4"><Spinner /><span className="text-xs text-slate-400 ml-2">Loading…</span></div>
-            : submissions.length === 0 ? <ApiPendingBanner endpoint="GET /admin_only/users/{id}/submissions" description="Submission details will appear here once the backend endpoint is available." />
+            : submissions.length === 0 ? <p className="text-xs text-slate-400 italic text-center py-4">No submissions yet.</p>
             : <div className="space-y-2">{submissions.map(s => { const st = SUB_STYLES[s.status] || SUB_STYLES.new; const ex = subExp === s.id; return <div key={s.id} className="border border-slate-100 rounded-xl overflow-hidden"><button onClick={() => setSubExp(ex ? null : s.id)} className="w-full px-3 py-2.5 flex items-center justify-between text-left hover:bg-slate-50/50"><div className="min-w-0"><p className="text-sm font-semibold text-slate-700 truncate">{s.form_name}</p><p className="text-xs text-slate-400 mt-0.5">{s.submitted_at ? fmtTime(s.submitted_at) : "Draft"}</p></div><div className="flex items-center gap-2 shrink-0"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${st.bg} ${st.text}`}>{st.label}</span><IconChevron open={ex} /></div></button>{ex && <div className="px-3 pb-3 border-t border-slate-50 space-y-1.5 pt-2">{(s.answers || []).map((a, i) => <div key={i} className="bg-slate-50 rounded-lg px-3 py-2"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{a.field}</p><p className="text-sm text-slate-700 mt-0.5">{a.value}</p></div>)}</div>}</div>; })}</div>}
         </div>
 
         <div className="px-5 py-4 border-b border-slate-100">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Health Goals</p>
           {goals === null ? <div className="flex items-center justify-center py-4"><Spinner /><span className="text-xs text-slate-400 ml-2">Loading…</span></div>
-            : goals.length === 0 ? <ApiPendingBanner endpoint="GET /admin_only/users/{id}/goals" description="Health goal progress will appear here once the backend endpoint is available." />
+            : goals.length === 0 ? <p className="text-xs text-slate-400 italic text-center py-4">No health goals set.</p>
             : <div className="space-y-2">{goals.map(g => { const gs = GOAL_STYLES[g.status] || GOAL_STYLES.in_progress; const pct = g.target_value > 0 ? Math.min(100, Math.round((g.current / g.target_value) * 100)) : 0; const ex = goalExp === g.id; return <div key={g.id} className="border border-slate-100 rounded-xl overflow-hidden"><button onClick={() => setGoalExp(ex ? null : g.id)} className="w-full px-3 py-2.5 text-left hover:bg-slate-50/50"><div className="flex items-center justify-between mb-1.5"><p className="text-sm font-semibold text-slate-700">{g.name}</p><div className="flex items-center gap-2"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${gs.bg} ${gs.text}`}>{g.status.replace("_", " ")}</span><IconChevron open={ex} /></div></div><div className="flex items-center justify-between text-xs mb-1"><span className="text-slate-400">Target: {g.target}</span><span className="font-semibold text-slate-600">{pct}%</span></div><div className="w-full bg-slate-200 rounded-full h-1.5"><div className={`h-1.5 rounded-full ${gs.bar}`} style={{ width: `${pct}%` }} /></div></button>{ex && (g.logs || []).length > 0 && <div className="px-3 pb-3 border-t border-slate-50 pt-2"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Log</p>{g.logs.map((l, i) => <div key={i} className="flex justify-between bg-slate-50 rounded-lg px-3 py-1.5 mb-1"><span className="text-xs text-slate-400">{l.date}</span><span className="text-xs font-semibold text-slate-700">{l.value} {g.unit}</span></div>)}</div>}</div>; })}</div>}
         </div>
       </>}
@@ -391,6 +393,7 @@ function UserDrawer({ user, users, groups, caretakers, onClose, onEdit, onDeacti
       <button onClick={() => onEdit(user)} className="w-full py-2.5 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 flex items-center justify-center gap-2"><IconEdit /> Edit</button>
       <button onClick={() => onChangeRole(user)} className="w-full py-2.5 text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 flex items-center justify-center gap-2"><IconSwitch /> Change Role</button>
       {user.role === "participant" && <button onClick={() => onChangeGroup([user])} className="w-full py-2.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl hover:bg-emerald-100 flex items-center justify-center gap-2"><IconUsers /> Change Group</button>}
+      {locked && <button onClick={() => onUnlock(user)} className="w-full py-2.5 text-sm font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl hover:bg-rose-100 flex items-center justify-center gap-2"><IconKey /> Unlock Account</button>}
       {user.status === "active" ? <button onClick={() => onDeactivate(user)} className="w-full py-2.5 text-sm font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl hover:bg-amber-100 flex items-center justify-center gap-2"><IconPause /> Deactivate</button>
         : <div className="grid grid-cols-2 gap-2"><button onClick={() => onReactivate(user)} className="py-2.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl hover:bg-emerald-100 flex items-center justify-center gap-2"><IconRefresh /> Reactivate</button><button onClick={() => onDelete(user)} className="py-2.5 text-sm font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl hover:bg-rose-100 flex items-center justify-center gap-2"><IconTrash /> Delete</button></div>}
     </div>
@@ -602,6 +605,16 @@ export default function UserManagementPage() {
     if (u.email?.startsWith("deleted_")) { setReactivateAnonymizedTarget(u); return; }
     (async () => { try { await api.adminUpdateUserStatus(u.id, "active"); } catch {} setUsers(p => p.map(x => x.id === u.id ? { ...x, status: "active" } : x)); if (detailUser?.id === u.id) setDetailUser(p => ({ ...p, status: "active" })); msg(`${u.firstName} reactivated.`); })();
   };
+  const handleUnlock = async (u) => {
+    try {
+      await api.adminUnlockUser(u.id);
+      setUsers(p => p.map(x => x.id === u.id ? { ...x, lockedUntil: null } : x));
+      if (detailUser?.id === u.id) setDetailUser(p => ({ ...p, lockedUntil: null }));
+      msg(`${u.firstName} unlocked.`);
+    } catch (err) {
+      msg(err.message || "Failed to unlock user.", "error");
+    }
+  };
   const handleAnonymizedReactivated = (newEmail) => {
     const u = reactivateAnonymizedTarget;
     setUsers(p => p.map(x => x.id === u.id ? { ...x, status: "active", email: newEmail } : x));
@@ -625,7 +638,17 @@ export default function UserManagementPage() {
     if (detailUser?.id === u.id) setDetailUser(null); setDeleteLoading(false); setDeleteTarget(null);
   };
   const handleEditSave = async (data) => { const apiPayload = { first_name: data.firstName, last_name: data.lastName, email: data.email, phone: data.phone }; try { await api.adminUpdateUser(editTarget.id, apiPayload); } catch {} setUsers(p => p.map(u => u.id === editTarget.id ? { ...u, ...data } : u)); if (detailUser?.id === editTarget.id) setDetailUser(p => ({ ...p, ...data })); setEditTarget(null); msg("User updated."); };
-  const handleChangeGroup = (groupId) => { const g = groups.find(x => x.group_id === groupId); changeGroupTargets.forEach(t => { setUsers(p => p.map(u => u.id === t.id ? { ...u, groupId, group: g?.name || null, caretakerId: g?.caretaker_id || null, caretaker: g?.caretaker_name || null } : u)); if (detailUser?.id === t.id) setDetailUser(p => ({ ...p, groupId, group: g?.name || null })); }); setChangeGroupTargets(null); msg(`Moved to "${g?.name}".`); };
+  const handleChangeGroup = async (groupId) => {
+  const isUnassign = groupId === "none";
+  const g = isUnassign ? null : groups.find(x => x.group_id === groupId);
+  for (const t of changeGroupTargets) {
+    try { await api.adminMoveParticipant(t.id, isUnassign ? null : groupId); } catch (err) { msg(err.message || "Move failed.", "error"); return; }
+    setUsers(p => p.map(u => u.id === t.id ? { ...u, groupId: isUnassign ? null : groupId, group: g?.name || null, caretakerId: g?.caretaker_id || null, caretaker: g?.caretaker_name || null } : u));
+    if (detailUser?.id === t.id) setDetailUser(p => ({ ...p, groupId: isUnassign ? null : groupId, group: g?.name || null }));
+  }
+  setChangeGroupTargets(null);
+  msg(isUnassign ? "Removed from group." : `Moved to "${g?.name}".`);
+};
   const handleAssignCaretaker = async (group, userId) => {
     try {
       await api.adminAssignCaretaker(userId, group.group_id);
@@ -676,7 +699,7 @@ export default function UserManagementPage() {
 
   // ── Columns ────────────────────────────────────────────────────────────────
   const getColumns = () => { switch (activeRole) { case "participant": return ["Name", "Group", "Caretaker", "Status", "Joined"]; case "caretaker": return ["Name", "Group", "Organization", "Title", "Status"]; case "researcher": return ["Name", "Institution", "Department", "Status"]; case "admin": return ["Name", "Email", "Status", "Joined"]; default: return ["Name", "Email", "Role", "Status", "Joined"]; } };
-  const getCell = (u, col) => { switch (col) { case "Name": return <div className="flex items-center gap-3 min-w-0"><Avatar name={`${u.firstName} ${u.lastName}`} size="sm" /><div><p className="text-sm font-semibold text-slate-800 truncate">{u.firstName} {u.lastName}</p>{u.email?.startsWith("deleted_") && <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded uppercase">Anonymized</span>}</div></div>; case "Email": return <span className="text-sm text-slate-500 truncate">{u.email}</span>; case "Role": return <RoleBadge role={u.role} />; case "Status": return <div className="flex items-center gap-1.5"><StatusDot status={u.status} /><span className="text-xs text-slate-500 capitalize">{u.status}</span></div>; case "Joined": return <span className="text-xs text-slate-400">{fmt(u.joinedAt)}</span>; case "Group": {
+  const getCell = (u, col) => { switch (col) { case "Name": return <div className="flex items-center gap-3 min-w-0"><Avatar name={`${u.firstName} ${u.lastName}`} size="sm" /><div><p className="text-sm font-semibold text-slate-800 truncate">{u.firstName} {u.lastName}</p><div className="flex items-center gap-1.5 mt-0.5 flex-wrap">{isLocked(u) && <span className="text-[9px] font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded uppercase">Locked</span>}{u.email?.startsWith("deleted_") && <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded uppercase">Anonymized</span>}</div></div></div>; case "Email": return <span className="text-sm text-slate-500 truncate">{u.email}</span>; case "Role": return <RoleBadge role={u.role} />; case "Status": return <div className="flex items-center gap-1.5 flex-wrap"><StatusDot status={u.status} /><span className="text-xs text-slate-500 capitalize">{u.status}</span>{isLocked(u) && <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full uppercase">Locked</span>}</div>; case "Joined": return <span className="text-xs text-slate-400">{fmt(u.joinedAt)}</span>; case "Group": {
       if (u.role === "caretaker") {
         const ct = caretakers.find(c => String(c.user_id) === String(u.id));
         const grps = ct ? groups.filter(g => String(g.caretaker_id) === String(ct.caretaker_id)) : [];
@@ -694,7 +717,7 @@ export default function UserManagementPage() {
     <div className="max-w-6xl mx-auto space-y-6">
       <style>{`@keyframes slide-in{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}.animate-slide-in{animation:slide-in .3s ease-out}`}</style>
       <Toast {...toast} onClose={() => setToast(p => ({ ...p, show: false }))} />
-      <UserDrawer user={detailUser} users={users} groups={groups} caretakers={caretakers} onClose={() => setDetailUser(null)} onEdit={setEditTarget} onDeactivate={setDeactivateTarget} onReactivate={handleReactivate} onDelete={setDeleteTarget} onChangeGroup={setChangeGroupTargets} onChangeRole={setChangeRoleTarget} />
+      <UserDrawer user={detailUser} users={users} groups={groups} caretakers={caretakers} onClose={() => setDetailUser(null)} onEdit={setEditTarget} onDeactivate={setDeactivateTarget} onReactivate={handleReactivate} onUnlock={handleUnlock} onDelete={setDeleteTarget} onChangeGroup={setChangeGroupTargets} onChangeRole={setChangeRoleTarget} />
       <InviteModal open={showInvite} onClose={() => { setShowInvite(false); setInvitePreRole(""); }} groups={groups} preselectedRole={invitePreRole} onError={(m) => msg(m, "error")} onInviteSent={(d) => { setInvites(p => [{ invite_id: `inv${Date.now()}`, email: d.email, role: d.role, group_name: d.group_name, group_id: d.groupId, invited_by: "You", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 48 * 3600000).toISOString(), used: false, status: "pending" }, ...p]); msg("Invite sent."); }} />
       <CreateGroupModal open={showCreateGroup} onClose={() => setShowCreateGroup(false)} caretakers={caretakers} users={users} onConfirm={(newGroup, cId, error, assignedParticipants) => { if (error) { msg(error, "error"); return; } const ct = caretakers.find(c => String(c.user_id) === cId); const gid = String(newGroup.group_id); setGroups(p => [...p, { ...newGroup, group_id: gid, caretaker_id: cId || null, caretaker_name: ct?.name || null, member_count: (assignedParticipants || []).length }]); if (assignedParticipants?.length) { setUsers(p => p.map(u => assignedParticipants.includes(u.id) ? { ...u, groupId: gid, group: newGroup.name } : u)); } setShowCreateGroup(false); msg(`"${newGroup.name}" created${assignedParticipants?.length ? ` with ${assignedParticipants.length} participant${assignedParticipants.length > 1 ? "s" : ""}` : ""}.`); }} />
       <EditUserModal open={!!editTarget} onClose={() => setEditTarget(null)} user={editTarget} onSave={handleEditSave} />

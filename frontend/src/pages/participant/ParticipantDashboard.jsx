@@ -214,7 +214,7 @@ export default function ParticipantDashboard() {
         {/* Left Side: Greeting & Pill */}
         <div className="space-y-3">
           <h1 className="text-2xl md:text-3xl font-bold text-slate-800">
-            {greetings.text}, {user?.firstName}! {greetings.icon}
+            {greetings.text}, {user?.first_name || "there"}! {greetings.icon}
           </h1>
 
           {/* Dynamic Health Tip Pill */}

@@ -141,13 +141,13 @@ async def get_form_by_id(form_id: UUID, db: AsyncSession) -> Optional[SurveyForm
 
     return form
 
-async def update_survey_form(form_id: UUID, form_data: SurveyCreate, db: AsyncSession):
+async def update_survey_form(form_id: UUID, form_data: SurveyCreate, user_id: UUID, db: AsyncSession):
     """Update an existing form"""
-    # Lightweight fetch — only what we need
-    result = await db.execute(select(SurveyForm).where(SurveyForm.form_id == form_id))
-    form = result.scalar_one_or_none()
+    form = await get_form_by_id(form_id, db)
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
+    if str(form.created_by) != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the researcher who created this form can edit it.")
     if form.status == "PUBLISHED":
         raise HTTPException(status_code=400, detail="Published forms cannot be edited. Unpublish the form first.")
 
@@ -202,31 +202,27 @@ async def update_survey_form(form_id: UUID, form_data: SurveyCreate, db: AsyncSe
     invalidate_forms_cache()
     return {"msg": "form updated"}
 
-async def delete_survey_form(form_id: UUID, db: AsyncSession):
+async def delete_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
     """Hard-delete if no submissions exist, soft-delete otherwise to preserve data."""
     form = await get_form_by_id(form_id, db)
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
+    if str(form.created_by) != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the researcher who created this form can delete it.")
 
-    sub_check = await db.execute(
-        select(FormSubmission.submission_id).where(
-            FormSubmission.form_id == form_id,
-            FormSubmission.submitted_at.is_not(None),
-        ).limit(1)
-    )
-    has_submissions = sub_check.scalar_one_or_none() is not None
+    has_submissions = (
+        await db.scalar(
+            select(FormSubmission.submission_id).where(
+                FormSubmission.form_id == form_id,
+                FormSubmission.submitted_at.is_not(None),
+            ).limit(1)
+        )
+    ) is not None
 
     if has_submissions:
         form.status = "DELETED"
         await db.commit()
     else:
-        field_ids_result = await db.execute(select(FormField.field_id).where(FormField.form_id == form_id))
-        field_ids = field_ids_result.scalars().all()
-        if field_ids:
-            await db.execute(sa_delete(FieldElementMap).where(FieldElementMap.field_id.in_(field_ids)))
-            await db.execute(sa_delete(FieldOption).where(FieldOption.field_id.in_(field_ids)))
-            await db.execute(sa_delete(FormField).where(FormField.form_id == form_id))
-        await db.execute(sa_delete(FormDeployment).where(FormDeployment.form_id == form_id))
         await db.delete(form)
         await db.commit()
 
@@ -239,6 +235,8 @@ async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: 
     form = await get_form_by_id(form_id, db)
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
+    if str(form.created_by) != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the researcher who created this form can publish it.")
 
     group_query = select(Group).where(Group.group_id == group_id)
     group_result = await db.execute(group_query)
@@ -286,11 +284,13 @@ async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: 
     return {"msg": "form has been published and assigned to group"}
 
 
-async def unpublish_survey_form_all(form_id: UUID, db: AsyncSession):
+async def unpublish_survey_form_all(form_id: UUID, user_id: UUID, db: AsyncSession):
     """Unpublish a form from all groups and revert to DRAFT."""
     form = await get_form_by_id(form_id, db)
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
+    if str(form.created_by) != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the researcher who created this form can unpublish it.")
 
     if form.status != "PUBLISHED":
         raise HTTPException(status_code=400, detail="This form is not currently published.")
@@ -308,11 +308,13 @@ async def unpublish_survey_form_all(form_id: UUID, db: AsyncSession):
     return {"msg": f"Form unpublished from all {len(deployments)} group(s) and reverted to DRAFT."}
 
 
-async def unpublish_survey_form(form_id: UUID, group_id: UUID, db: AsyncSession):
+async def unpublish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: AsyncSession):
     """Unpublish a form from a specific group. If no deployments remain, form reverts to DRAFT."""
     form = await get_form_by_id(form_id, db)
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
+    if str(form.created_by) != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the researcher who created this form can unpublish it.")
 
     deployment_result = await db.execute(
         select(FormDeployment).where(FormDeployment.form_id == form_id, FormDeployment.group_id == group_id)
@@ -337,3 +339,39 @@ async def unpublish_survey_form(form_id: UUID, group_id: UUID, db: AsyncSession)
     if form.status == "DRAFT":
         return {"msg": "Form unpublished from group and reverted to DRAFT — no remaining deployments."}
     return {"msg": "Form unpublished from group. Still deployed to other groups."}
+
+
+async def archive_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
+    """Archive a form so it is hidden from active authoring workflows."""
+    form = await get_form_by_id(form_id, db)
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found.")
+    if str(form.created_by) != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the researcher who created this form can archive it.")
+    if form.status == "PUBLISHED":
+        raise HTTPException(status_code=400, detail="Published forms cannot be archived. Unpublish the form first.")
+    if form.status == "DELETED":
+        raise HTTPException(status_code=400, detail="Deleted forms cannot be archived.")
+    if form.status == "ARCHIVED":
+        return {"msg": "Form is already archived."}
+
+    form.status = "ARCHIVED"
+    await db.commit()
+    invalidate_forms_cache()
+    return {"msg": "Form archived."}
+
+
+async def unarchive_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
+    """Restore an archived form back to draft status."""
+    form = await get_form_by_id(form_id, db)
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found.")
+    if str(form.created_by) != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the researcher who created this form can unarchive it.")
+    if form.status != "ARCHIVED":
+        raise HTTPException(status_code=400, detail="Only archived forms can be restored to draft.")
+
+    form.status = "DRAFT"
+    await db.commit()
+    invalidate_forms_cache()
+    return {"msg": "Form restored to draft."}

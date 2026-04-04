@@ -1,4 +1,11 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - hdb-network
+
   backend:
     build:
       context: ./backend
@@ -12,6 +19,12 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       - WATCHFILES_FORCE_POLLING=true
+      - RATE_LIMIT_BACKEND=redis
+      - REDIS_URL=redis://redis:6379/0
+      - SESSION_IDLE_TIMEOUT_MINUTES=30
+      - SESSION_TOKEN_EXPIRE_MINUTES=10080
+    depends_on:
+      - redis
     networks:
       - hdb-network
 
@@ -26,6 +39,7 @@ services:
       - /app/node_modules
     environment:
       - CHOKIDAR_USEPOLLING=true
+      - VITE_API_PROXY_TARGET=http://backend:8000
     depends_on:
       - backend
     networks:

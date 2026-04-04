@@ -224,11 +224,15 @@ async def get_participant(
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
     participant, first_name, last_name, _ = await CaretakersQuery(db).get_group_participant(group_id, participant_id)
+    groups = await CaretakersQuery(db).get_participant_group_memberships(
+        participant_id,
+        current_user.user_id,
+    )
     return ParticipantDetail(
         participant_id=participant.participant_id,
         name=f"{first_name or ''} {last_name or ''}".strip(),
         status="active",
-        groups=[],
+        groups=groups,
     )
 
 
