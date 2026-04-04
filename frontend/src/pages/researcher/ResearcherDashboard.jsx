@@ -53,6 +53,7 @@ export default function ResearcherDashboard() {
   const [groupSearch, setGroupSearch] = useState("");
   const [isSurveyOpen, setIsSurveyOpen] = useState(false);
   const [isGroupOpen, setIsGroupOpen] = useState(false);
+  const [sourceStatusFilter, setSourceStatusFilter] = useState("PUBLISHED");
 
   // 🟢 NEW: Individual refs for each dropdown so they close properly
   const surveyDropdownRef = useRef(null);
@@ -87,7 +88,7 @@ export default function ResearcherDashboard() {
     Promise.all([
       api.getAvailableSurveys().catch(() => []),
       api.listGroups().catch(() => []),
-      api.listForms().catch(() => []), // 🟢 FETCH THE FULL FORMS LIST HERE
+      api.listForms().catch(() => []),
     ])
       .then(([formsRes, groupsRes, allFormsRes]) => {
         setAvailableSurveys(formsRes || []);
@@ -160,6 +161,32 @@ export default function ResearcherDashboard() {
     }
   }, [filters.survey_id, allGroups, allForms]); // 🟢 Added allForms to dependencies
 
+  // Group surveys into version families — one entry per form family
+  const surveyFamilies = useMemo(() => {
+    const familyMap = {};
+    availableSurveys.forEach((s) => {
+      const rootId = String(s.parent_form_id || s.form_id || s.id);
+      if (!familyMap[rootId]) familyMap[rootId] = [];
+      familyMap[rootId].push(s);
+    });
+    return Object.values(familyMap).map((fam) => {
+      const sorted = [...fam].sort((a, b) => (b.version || 1) - (a.version || 1));
+      return { latest: sorted[0], versions: sorted };
+    });
+  }, [availableSurveys]);
+
+  // Derive the selected family from the current survey_id
+  const selectedFamily = useMemo(() => {
+    if (!filters.survey_id) return null;
+    const s = availableSurveys.find((s) => (s.form_id || s.id) === filters.survey_id);
+    if (!s) return null;
+    const rootId = String(s.parent_form_id || s.form_id || s.id);
+    const versions = availableSurveys
+      .filter((f) => String(f.parent_form_id || f.form_id || f.id) === rootId)
+      .sort((a, b) => (b.version || 1) - (a.version || 1));
+    return { title: versions[0].title, versions };
+  }, [filters.survey_id, availableSurveys]);
+
   // Auto-fetch when any filter changes (debounced 400ms)
   const filterMounted = useRef(false);
   useEffect(() => {
@@ -171,7 +198,7 @@ export default function ResearcherDashboard() {
     return () => clearTimeout(timer);
   }, [
     filters.survey_id,
-    filters.group_ids, // 🟢 THIS WAS MISSING: It makes the table refresh when you click a pill
+    filters.group_ids,
     filters.gender,
     filters.status,
     filters.primary_language,
@@ -502,23 +529,11 @@ export default function ResearcherDashboard() {
               Survey
             </label>
 
-            {/* Inner wrapper keeps dropdown perfectly attached to the input */}
             <div className="relative">
               <div className="flex items-center border border-slate-200 rounded-lg p-1.5 bg-white focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all shadow-sm">
                 <span className="pl-2 pr-2 text-slate-400">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                    />
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
                 </span>
                 {filters.survey_id && !isSurveyOpen ? (
@@ -526,9 +541,7 @@ export default function ResearcherDashboard() {
                     className="flex-1 text-sm font-medium text-slate-800 p-1 cursor-pointer truncate"
                     onClick={() => setIsSurveyOpen(true)}
                   >
-                    {availableSurveys.find(
-                      (s) => (s.form_id || s.id) === filters.survey_id,
-                    )?.title || "Selected Survey"}
+                    {selectedFamily ? selectedFamily.title : "Selected Survey"}
                   </div>
                 ) : (
                   <input
@@ -542,92 +555,101 @@ export default function ResearcherDashboard() {
                 )}
                 {filters.survey_id && (
                   <button
-                    onClick={() =>
-                      setFilters((prev) => ({
-                        ...prev,
-                        survey_id: "",
-                        group_ids: [],
-                      }))
-                    }
+                    onClick={() => setFilters((prev) => ({ ...prev, survey_id: "", group_ids: [] }))}
                     className="p-1 hover:bg-slate-100 rounded-md text-slate-400 mr-1 transition-colors"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-4 w-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
                 )}
               </div>
 
-              {/* Dropdown snaps directly below the input using top-full */}
+              {/* Version switcher pills */}
+              {selectedFamily && selectedFamily.versions.length > 1 && (
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                  <span className="text-xs text-slate-400 font-medium">Version:</span>
+                  {selectedFamily.versions.map((v) => {
+                    const vid = v.form_id || v.id;
+                    const isActive = filters.survey_id === vid;
+                    return (
+                      <button
+                        key={vid}
+                        onClick={() => setFilters((prev) => ({ ...prev, survey_id: vid, group_ids: [] }))}
+                        className={`text-xs font-bold px-2.5 py-1 rounded-full border transition-all ${
+                          isActive
+                            ? "bg-violet-600 text-white border-violet-600"
+                            : "bg-white text-violet-700 border-violet-300 hover:bg-violet-50"
+                        }`}
+                      >
+                        v{v.version || 1}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Dropdown */}
               {isSurveyOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-50">
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-64 overflow-y-auto z-50">
                   {(() => {
                     const q = surveySearch.toLowerCase();
-                    const published = availableSurveys.filter(
-                      (s) =>
-                        s.status !== "DELETED" &&
-                        (s.title || "").toLowerCase().includes(q),
+
+                    const STATUS_OPTS = [
+                      { key: "PUBLISHED", label: "Published", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+                      { key: "ARCHIVED",  label: "Archived",  cls: "bg-slate-100 text-slate-500 border-slate-300" },
+                      { key: "DELETED",   label: "Deleted",   cls: "bg-rose-100 text-rose-500 border-rose-200" },
+                    ];
+
+                    const filteredFamilies = surveyFamilies.filter(({ latest: s }) =>
+                      s.status === sourceStatusFilter && (s.title || "").toLowerCase().includes(q)
                     );
-                    const deleted = availableSurveys.filter(
-                      (s) =>
-                        s.status === "DELETED" &&
-                        (s.title || "").toLowerCase().includes(q),
-                    );
-                    const renderItem = (s) => (
+
+                    const renderFamily = ({ latest: s, versions }) => (
                       <div
                         key={s.form_id || s.id}
-                        className={`px-4 py-2.5 text-sm font-medium cursor-pointer border-b border-slate-50 last:border-0 truncate ${
-                          s.status === "DELETED"
-                            ? "text-rose-600 hover:bg-rose-50 hover:text-rose-700"
-                            : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"
-                        }`}
+                        className="flex items-center justify-between px-4 py-2.5 text-sm font-medium cursor-pointer border-b border-slate-50 last:border-0 text-slate-700 hover:bg-blue-50 hover:text-blue-700"
                         onClick={() => {
-                          setFilters((prev) => ({
-                            ...prev,
-                            survey_id: s.form_id || s.id,
-                          }));
+                          setFilters((prev) => ({ ...prev, survey_id: s.form_id || s.id, group_ids: [] }));
                           setSurveySearch("");
                           setIsSurveyOpen(false);
                         }}
                       >
-                        {s.title || s.name}
-                        {s.status === "DELETED" && " (Deleted)"}
+                        <div className="flex items-center gap-2 min-w-0">
+                          {s.status !== "PUBLISHED" && (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 uppercase ${
+                              s.status === "ARCHIVED" ? "bg-slate-100 text-slate-500 border-slate-300" : "bg-rose-100 text-rose-500 border-rose-200"
+                            }`}>{s.status}</span>
+                          )}
+                          <span className="truncate">{s.title || s.name}</span>
+                        </div>
+                        {versions.length > 1 && (
+                          <span className="ml-2 shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">
+                            {versions.length} versions
+                          </span>
+                        )}
                       </div>
                     );
+
                     return (
                       <>
-                        {published.length > 0 && (
-                          <>
-                            <div className="px-4 py-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider bg-slate-50 border-y border-slate-100">
-                              Published Forms
-                            </div>
-                            {published.map(renderItem)}
-                          </>
-                        )}
-                        {deleted.length > 0 && (
-                          <>
-                            <div className="px-4 py-1.5 text-xs font-semibold text-rose-400 uppercase tracking-wider bg-rose-50 border-y border-rose-100">
-                              Deleted Forms
-                            </div>
-                            {deleted.map(renderItem)}
-                          </>
-                        )}
-                        {published.length === 0 && deleted.length === 0 && (
-                          <div className="px-4 py-3 text-sm text-slate-400">
-                            No surveys found
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1.5 px-3 py-2 border-b border-slate-100 bg-slate-50">
+                          {STATUS_OPTS.map(({ key, label, cls }) => (
+                            <button
+                              key={key}
+                              onClick={() => setSourceStatusFilter(key)}
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all ${
+                                sourceStatusFilter === key ? cls : "bg-white text-slate-400 border-slate-200"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        {filteredFamilies.length > 0
+                          ? filteredFamilies.map(renderFamily)
+                          : <div className="px-4 py-3 text-sm text-slate-400">No surveys found</div>
+                        }
                       </>
                     );
                   })()}

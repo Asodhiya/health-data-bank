@@ -9,6 +9,8 @@ class AvailableSurvey(BaseModel):
     title: str
     description: Optional[str] = None
     status: str
+    version: Optional[int] = 1
+    parent_form_id: Optional[UUID] = None
     deployed_groups: list[str] = []
 
     class Config:

@@ -111,6 +111,7 @@ async def list_assigned_surveys(user_id: UUID, db: AsyncSession) -> List[Dict[st
             "title": survey.title,
             "description": survey.description,
             "status": status,
+            "version": survey.version or 1,
             "due_date": None,
             "deployed_at": deployment.deployed_at,
             "submitted_at": submitted_at,

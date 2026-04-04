@@ -29,6 +29,7 @@ const transformAssigned = (item) => ({
   title: item.title,
   description: item.description || "",
   question_count: item.question_count || 0,
+  version: item.version || 1,
   status: STATUS_MAP[item.status] || item.status || "pending",
   category: item.category || "",
   answered: item.answered_count ?? item.answered ?? 0,
@@ -227,26 +228,6 @@ const AlertIco = () => (
   />
 );
 
-function StatusBadge({ status }) {
-  const cls =
-    {
-      completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-      in_progress: "bg-blue-50 text-blue-700 border-blue-200",
-      pending: "bg-amber-50 text-amber-700 border-amber-200",
-    }[status] || "bg-slate-100 text-slate-500 border-slate-200";
-  const label =
-    { completed: "Filled", in_progress: "In Progress", pending: "Unfilled" }[
-      status
-    ] || status;
-  return (
-    <span
-      className={`text-xs font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${cls}`}
-    >
-      {label}
-    </span>
-  );
-}
-
 /* ── Due date helpers ── */
 const fmtDate = (s) =>
   s
@@ -334,7 +315,14 @@ function FormRow({ form, onStart }) {
         </div>
       </div>
 
-      <h3 className="text-base font-bold text-slate-800 mb-1">{form.title}</h3>
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="text-base font-bold text-slate-800">{form.title}</h3>
+        {form.version > 1 && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 shrink-0">
+            v{form.version}
+          </span>
+        )}
+      </div>
       <p className="text-sm text-slate-500 mb-4 line-clamp-2">
         {form.description}
       </p>

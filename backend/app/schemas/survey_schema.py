@@ -48,8 +48,10 @@ class SurveyDetailOut(BaseModel):
     title: str
     description: Optional[str] = None
     version: int
+    parent_form_id: Optional[UUID] = None
     status: Optional[str] = None
     created_at: Optional[datetime] = None
+    modified_at: Optional[datetime] = None
     fields: List[FormFieldOut] = []
     deployed_group_ids: List[UUID] = []
 
@@ -60,11 +62,15 @@ class SurveyListItem(BaseModel):
     form_id: UUID
     title: str
     description: Optional[str] = None
+    version: Optional[int] = 1
+    parent_form_id: Optional[UUID] = None
     status: Optional[str] = None
     created_at: Optional[datetime] = None
+    modified_at: Optional[datetime] = None
     due_date: Optional[datetime] = None
     deployment_id: Optional[UUID] = None
     field_count: int = 0
+    submission_count: int = 0
     deployed_groups: List[str] = []
     deployed_group_ids: List[UUID] = []
 
@@ -76,6 +82,7 @@ class ParticipantSurveyItem(BaseModel):
     title: str
     description: Optional[str] = None
     status: str # NEW, IN_PROGRESS, COMPLETED
+    version: Optional[int] = 1
     deployed_at: Optional[datetime] = None
     submitted_at: Optional[datetime] = None
     due_date: Optional[datetime] = None

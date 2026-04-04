@@ -152,6 +152,11 @@ export const api = {
       method: "DELETE",
     }),
 
+  deleteFormFamily: (formId) =>
+    request(`/form_management/delete/${formId}/family`, {
+      method: "DELETE",
+    }),
+
   listGroups: () => request("/form_management/groups"),
 
   publishForm: (formId, groupId) =>
@@ -169,10 +174,18 @@ export const api = {
       method: "POST",
     }),
 
-  getFormDeployments: (formId) =>
-    request(`/form_management/${formId}/deployments`),
+  branchForm: (formId) =>
+    request(`/form_management/${formId}/branch`, {
+      method: "POST",
+    }),
 
-  // ── Admin: Audit Logs ──
+  getPublishPreview: (formId, groupIds) =>
+    request(`/form_management/${formId}/publish-preview?group_ids=${groupIds.join(",")}`),
+
+  archiveForm: (formId) =>
+    request(`/form_management/${formId}/archive`, { method: "POST" }),
+
+// ── Admin: Audit Logs ──
   getAuditLogs: ({ limit = 20, offset = 0, action } = {}) => {
     const params = new URLSearchParams({ limit, offset });
     if (action) params.set("action", action);
@@ -422,6 +435,9 @@ export const api = {
 
   deleteElement: (element_id) =>
     request(`/data-elements/${element_id}`, { method: "DELETE" }),
+
+  getAllMappings: () =>
+    request(`/data-elements/all-mappings`),
 
   getFieldMapping: (field_id) =>
     request(`/data-elements/fields/${field_id}/map`),

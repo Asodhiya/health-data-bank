@@ -323,8 +323,10 @@ class SurveyForm(Base):
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int | None] = mapped_column(Integer, server_default=text("1"))
+    parent_form_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id"), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id"))
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    modified_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     fields: Mapped[List["FormField"]]= relationship("FormField", back_populates="form", cascade="all, delete-orphan")
 
 
