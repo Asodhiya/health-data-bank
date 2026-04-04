@@ -152,6 +152,11 @@ export const api = {
       method: "DELETE",
     }),
 
+  deleteFormFamily: (formId) =>
+    request(`/form_management/delete/${formId}/family`, {
+      method: "DELETE",
+    }),
+
   listGroups: () => request("/form_management/groups"),
 
   publishForm: (formId, groupId) =>
@@ -168,6 +173,20 @@ export const api = {
     request(`/form_management/${formId}/unpublish/${groupId}`, {
       method: "POST",
     }),
+
+  branchForm: (formId) =>
+    request(`/form_management/${formId}/branch`, {
+      method: "POST",
+    }),
+
+  getPublishPreview: (formId, groupIds) =>
+    request(`/form_management/${formId}/publish-preview?group_ids=${groupIds.join(",")}`),
+
+  archiveForm: (formId) =>
+    request(`/form_management/${formId}/archive`, { method: "POST" }),
+
+  unarchiveForm: (formId) =>
+    request(`/form_management/${formId}/unarchive`, { method: "POST" }),
 
   getFormDeployments: (formId) =>
     request(`/form_management/${formId}/deployments`),
@@ -422,6 +441,9 @@ export const api = {
 
   deleteElement: (element_id) =>
     request(`/data-elements/${element_id}`, { method: "DELETE" }),
+
+  getAllMappings: () =>
+    request(`/data-elements/all-mappings`),
 
   getFieldMapping: (field_id) =>
     request(`/data-elements/fields/${field_id}/map`),

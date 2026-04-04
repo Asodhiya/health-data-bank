@@ -18,12 +18,16 @@ from app.services.form_management_service import (
     get_form_by_id,
     update_survey_form,
     delete_survey_form,
+    delete_form_family,
+    branch_survey_form,
     publish_survey_form,
+    get_publish_preview,
     unpublish_survey_form,
     unpublish_survey_form_all,
     archive_survey_form,
     unarchive_survey_form,
 )
+from typing import List as TypingList
 
 router = APIRouter()
 
@@ -76,12 +80,30 @@ async def delete_form(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_current_user),
 ):
-    """Delete form"""
+    """Delete a single form version"""
     try:
-        delete = await delete_survey_form(form_id, current_user.user_id, db)
-        return delete
+        return await delete_survey_form(form_id, current_user.user_id, db)
     except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=str(e))
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+@router.delete("/delete/{form_id}/family", status_code=status.HTTP_200_OK, dependencies=[Depends(require_permissions(FORM_DELETE))])
+async def delete_form_family_route(
+    form_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Delete all versions in a form family"""
+    try:
+        return await delete_form_family(form_id, current_user.user_id, db)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+@router.get("/{form_id}/publish-preview", dependencies=[Depends(require_permissions(FORM_PUBLISH))])
+async def publish_preview(form_id: UUID, group_ids: str, db: AsyncSession = Depends(get_db)):
+    """Return in-progress participant counts per group before publishing a new version."""
+    parsed_ids = [UUID(gid.strip()) for gid in group_ids.split(",") if gid.strip()]
+    return await get_publish_preview(form_id, parsed_ids, db)
+
 
 @router.post("/{form_id}/publish", dependencies=[Depends(require_permissions(FORM_PUBLISH))])
 async def publish_form(form_id: UUID, group_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(check_current_user)):
@@ -113,6 +135,16 @@ async def unpublish_form_all(
 ):
     """Unpublish a form from all groups and revert to DRAFT."""
     return await unpublish_survey_form_all(form_id, current_user.user_id, db)
+
+
+@router.post("/{form_id}/branch", dependencies=[Depends(require_permissions(FORM_CREATE))])
+async def branch_form(
+    form_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Create a new draft version branched from an existing form."""
+    return await branch_survey_form(form_id, current_user.user_id, db)
 
 
 @router.post("/{form_id}/archive", dependencies=[Depends(require_permissions(FORM_UPDATE))])

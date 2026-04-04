@@ -88,12 +88,26 @@ async def list_researcher_forms(db: AsyncSession):
         .correlate(SurveyForm)
         .scalar_subquery()
     )
-    query = select(SurveyForm, field_count_subq.label("field_count")).where(SurveyForm.status != "DELETED").order_by(desc(SurveyForm.created_at))
+    submission_count_subq = (
+        select(func.count(FormSubmission.submission_id))
+        .where(
+            FormSubmission.form_id == SurveyForm.form_id,
+            FormSubmission.submitted_at.is_not(None),
+        )
+        .correlate(SurveyForm)
+        .scalar_subquery()
+    )
+    query = (
+        select(SurveyForm, field_count_subq.label("field_count"), submission_count_subq.label("submission_count"))
+        .where(SurveyForm.status != "DELETED")
+        .order_by(desc(SurveyForm.created_at))
+    )
     result = await db.execute(query)
     rows = result.all()
-    for form, count in rows:
+    for form, count, sub_count in rows:
         form.field_count = count
-    forms = [form for form, _ in rows]
+        form.submission_count = sub_count
+    forms = [form for form, _, __ in rows]
 
     # Attach deployed group names
     if forms:
@@ -197,18 +211,31 @@ async def update_survey_form(form_id: UUID, form_data: SurveyCreate, user_id: UU
 
     form.title = form_data.title
     form.description = form_data.description
+    form.modified_at = func.now()
 
     await db.commit()
     invalidate_forms_cache()
     return {"msg": "form updated"}
 
 async def delete_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
-    """Hard-delete if no submissions exist, soft-delete otherwise to preserve data."""
+    """Soft-delete versioned forms to preserve version numbers. Hard-delete standalone forms with no submissions."""
     form = await get_form_by_id(form_id, db)
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
     if str(form.created_by) != str(user_id):
         raise HTTPException(status_code=403, detail="Only the researcher who created this form can delete it.")
+
+    # If this form is part of a version family, always soft-delete so the version
+    # number is preserved for future branches (e.g. deleting v4 still lets next be v5)
+    is_versioned = form.parent_form_id is not None
+    if not is_versioned:
+        # Check if any other form points to this one as its root
+        has_children = (
+            await db.scalar(
+                select(SurveyForm.form_id).where(SurveyForm.parent_form_id == form_id).limit(1)
+            )
+        ) is not None
+        is_versioned = has_children
 
     has_submissions = (
         await db.scalar(
@@ -219,7 +246,7 @@ async def delete_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
         )
     ) is not None
 
-    if has_submissions:
+    if has_submissions or is_versioned:
         form.status = "DELETED"
         await db.commit()
     else:
@@ -228,6 +255,143 @@ async def delete_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
 
     invalidate_forms_cache()
     return {"msg": "form deleted"}
+
+
+async def delete_form_family(form_id: UUID, user_id: UUID, db: AsyncSession):
+    """Soft-delete all versions in a form family to preserve version number history."""
+    form = await get_form_by_id(form_id, db)
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found.")
+    if str(form.created_by) != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the researcher who created this form can delete it.")
+
+    root_id = form.parent_form_id or form.form_id
+    family_result = await db.execute(
+        select(SurveyForm).where(
+            (SurveyForm.form_id == root_id) | (SurveyForm.parent_form_id == root_id)
+        )
+    )
+    family = family_result.scalars().all()
+
+    for f in family:
+        # Always soft-delete family members — preserves version numbers so future
+        # branches continue from the correct next version (e.g. after deleting v4,
+        # the next branch is still v5, not v4)
+        f.status = "DELETED"
+
+    await db.commit()
+    invalidate_forms_cache()
+    return {"msg": f"All {len(family)} version(s) deleted"}
+
+
+async def branch_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
+    """Create a new draft version branched from an existing form.
+
+    The new form gets version + 1, parent_form_id pointing to the original,
+    and all fields copied over. The original form is untouched.
+    """
+    original = await get_form_by_id(form_id, db)
+    if not original:
+        raise HTTPException(status_code=404, detail="Form not found.")
+
+    # Determine root form id — always point back to the original, not a chain
+    root_id = original.parent_form_id or original.form_id
+
+    # Find the highest version in this form family
+    version_result = await db.execute(
+        select(func.max(SurveyForm.version)).where(
+            (SurveyForm.form_id == root_id) | (SurveyForm.parent_form_id == root_id)
+        )
+    )
+    max_version = version_result.scalar() or original.version or 1
+
+    new_form = SurveyForm(
+        title=original.title,
+        description=original.description,
+        status="DRAFT",
+        version=max_version + 1,
+        parent_form_id=root_id,
+        created_by=user_id,
+    )
+    db.add(new_form)
+    await db.flush()  # get new_form.form_id
+
+    # Copy all fields
+    old_fields_result = await db.execute(
+        select(FormField).where(FormField.form_id == form_id)
+    )
+    old_fields = old_fields_result.scalars().all()
+
+    for old_field in old_fields:
+        new_field_id = uuid4()
+        db.add(FormField(
+            field_id=new_field_id,
+            form_id=new_form.form_id,
+            label=old_field.label,
+            field_type=old_field.field_type,
+            is_required=old_field.is_required,
+            display_order=old_field.display_order,
+        ))
+        await db.flush()
+
+        # Copy field options
+        options_result = await db.execute(
+            select(FieldOption).where(FieldOption.field_id == old_field.field_id)
+        )
+        for opt in options_result.scalars().all():
+            db.add(FieldOption(
+                field_id=new_field_id,
+                label=opt.label,
+                value=opt.value,
+                display_order=opt.display_order,
+            ))
+
+        # Copy element mappings
+        maps_result = await db.execute(
+            select(FieldElementMap).where(FieldElementMap.field_id == old_field.field_id)
+        )
+        for m in maps_result.scalars().all():
+            db.add(FieldElementMap(field_id=new_field_id, element_id=m.element_id))
+
+    await db.commit()
+    invalidate_forms_cache()
+    return {"msg": "new version created", "form_id": str(new_form.form_id), "version": new_form.version}
+
+
+async def get_publish_preview(form_id: UUID, group_ids: List[UUID], db: AsyncSession) -> List[dict]:
+    """
+    For each group, return how many participants have an IN_PROGRESS submission
+    on any older version of this form family — so the UI can warn before publishing.
+    """
+    form = await get_form_by_id(form_id, db)
+    if not form:
+        return []
+
+    root_id = form.parent_form_id or form.form_id
+    sibling_result = await db.execute(
+        select(SurveyForm.form_id).where(
+            (SurveyForm.parent_form_id == root_id) | (SurveyForm.form_id == root_id),
+            SurveyForm.form_id != form_id
+        )
+    )
+    sibling_ids = [row[0] for row in sibling_result.all()]
+    if not sibling_ids:
+        return [{"group_id": str(gid), "in_progress_count": 0} for gid in group_ids]
+
+    results = []
+    for gid in group_ids:
+        count_result = await db.execute(
+            select(func.count(FormSubmission.submission_id))
+            .join(GroupMember, GroupMember.participant_id == FormSubmission.participant_id)
+            .where(
+                FormSubmission.form_id.in_(sibling_ids),
+                FormSubmission.submitted_at.is_(None),  # IN_PROGRESS = no submitted_at
+                GroupMember.group_id == gid,
+                GroupMember.left_at.is_(None),
+            )
+        )
+        results.append({"group_id": str(gid), "in_progress_count": count_result.scalar() or 0})
+    return results
 
 
 async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: AsyncSession):
@@ -248,6 +412,37 @@ async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: 
     )
     if existing_deployment.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="This form is already deployed to that group.")
+
+    # If this is a newer version, remove older versions of the same family from this group
+    root_id = form.parent_form_id or form.form_id
+    sibling_result = await db.execute(
+        select(SurveyForm.form_id).where(
+            (SurveyForm.parent_form_id == root_id) | (SurveyForm.form_id == root_id),
+            SurveyForm.form_id != form_id
+        )
+    )
+    sibling_ids = [row[0] for row in sibling_result.all()]
+    if sibling_ids:
+        old_deployments_result = await db.execute(
+            select(FormDeployment).where(
+                FormDeployment.form_id.in_(sibling_ids),
+                FormDeployment.group_id == group_id
+            )
+        )
+        for old_dep in old_deployments_result.scalars().all():
+            old_form_id = old_dep.form_id
+            await db.delete(old_dep)
+            # Revert older form to DRAFT if it has no remaining deployments
+            remaining = await db.execute(
+                select(FormDeployment).where(
+                    FormDeployment.form_id == old_form_id,
+                    FormDeployment.deployment_id != old_dep.deployment_id
+                )
+            )
+            if not remaining.scalars().first():
+                old_form = await db.get(SurveyForm, old_form_id)
+                if old_form:
+                    old_form.status = "ARCHIVED"
 
     deployment = FormDeployment(
         form_id=form_id,
@@ -279,6 +474,7 @@ async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: 
         )
 
     form.status = "PUBLISHED"
+    form.modified_at = func.now()
     await db.commit()
     invalidate_forms_cache()
     return {"msg": "form has been published and assigned to group"}
@@ -349,7 +545,12 @@ async def archive_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
     if str(form.created_by) != str(user_id):
         raise HTTPException(status_code=403, detail="Only the researcher who created this form can archive it.")
     if form.status == "PUBLISHED":
-        raise HTTPException(status_code=400, detail="Published forms cannot be archived. Unpublish the form first.")
+        # Remove all deployments so participants lose access, then archive
+        deployments_result = await db.execute(
+            select(FormDeployment).where(FormDeployment.form_id == form_id)
+        )
+        for dep in deployments_result.scalars().all():
+            await db.delete(dep)
     if form.status == "DELETED":
         raise HTTPException(status_code=400, detail="Deleted forms cannot be archived.")
     if form.status == "ARCHIVED":
