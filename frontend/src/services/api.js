@@ -489,6 +489,22 @@ export const api = {
       method: 'POST',
     }),
 
+  getBackgroundInfo: () => request('/onboarding/background-info'),
+
+  getConsentForm: () => request('/onboarding/consent-form'),
+
+  updateConsentTemplate: (payload) =>
+    request('/onboarding/admin/consent-template', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  updateBackgroundTemplate: (payload) =>
+    request('/onboarding/admin/background-template', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
   // ── Survey Fill (participant) ──
   getDeployedForms: () => request("/participant/surveys/assigned"),
 

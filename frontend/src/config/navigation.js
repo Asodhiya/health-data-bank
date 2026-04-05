@@ -26,6 +26,12 @@ export const DASHBOARD_NAV = [
   },
 
   {
+    label: "Onboarding",
+    to: "/onboarding-management",
+    roles: ["admin"],
+  },
+
+  {
     label: "Surveys",
     to: "/surveys",
     roles: ["admin"],
