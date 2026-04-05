@@ -505,6 +505,14 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  getAdminIntakeForm: () => request('/onboarding/admin/intake-form'),
+
+  updateIntakeForm: (payload) =>
+    request('/onboarding/admin/intake-form', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
   // ── Survey Fill (participant) ──
   getDeployedForms: () => request("/participant/surveys/assigned"),
 

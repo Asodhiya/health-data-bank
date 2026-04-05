@@ -27,7 +27,18 @@ const Spinner = () => (
 const TABS = [
   { key: "consent", label: "Consent form" },
   { key: "background", label: "Background info" },
+  { key: "intake", label: "Intake form" },
   { key: "preview", label: "Preview" },
+];
+
+const FIELD_TYPES = [
+  { value: "text", label: "Text" },
+  { value: "number", label: "Number" },
+  { value: "date", label: "Date" },
+  { value: "single_select", label: "Single select" },
+  { value: "multi_select", label: "Multi select" },
+  { value: "dropdown", label: "Dropdown" },
+  { value: "textarea", label: "Text area" },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -328,9 +339,174 @@ function BackgroundEditor({ background, setBackground }) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+//  INTAKE FORM EDITOR
+// ═════════════════════════════════════════════════════════════════════════════
+function IntakeEditor({ intakeFields, setIntakeFields }) {
+  const hasSelectOptions = (type) => ["single_select", "multi_select", "dropdown"].includes(type);
+
+  const updateField = (idx, key, value) => {
+    const next = [...intakeFields];
+    next[idx] = { ...next[idx], [key]: value };
+    if (key === "field_type" && !hasSelectOptions(value)) {
+      next[idx].options = [];
+    }
+    setIntakeFields(next);
+  };
+
+  const addField = () => {
+    setIntakeFields([
+      ...intakeFields,
+      { label: "", field_type: "text", is_required: true, display_order: intakeFields.length + 1, options: [] },
+    ]);
+  };
+
+  const removeField = (idx) => {
+    setIntakeFields(intakeFields.filter((_, i) => i !== idx));
+  };
+
+  const addOption = (fieldIdx) => {
+    const next = [...intakeFields];
+    const opts = next[fieldIdx].options || [];
+    next[fieldIdx] = { ...next[fieldIdx], options: [...opts, { label: "", value: opts.length, display_order: opts.length }] };
+    setIntakeFields(next);
+  };
+
+  const updateOption = (fieldIdx, optIdx, key, value) => {
+    const next = [...intakeFields];
+    const opts = [...(next[fieldIdx].options || [])];
+    opts[optIdx] = { ...opts[optIdx], [key]: value };
+    next[fieldIdx] = { ...next[fieldIdx], options: opts };
+    setIntakeFields(next);
+  };
+
+  const removeOption = (fieldIdx, optIdx) => {
+    const next = [...intakeFields];
+    next[fieldIdx] = { ...next[fieldIdx], options: (next[fieldIdx].options || []).filter((_, i) => i !== optIdx) };
+    setIntakeFields(next);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white border border-slate-200 rounded-2xl p-6">
+        <h3 className="text-sm font-bold text-slate-700 mb-1">Intake form fields</h3>
+        <p className="text-xs text-slate-400 mb-2">
+          These are the survey-style questions on the intake page
+        </p>
+        <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 mb-5">
+          <p className="text-xs text-blue-600">
+            The intake page always includes fixed demographics (Name, DOB, Sex, Pronouns, Language, Marital Status, Education, Living Arrangement, Dependents, Occupation). The fields below appear in the Lifestyle &amp; Wellness section after demographics.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {intakeFields.map((field, idx) => (
+            <div key={idx} className="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
+              <div className="flex gap-3">
+                <span className="flex-shrink-0 w-7 h-7 rounded-lg bg-violet-100 text-violet-600 text-xs font-bold flex items-center justify-center mt-0.5">
+                  {idx + 1}
+                </span>
+                <div className="flex-1 min-w-0 space-y-3">
+                  <input
+                    type="text"
+                    value={field.label}
+                    onChange={(e) => updateField(idx, "label", e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all"
+                    placeholder="Field label (e.g. Undergraduate Program)"
+                  />
+                  <div className="flex items-center gap-4">
+                    <select
+                      value={field.field_type}
+                      onChange={(e) => updateField(idx, "field_type", e.target.value)}
+                      className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                    >
+                      {FIELD_TYPES.map((ft) => (
+                        <option key={ft.value} value={ft.value}>{ft.label}</option>
+                      ))}
+                    </select>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={field.is_required}
+                        onChange={(e) => updateField(idx, "is_required", e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-xs font-medium text-slate-500">Required</span>
+                    </label>
+                  </div>
+                  {hasSelectOptions(field.field_type) && (
+                    <div className="pl-2 border-l-2 border-violet-200 space-y-2">
+                      <span className="text-xs font-medium text-slate-500">Options</span>
+                      {(field.options || []).map((opt, oi) => (
+                        <div key={oi} className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={opt.label}
+                            onChange={(e) => updateOption(idx, oi, "label", e.target.value)}
+                            className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                            placeholder={`Option ${oi + 1}`}
+                          />
+                          <button
+                            onClick={() => removeOption(idx, oi)}
+                            className="p-1 rounded hover:bg-rose-100 text-slate-400 hover:text-rose-500 transition-colors"
+                          >
+                            <IconTrash />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => addOption(idx)}
+                        className="text-xs text-violet-600 hover:text-violet-700 font-medium"
+                      >
+                        + Add option
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1 shrink-0">
+                  <button
+                    onClick={() => idx > 0 && setIntakeFields(moveItem(intakeFields, idx, idx - 1))}
+                    disabled={idx === 0}
+                    className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-400 disabled:opacity-30 transition-colors"
+                    title="Move up"
+                  >
+                    <IconUp />
+                  </button>
+                  <button
+                    onClick={() => idx < intakeFields.length - 1 && setIntakeFields(moveItem(intakeFields, idx, idx + 1))}
+                    disabled={idx === intakeFields.length - 1}
+                    className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-400 disabled:opacity-30 transition-colors"
+                    title="Move down"
+                  >
+                    <IconDown />
+                  </button>
+                  <button
+                    onClick={() => removeField(idx)}
+                    className="p-1.5 rounded-lg hover:bg-rose-100 text-slate-400 hover:text-rose-500 transition-colors"
+                    title="Remove"
+                  >
+                    <IconTrash />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={addField}
+          className="mt-4 flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-xl transition-colors w-full justify-center"
+        >
+          <IconPlus /> Add field
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 //  PREVIEW (participant view)
 // ═════════════════════════════════════════════════════════════════════════════
-function Preview({ consent, background }) {
+function Preview({ consent, background, intakeFields }) {
   const [previewTab, setPreviewTab] = useState("consent");
 
   return (
@@ -346,6 +522,7 @@ function Preview({ consent, background }) {
           {[
             { key: "consent", label: "Consent form" },
             { key: "background", label: "Background info" },
+            { key: "intake", label: "Intake form" },
           ].map((t) => (
             <button
               key={t.key}
@@ -363,11 +540,9 @@ function Preview({ consent, background }) {
 
         {/* Preview content card */}
         <div className="border border-slate-200 rounded-xl p-6 bg-slate-50/30 max-h-[600px] overflow-y-auto">
-          {previewTab === "consent" ? (
-            <ConsentPreview consent={consent} />
-          ) : (
-            <BackgroundPreview background={background} />
-          )}
+          {previewTab === "consent" && <ConsentPreview consent={consent} />}
+          {previewTab === "background" && <BackgroundPreview background={background} />}
+          {previewTab === "intake" && <IntakePreview intakeFields={intakeFields} />}
         </div>
       </div>
     </div>
@@ -434,6 +609,48 @@ function BackgroundPreview({ background }) {
   );
 }
 
+function IntakePreview({ intakeFields }) {
+  return (
+    <div>
+      <div className="text-center mb-5">
+        <h2 className="text-xl font-bold text-slate-800 mb-1">Intake Questionnaire</h2>
+        <p className="text-sm text-slate-400">Preview of intake form fields</p>
+      </div>
+      <p className="text-xs text-slate-400 italic mb-4">
+        Demographics section (DOB, Sex, Pronouns, etc.) appears above these fields.
+      </p>
+      <div className="space-y-3">
+        {intakeFields.map((field, idx) => (
+          <div key={idx} className="border border-slate-100 rounded-xl p-4">
+            <p className="text-sm font-medium text-slate-700 mb-2">
+              <span className="text-violet-600 font-bold mr-1">{idx + 1}.</span>
+              {field.label || "(empty)"}
+              {field.is_required && <span className="text-rose-500 ml-0.5">*</span>}
+            </p>
+            {["single_select", "multi_select", "dropdown"].includes(field.field_type) ? (
+              <div className="flex flex-wrap gap-2">
+                {(field.options || []).map((opt, oi) => (
+                  <span key={oi} className="px-3 py-1.5 rounded-full border border-slate-200 text-xs text-slate-500 bg-white">
+                    {opt.label || `Option ${oi + 1}`}
+                  </span>
+                ))}
+                {(!field.options || field.options.length === 0) && (
+                  <span className="text-xs text-slate-300 italic">No options defined</span>
+                )}
+              </div>
+            ) : (
+              <div className="w-full h-9 bg-slate-100 border border-slate-200 rounded-lg" />
+            )}
+          </div>
+        ))}
+        {intakeFields.length === 0 && (
+          <p className="text-center text-sm text-slate-400 py-8">No intake fields yet</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  MAIN PAGE
 // ═════════════════════════════════════════════════════════════════════════════
@@ -449,19 +666,23 @@ export default function OnboardingManagementPage() {
   const [consent, setConsentRaw] = useState({ title: "", subtitle: "", items: [] });
   // Background state
   const [background, setBackgroundRaw] = useState({ title: "", subtitle: "", sections: [] });
+  // Intake state
+  const [intakeFields, setIntakeFieldsRaw] = useState([]);
 
   // Wrap setters to track dirty state
   const setConsent = useCallback((val) => { setConsentRaw(val); setDirty(true); setSuccess(""); }, []);
   const setBackground = useCallback((val) => { setBackgroundRaw(val); setDirty(true); setSuccess(""); }, []);
+  const setIntakeFields = useCallback((val) => { setIntakeFieldsRaw(val); setDirty(true); setSuccess(""); }, []);
 
   // Fetch both templates on mount
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [consentData, bgData] = await Promise.all([
+        const [consentData, bgData, intakeData] = await Promise.all([
           api.getConsentForm(),
           api.getBackgroundInfo(),
+          api.getAdminIntakeForm().catch(() => null),
         ]);
         if (cancelled) return;
         setConsentRaw({
@@ -474,6 +695,21 @@ export default function OnboardingManagementPage() {
           subtitle: bgData.subtitle || "",
           sections: bgData.sections || [],
         });
+        if (intakeData) {
+          setIntakeFieldsRaw(
+            (intakeData.fields || []).map((f) => ({
+              label: f.label,
+              field_type: f.field_type,
+              is_required: f.is_required,
+              display_order: f.display_order,
+              options: (f.options || []).map((o) => ({
+                label: o.label || "",
+                value: o.value,
+                display_order: o.display_order,
+              })),
+            }))
+          );
+        }
       } catch (err) {
         if (!cancelled) setError(err.message || "Failed to load onboarding templates.");
       } finally {
@@ -500,6 +736,11 @@ export default function OnboardingManagementPage() {
       setActiveTab("background");
       return;
     }
+    if (intakeFields.some((f) => !f.label.trim())) {
+      setError("All intake fields must have a label.");
+      setActiveTab("intake");
+      return;
+    }
 
     setError("");
     setSaving(true);
@@ -514,6 +755,9 @@ export default function OnboardingManagementPage() {
           title: background.title,
           subtitle: background.subtitle || null,
           sections: background.sections,
+        }),
+        api.updateIntakeForm({
+          fields: intakeFields.map((f, i) => ({ ...f, display_order: i + 1 })),
         }),
       ]);
       setSuccess("Onboarding templates saved successfully. A new version has been created.");
@@ -593,7 +837,8 @@ export default function OnboardingManagementPage() {
       {/* Tab content */}
       {activeTab === "consent" && <ConsentEditor consent={consent} setConsent={setConsent} />}
       {activeTab === "background" && <BackgroundEditor background={background} setBackground={setBackground} />}
-      {activeTab === "preview" && <Preview consent={consent} background={background} />}
+      {activeTab === "intake" && <IntakeEditor intakeFields={intakeFields} setIntakeFields={setIntakeFields} />}
+      {activeTab === "preview" && <Preview consent={consent} background={background} intakeFields={intakeFields} />}
     </div>
   );
 }

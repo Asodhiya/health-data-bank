@@ -34,3 +34,7 @@ class BackgroundInfoUpdateIn(BaseModel):
     title: str
     subtitle: Optional[str] = None
     sections: List[Dict[str, Any]]
+
+
+class IntakeFormUpdateIn(BaseModel):
+    fields: List[Dict[str, Any]]  # [{label, field_type, is_required, display_order, options: [...]}]
