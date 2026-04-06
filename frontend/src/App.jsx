@@ -43,6 +43,7 @@ import SystemSettingsPage from "./pages/admin/SystemSettingsPage";
 import AdminOnboardingPage from "./pages/admin/AdminOnboardingPage";
 import AdminInsightsPage from "./pages/admin/AdminInsightsPage";
 import AdminMessagesPage from "./pages/admin/AdminMessagesPage";
+import OnboardingManagementPage from "./pages/admin/OnboardingManagementPage";
 
 // --- Researcher pages ---
 import ResearcherOnboardingPage from "./pages/researcher/ResearcherOnboardingPage";
@@ -100,6 +101,7 @@ function App() {
             <Route path="/users" element={<UserManagementPage />} />
             <Route path="/admin/users/:id" element={<UserDetailPage />} />
             <Route path="/audit-logs" element={<AuditLogPage />} /> 
+            <Route path="/onboarding-management" element={<OnboardingManagementPage />} />
             <Route path="/settings" element={<SystemSettingsPage />} />
             <Route path="/admin/insights" element={<AdminInsightsPage />} />
             <Route path="/admin/messages" element={<AdminMessagesPage />} />
