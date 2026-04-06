@@ -12,7 +12,7 @@ from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import ONBOARDING_READ, ONBOARDING_SUBMIT, ONBOARDING_EDIT
 from app.db.models import (
     User, SurveyForm, FormField, FormSubmission,
-    ParticipantProfile, FieldElementMap, HealthDataPoint
+    ParticipantProfile, FieldElementMap, HealthDataPoint, Role, UserRole
 )
 from app.services.participant_survey_service import _get_participant, _build_answer_records, _apply_transform
 from app.services.onboarding_service import (
@@ -31,6 +31,7 @@ from app.schemas.onboarding_schema import (
     ConsentTemplateUpdateIn,
     BackgroundInfoUpdateIn,
 )
+from app.services.notification_service import create_notifications_bulk
 
 router = APIRouter()
 
@@ -271,6 +272,27 @@ async def complete_onboarding_route(
         await complete_onboarding(current_user.user_id, db)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    admin_rows = await db.execute(
+        select(User.user_id)
+        .join(UserRole, UserRole.user_id == User.user_id)
+        .join(Role, Role.role_id == UserRole.role_id)
+        .where(Role.role_name == "admin")
+    )
+    admin_ids = [row[0] for row in admin_rows.all()]
+    if admin_ids:
+        display_name = f"{current_user.first_name or ''} {current_user.last_name or ''}".strip() or "A participant"
+        await create_notifications_bulk(
+            db=db,
+            user_ids=admin_ids,
+            notification_type="summary",
+            title="Participant completed onboarding",
+            message=f"{display_name} completed onboarding.",
+            link="/admin/system-insights",
+            role_target="admin",
+            source_type="onboarding_completed",
+            source_id=current_user.user_id,
+        )
     return {"message": "Onboarding completed."}
 
 

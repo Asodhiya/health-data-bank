@@ -13,7 +13,7 @@ from app.db.models import (
     SubmissionAnswer, FormField, ParticipantProfile,
     FieldElementMap, HealthDataPoint, Group, CaretakerProfile
 )
-from app.services.notification_service import create_notification
+from app.services.notification_service import create_notification, notification_exists_recent
 
 async def _get_participant(user_id: UUID, db: AsyncSession) -> Optional[ParticipantProfile]:
     """Resolve user_id to ParticipantProfile, or return None."""
@@ -378,17 +378,26 @@ async def submit_survey_response(form_id: UUID, user_id: UUID, answers: List[Dic
 
     form = await db.scalar(select(SurveyForm).where(SurveyForm.form_id == form_id))
     if form and form.created_by:
-        await create_notification(
-            db=db,
+        already_notified = await notification_exists_recent(
+            db,
             user_id=form.created_by,
             notification_type="summary",
-            title="New form submission",
-            message=f"A participant submitted '{form.title}'.",
-            link="/researcher",
-            role_target="researcher",
-            source_type="submission",
-            source_id=submission.submission_id,
+            source_type="form_submission",
+            source_id=form.form_id,
+            within_hours=1,
         )
+        if not already_notified:
+            await create_notification(
+                db=db,
+                user_id=form.created_by,
+                notification_type="summary",
+                title="New form submission",
+                message=f"A participant submitted '{form.title}'.",
+                link="/researcher",
+                role_target="researcher",
+                source_type="form_submission",
+                source_id=form.form_id,
+            )
 
     if submission.group_id:
         caretaker_user_id = await db.scalar(
@@ -397,17 +406,26 @@ async def submit_survey_response(form_id: UUID, user_id: UUID, answers: List[Dic
             .where(Group.group_id == submission.group_id)
         )
         if caretaker_user_id:
-            await create_notification(
-                db=db,
+            already_notified = await notification_exists_recent(
+                db,
                 user_id=caretaker_user_id,
                 notification_type="submission",
-                title="Participant submitted a survey",
-                message=f"A participant in your group submitted '{form.title if form else 'a survey'}'.",
-                link="/caretaker/participants",
-                role_target="caretaker",
-                source_type="submission",
-                source_id=submission.submission_id,
+                source_type="group_submission",
+                source_id=submission.group_id,
+                within_hours=1,
             )
+            if not already_notified:
+                await create_notification(
+                    db=db,
+                    user_id=caretaker_user_id,
+                    notification_type="submission",
+                    title="Participant submitted a survey",
+                    message=f"A participant in your group submitted '{form.title if form else 'a survey'}'.",
+                    link="/caretaker/participants",
+                    role_target="caretaker",
+                    source_type="group_submission",
+                    source_id=submission.group_id,
+                )
 
     await db.commit()
     return submission

@@ -920,6 +920,8 @@ export default function ReportsPage() {
   const { user } = useOutletContext();
   const [activeTab, setActiveTab] = useState("group");
   const [participants, setParticipants] = useState([]);
+  const [participantsLoadedFor, setParticipantsLoadedFor] = useState("none");
+  const [participantTotal, setParticipantTotal] = useState(0);
   const [groups, setGroups] = useState([]);
   const [elements, setElements] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("all");
@@ -928,11 +930,13 @@ export default function ReportsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [pData, gData] = await Promise.all([
-        api.caretakerListParticipants().catch(() => []),
+      const [pSummary, gData] = await Promise.all([
+        api.caretakerGetParticipantsSummary().catch(() => ({ total: 0 })),
         api.caretakerGetGroups().catch(() => []),
       ]);
-      setParticipants(Array.isArray(pData) ? pData : []);
+      setParticipantTotal(Number(pSummary?.total || 0));
+      setParticipants([]);
+      setParticipantsLoadedFor("none");
       const transformedGroups = Array.isArray(gData)
         ? gData.map(g => ({ id: g.group_id, name: g.name }))
         : [];
@@ -972,6 +976,26 @@ export default function ReportsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  useEffect(() => {
+    if (activeTab !== "comparison" && activeTab !== "trends") return;
+    const scope = selectedGroupId === "all" ? "all" : selectedGroupId;
+    if (participantsLoadedFor === scope) return;
+    api.caretakerListParticipants({
+      limit: 100,
+      offset: 0,
+      ...(selectedGroupId !== "all" ? { group_id: selectedGroupId } : {}),
+      sort_by: "name",
+    })
+      .then((data) => {
+        setParticipants(Array.isArray(data) ? data : []);
+        setParticipantsLoadedFor(scope);
+      })
+      .catch(() => {
+        setParticipants([]);
+        setParticipantsLoadedFor(scope);
+      });
+  }, [activeTab, selectedGroupId, participantsLoadedFor]);
+
   const filteredParticipants = selectedGroupId === "all"
     ? participants
     : participants.filter(p => p.group_id === selectedGroupId);
@@ -996,7 +1020,7 @@ export default function ReportsPage() {
       </div>
 
       {groups.length > 0 && (
-        <ReportsGroupSelector groups={groups} selectedGroupId={selectedGroupId} onChange={setSelectedGroupId} totalParticipants={participants.length} />
+        <ReportsGroupSelector groups={groups} selectedGroupId={selectedGroupId} onChange={setSelectedGroupId} totalParticipants={participantTotal} />
       )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-1.5 flex gap-1 overflow-x-auto">

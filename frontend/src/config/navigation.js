@@ -38,6 +38,18 @@ export const DASHBOARD_NAV = [
   },
 
   {
+    label: "System Insights",
+    to: "/admin/insights",
+    roles: ["admin"],
+  },
+
+  {
+    label: "Messages & Feedback",
+    to: "/admin/messages",
+    roles: ["admin"],
+  },
+
+  {
     label: "Security & Audit Logs",
     to: "/audit-logs",
     roles: ["admin"],
