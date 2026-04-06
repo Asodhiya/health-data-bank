@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 
@@ -12,6 +12,8 @@ const ROLES = [
 const INV_STYLES = { pending: { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-400 animate-pulse", label: "Pending" }, accepted: { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-400", label: "Accepted" }, expired: { bg: "bg-slate-100", text: "text-slate-500", dot: "bg-slate-400", label: "Expired" }, revoked: { bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-400", label: "Revoked" } };
 const SUB_STYLES = { completed: { bg: "bg-emerald-50", text: "text-emerald-700", label: "Completed" }, in_progress: { bg: "bg-amber-50", text: "text-amber-700", label: "In Progress" }, new: { bg: "bg-blue-50", text: "text-blue-700", label: "New" } };
 const GOAL_STYLES = { completed: { bg: "bg-emerald-50", text: "text-emerald-700", bar: "bg-emerald-500" }, active: { bg: "bg-blue-50", text: "text-blue-700", bar: "bg-blue-500" }, in_progress: { bg: "bg-blue-50", text: "text-blue-700", bar: "bg-blue-500" }, not_started: { bg: "bg-slate-100", text: "text-slate-500", bar: "bg-slate-300" } };
+const USERS_PAGE_SIZE = 10;
+const INVITES_PAGE_SIZE = 10;
 
 // ── Icons & Utils ────────────────────────────────────────────────────────────
 const Ic = ({ d, c = "h-5 w-5" }) => <svg xmlns="http://www.w3.org/2000/svg" className={c} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} /></svg>;
@@ -456,15 +458,24 @@ function EditGroupModal({ open, onClose, group, onSave }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function UserManagementPage() {
   const [users, setUsers] = useState([]);
+  const [usersTotal, setUsersTotal] = useState(0);
+  const [usersOffset, setUsersOffset] = useState(0);
+  const [usersLoadingMore, setUsersLoadingMore] = useState(false);
+  const [roleTotals, setRoleTotals] = useState({});
   const [groups, setGroups] = useState([]);
   const [caretakers, setCaretakers] = useState([]);
   const [invites, setInvites] = useState([]);
+  const [invitesOffset, setInvitesOffset] = useState(0);
+  const [invitesHasMore, setInvitesHasMore] = useState(false);
+  const [invitesLoadingMore, setInvitesLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [usersAvailable, setUsersAvailable] = useState(false);
-  const [invitesAvailable, setInvitesAvailable] = useState(false);
+  const [usersError, setUsersError] = useState("");
+  const [invitesAvailable, setInvitesAvailable] = useState(null);
 
   // Search, filter, sort
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [activeRole, setActiveRole] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterGroup, setFilterGroup] = useState("all");
@@ -478,6 +489,8 @@ export default function UserManagementPage() {
   const [invitePreRole, setInvitePreRole] = useState("");
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [groupsExpanded, setGroupsExpanded] = useState(false);
+  const [groupMembersByGroup, setGroupMembersByGroup] = useState({});
+  const [groupMembersLoading, setGroupMembersLoading] = useState({});
   const [invitesExpanded, setInvitesExpanded] = useState(false);
   const [inviteFilter, setInviteFilter] = useState("all");
   const [inviteSearch, setInviteSearch] = useState("");
@@ -500,31 +513,194 @@ export default function UserManagementPage() {
   const [groupInviteTarget, setGroupInviteTarget] = useState(null);
   const [addParticipantsTarget, setAddParticipantsTarget] = useState(null);
   const [toast, setToast] = useState({ show: false, message: "", type: "success" });
+  const didRunSearchSync = useRef(false);
   const msg = (m, t = "success") => { setToast({ show: true, message: m, type: t }); setTimeout(() => setToast(p => ({ ...p, show: false })), 3500); };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   // ── Fetch all data on mount ────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
-    try {
-      const [g, c] = await Promise.all([api.adminGetGroups(), api.adminGetCaretakers()]);
-      const enriched = (Array.isArray(g) ? g : []).map(grp => {
-        const ct = (Array.isArray(c) ? c : []).find(x => String(x.caretaker_id) === String(grp.caretaker_id));
-        return { ...grp, group_id: String(grp.group_id), caretaker_id: grp.caretaker_id ? String(grp.caretaker_id) : null, caretaker_name: ct?.name || null, member_count: grp.member_count || 0 };
-      });
-      setGroups(enriched);
-      setCaretakers(Array.isArray(c) ? c : []);
-    } catch (err) {
-      console.error("Failed to load groups/caretakers:", err);
+    setInvitesAvailable(null);
+    const [groupsRes, caretakersRes, usersPageRes, invitesRes, roleStatsRes] = await Promise.allSettled([
+      api.adminGetGroups(),
+      api.adminGetCaretakers(),
+      api.adminListUsersPaged(USERS_PAGE_SIZE, 0, ""),
+      api.adminListInvites(INVITES_PAGE_SIZE, 0),
+      api.adminGetRoleGroupStats(),
+    ]);
+
+    const groupsData = groupsRes.status === "fulfilled" && Array.isArray(groupsRes.value) ? groupsRes.value : [];
+    const caretakersData = caretakersRes.status === "fulfilled" && Array.isArray(caretakersRes.value) ? caretakersRes.value : [];
+
+    if (groupsRes.status !== "fulfilled" || caretakersRes.status !== "fulfilled") {
+      console.error("Failed to load groups/caretakers.");
     }
-    try { const u = await api.adminListUsers(); const mapped = Array.isArray(u) ? u.map(transformUser) : []; const seen = new Set(); setUsers(mapped.filter(x => !seen.has(x.id) && seen.add(x.id))); setUsersAvailable(true); } catch { setUsers([]); setUsersAvailable(false); }
-    try { const inv = await api.adminListInvites(); setInvites(Array.isArray(inv) ? inv : []); setInvitesAvailable(true); } catch { setInvites([]); setInvitesAvailable(false); }
+
+    const enriched = groupsData.map((grp) => {
+      const ct = caretakersData.find((x) => String(x.caretaker_id) === String(grp.caretaker_id));
+      return {
+        ...grp,
+        group_id: String(grp.group_id),
+        caretaker_id: grp.caretaker_id ? String(grp.caretaker_id) : null,
+        caretaker_name: ct?.name || null,
+        member_count: grp.member_count || 0,
+      };
+    });
+    setGroups(enriched);
+    setCaretakers(caretakersData);
+
+    if (usersPageRes.status === "fulfilled") {
+      const page = usersPageRes.value;
+      const mapped = Array.isArray(page?.items) ? page.items.map(transformUser) : [];
+      const seen = new Set();
+      const uniqueMapped = mapped.filter((x) => !seen.has(x.id) && seen.add(x.id));
+      setUsers(uniqueMapped);
+      setUsersTotal(Number(page?.total || 0));
+      setUsersOffset(uniqueMapped.length);
+      setUsersAvailable(true);
+      setUsersError(page?._fallback ? (page?._error || "Paged endpoint unavailable; using fallback list.") : "");
+    } else {
+      setUsers([]);
+      setUsersTotal(0);
+      setUsersOffset(0);
+      setUsersAvailable(false);
+      setUsersError(usersPageRes.reason?.message || "Failed to load users.");
+    }
+
+    if (invitesRes.status === "fulfilled") {
+      const firstPage = Array.isArray(invitesRes.value) ? invitesRes.value : [];
+      setInvites(firstPage);
+      setInvitesOffset(firstPage.length);
+      setInvitesHasMore(firstPage.length === INVITES_PAGE_SIZE);
+      setInvitesAvailable(true);
+    } else {
+      setInvites([]);
+      setInvitesOffset(0);
+      setInvitesHasMore(false);
+      setInvitesAvailable(false);
+    }
+
+    if (roleStatsRes.status === "fulfilled" && Array.isArray(roleStatsRes.value?.role_summary)) {
+      const map = {};
+      roleStatsRes.value.role_summary.forEach((r) => {
+        const key = String(r.role || "").toLowerCase();
+        map[key] = Number(r.total || 0);
+      });
+      setRoleTotals(map);
+    } else {
+      setRoleTotals({});
+    }
     setLoading(false);
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  useEffect(() => {
+    if (!didRunSearchSync.current) {
+      didRunSearchSync.current = true;
+      return;
+    }
+
+    let cancelled = false;
+    const syncUsersForSearch = async () => {
+      setLoading(true);
+      try {
+        const page = await api.adminListUsersPaged(USERS_PAGE_SIZE, 0, debouncedSearch);
+        if (cancelled) return;
+        const mapped = Array.isArray(page?.items) ? page.items.map(transformUser) : [];
+        const seen = new Set();
+        const uniqueMapped = mapped.filter((x) => !seen.has(x.id) && seen.add(x.id));
+        setUsers(uniqueMapped);
+        setUsersTotal(Number(page?.total || 0));
+        setUsersOffset(uniqueMapped.length);
+        setUsersAvailable(true);
+        setUsersError(page?._fallback ? (page?._error || "Paged endpoint unavailable; using fallback list.") : "");
+        setSelected(new Set());
+      } catch (err) {
+        if (cancelled) return;
+        setUsers([]);
+        setUsersTotal(0);
+        setUsersOffset(0);
+        setUsersAvailable(false);
+        setUsersError(err.message || "Failed to load users.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    syncUsersForSearch();
+    return () => { cancelled = true; };
+  }, [debouncedSearch]);
+
+  const loadMoreUsers = useCallback(async () => {
+    if (usersLoadingMore || usersOffset >= usersTotal) return;
+    setUsersLoadingMore(true);
+    try {
+      const page = await api.adminListUsersPaged(USERS_PAGE_SIZE, usersOffset, debouncedSearch);
+      const mapped = Array.isArray(page?.items) ? page.items.map(transformUser) : [];
+      const uniquePage = [];
+      {
+        const pageSeen = new Set();
+        for (const row of mapped) {
+          if (pageSeen.has(row.id)) continue;
+          pageSeen.add(row.id);
+          uniquePage.push(row);
+        }
+      }
+      setUsers(p => {
+        const seen = new Set(p.map(x => x.id));
+        const next = [];
+        for (const row of uniquePage) {
+          if (seen.has(row.id)) continue;
+          seen.add(row.id);
+          next.push(row);
+        }
+        return [...p, ...next];
+      });
+      setUsersOffset(prev => prev + uniquePage.length);
+      setUsersTotal(Number(page?.total || usersTotal));
+    } catch (err) {
+      msg(err.message || "Failed to load more users.", "error");
+    } finally {
+      setUsersLoadingMore(false);
+    }
+  }, [debouncedSearch, usersLoadingMore, usersOffset, usersTotal]);
+
+  const loadMoreInvites = useCallback(async () => {
+    if (invitesLoadingMore || !invitesHasMore) return;
+    setInvitesLoadingMore(true);
+    try {
+      const nextPage = await api.adminListInvites(INVITES_PAGE_SIZE, invitesOffset);
+      const nextRows = Array.isArray(nextPage) ? nextPage : [];
+      setInvites((prev) => {
+        const seen = new Set(prev.map((x) => x.invite_id));
+        const uniqueNext = nextRows.filter((x) => !seen.has(x.invite_id));
+        return [...prev, ...uniqueNext];
+      });
+      setInvitesOffset((prev) => prev + nextRows.length);
+      setInvitesHasMore(nextRows.length === INVITES_PAGE_SIZE);
+    } catch (err) {
+      msg(err.message || "Failed to load more invites.", "error");
+    } finally {
+      setInvitesLoadingMore(false);
+    }
+  }, [invitesLoadingMore, invitesHasMore, invitesOffset]);
+
   // ── Derived ────────────────────────────────────────────────────────────────
-  const counts = useMemo(() => { const c = {}; ROLES.forEach(r => { c[r.value] = users.filter(u => u.role === r.value).length; }); return c; }, [users]);
+  const counts = useMemo(() => {
+    const c = {};
+    ROLES.forEach(r => {
+      if (typeof roleTotals[r.value] === "number") c[r.value] = roleTotals[r.value];
+      else c[r.value] = users.filter(u => u.role === r.value).length;
+    });
+    return c;
+  }, [users, roleTotals]);
   const inviteCounts = useMemo(() => { const c = { all: invites.length, pending: 0, accepted: 0, expired: 0, revoked: 0 }; invites.forEach(i => { if (c[i.status] !== undefined) c[i.status]++; }); return c; }, [invites]);
 
   const activeFilterCount = useMemo(() => {
@@ -537,8 +713,8 @@ export default function UserManagementPage() {
 
   // ── Filter + Sort ──────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
     let list = users.filter(u => {
-      const q = search.toLowerCase();
       if (q && !`${u.firstName || ""} ${u.lastName || ""} ${u.email || ""}`.toLowerCase().includes(q)) return false;
       if (activeRole && u.role !== activeRole) return false;
       if (filterStatus !== "all" && u.status !== filterStatus) return false;
@@ -559,6 +735,30 @@ export default function UserManagementPage() {
       }
       return true;
     });
+
+    if (q) {
+      const relevance = (u) => {
+        const first = (u.firstName || "").toLowerCase();
+        const last = (u.lastName || "").toLowerCase();
+        const full = `${first} ${last}`.trim();
+        const email = (u.email || "").toLowerCase();
+
+        if (full === q) return 0;
+        if (first === q || last === q) return 1;
+        if (full.startsWith(q)) return 2;
+        if (first.startsWith(q) || last.startsWith(q)) return 3;
+        if (email.startsWith(q)) return 4;
+        return 5;
+      };
+
+      list.sort((a, b) => {
+        const ra = relevance(a);
+        const rb = relevance(b);
+        if (ra !== rb) return ra - rb;
+        return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
+      });
+      return list;
+    }
 
     const dir = sort.dir === "asc" ? 1 : -1;
     list.sort((a, b) => {
@@ -587,6 +787,29 @@ export default function UserManagementPage() {
     });
   }, [invites, inviteFilter, inviteRoleFilter, inviteGroupFilter, inviteSearch, inviteDateFilter]);
   const hasInvFilters = inviteSearch || inviteRoleFilter !== "all" || inviteGroupFilter !== "all" || inviteDateFilter !== "all";
+  const hasUserFilters = Boolean(
+    search ||
+    activeRole ||
+    filterStatus !== "all" ||
+    filterGroup !== "all" ||
+    filterCaretaker !== "all"
+  );
+  const hasClientSideUserFilters = Boolean(
+    activeRole ||
+    filterStatus !== "all" ||
+    filterGroup !== "all" ||
+    filterCaretaker !== "all"
+  );
+  const hasMoreUsers = usersOffset < usersTotal;
+
+  // For client-side-only filters, keep fetching pages so the filter can apply to the full dataset.
+  useEffect(() => {
+    if (!hasClientSideUserFilters || loading || usersLoadingMore || !hasMoreUsers) return;
+    const timer = setTimeout(() => {
+      loadMoreUsers();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [hasClientSideUserFilters, hasMoreUsers, loadMoreUsers, loading, usersLoadingMore, usersOffset]);
 
   const allSel = filtered.length > 0 && filtered.every(u => selected.has(u.id));
   const toggleAll = () => { if (allSel) setSelected(new Set()); else setSelected(new Set(filtered.map(u => u.id))); };
@@ -599,7 +822,7 @@ export default function UserManagementPage() {
   const clearFilters = () => { setFilterStatus("all"); setFilterGroup("all"); setFilterCaretaker("all"); setSearch(""); };
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  const handleDeleteGroup = async (g) => { try { await api.adminDeleteGroup(g.group_id); setGroups(p => p.filter(x => x.group_id !== g.group_id)); msg(`"${g.name}" deleted.`); } catch (err) { msg(err.message || "Failed.", "error"); } };
+  const handleDeleteGroup = async (g) => { try { await api.adminDeleteGroup(g.group_id); setGroups(p => p.filter(x => x.group_id !== g.group_id)); setGroupMembersByGroup(prev => { const next = { ...prev }; delete next[g.group_id]; return next; }); msg(`"${g.name}" deleted.`); } catch (err) { msg(err.message || "Failed.", "error"); } };
   const handleDeactivate = async (u) => { setDeactivateLoading(true); try { await api.adminUpdateUserStatus(u.id, "inactive"); } catch {} setUsers(p => p.map(x => x.id === u.id ? { ...x, status: "inactive" } : x)); if (detailUser?.id === u.id) setDetailUser(p => ({ ...p, status: "inactive" })); setDeactivateLoading(false); setDeactivateTarget(null); msg(`${u.firstName} deactivated.`); };
   const handleReactivate = (u) => {
     if (u.email?.startsWith("deleted_")) { setReactivateAnonymizedTarget(u); return; }
@@ -645,6 +868,27 @@ export default function UserManagementPage() {
     try { await api.adminMoveParticipant(t.id, isUnassign ? null : groupId); } catch (err) { msg(err.message || "Move failed.", "error"); return; }
     setUsers(p => p.map(u => u.id === t.id ? { ...u, groupId: isUnassign ? null : groupId, group: g?.name || null, caretakerId: g?.caretaker_id || null, caretaker: g?.caretaker_name || null } : u));
     if (detailUser?.id === t.id) setDetailUser(p => ({ ...p, groupId: isUnassign ? null : groupId, group: g?.name || null }));
+    setGroups(prev => prev.map(group => {
+      if (group.group_id === t.groupId) return { ...group, member_count: Math.max(0, Number(group.member_count || 0) - 1) };
+      if (!isUnassign && group.group_id === groupId) return { ...group, member_count: Number(group.member_count || 0) + 1 };
+      return group;
+    }));
+    setGroupMembersByGroup(prev => {
+      const next = { ...prev };
+      if (t.groupId && Array.isArray(next[t.groupId])) {
+        next[t.groupId] = next[t.groupId].filter(member => member.participant_id !== t.id);
+      }
+      if (!isUnassign && Array.isArray(next[groupId])) {
+        const exists = next[groupId].some(member => member.participant_id === t.id);
+        if (!exists) {
+          next[groupId] = [
+            ...next[groupId],
+            { participant_id: t.id, name: `${t.firstName} ${t.lastName}`.trim() || t.email || "Unknown", joined_at: null },
+          ];
+        }
+      }
+      return next;
+    });
   }
   setChangeGroupTargets(null);
   msg(isUnassign ? "Removed from group." : `Moved to "${g?.name}".`);
@@ -670,7 +914,12 @@ export default function UserManagementPage() {
     }
   };
   const handleChangeRole = async (user, newRole) => {
-    try { await api.adminUpdateUser(user.id, { role: newRole }); } catch {}
+    try {
+      await api.adminUpdateUser(user.id, { role: newRole });
+    } catch (err) {
+      msg(err.message || "Failed to change role.", "error");
+      return;
+    }
     setUsers(p => p.map(u => u.id === user.id ? { ...u, role: newRole } : u));
     if (detailUser?.id === user.id) setDetailUser(p => ({ ...p, role: newRole }));
     setChangeRoleTarget(null);
@@ -695,6 +944,30 @@ export default function UserManagementPage() {
     const a = document.createElement("a"); a.href = url; a.download = `users_export_${new Date().toISOString().split("T")[0]}.csv`; a.click();
     URL.revokeObjectURL(url);
     msg(`Exported ${filtered.length} users.`);
+  };
+
+  const handleToggleGroupExpanded = async (groupId) => {
+    if (expandedGroupId === groupId) {
+      setExpandedGroupId(null);
+      return;
+    }
+
+    setExpandedGroupId(groupId);
+    if (groupMembersByGroup[groupId] || groupMembersLoading[groupId]) return;
+
+    setGroupMembersLoading(prev => ({ ...prev, [groupId]: true }));
+    try {
+      const members = await api.adminGetGroupMembers(groupId);
+      setGroupMembersByGroup(prev => ({
+        ...prev,
+        [groupId]: Array.isArray(members) ? members : [],
+      }));
+    } catch (err) {
+      msg(err.message || "Failed to load group members.", "error");
+      setGroupMembersByGroup(prev => ({ ...prev, [groupId]: [] }));
+    } finally {
+      setGroupMembersLoading(prev => ({ ...prev, [groupId]: false }));
+    }
   };
 
   // ── Columns ────────────────────────────────────────────────────────────────
@@ -730,7 +1003,7 @@ export default function UserManagementPage() {
       <AssignCaretakerModal open={!!assignCaretakerTarget} onClose={() => setAssignCaretakerTarget(null)} group={assignCaretakerTarget} caretakers={caretakers} onAssign={handleAssignCaretaker} />
       <ReactivateAnonymizedModal open={!!reactivateAnonymizedTarget} onClose={() => setReactivateAnonymizedTarget(null)} user={reactivateAnonymizedTarget} onConfirm={handleAnonymizedReactivated} />
       <GroupInviteModal open={!!groupInviteTarget} onClose={() => setGroupInviteTarget(null)} group={groupInviteTarget} onInviteSent={(d) => { setInvites(p => [{ invite_id: `inv${Date.now()}`, email: d.email, role: d.role, group_name: d.group_name, group_id: d.groupId, invited_by: "You", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 48 * 3600000).toISOString(), used: false, status: "pending" }, ...p]); msg("Invite sent."); }} onError={(m) => msg(m, "error")} />
-      <AddParticipantsModal open={!!addParticipantsTarget} onClose={() => setAddParticipantsTarget(null)} group={addParticipantsTarget} users={users} groups={groups} onConfirm={(group, pIds) => { setUsers(p => p.map(u => pIds.includes(u.id) ? { ...u, groupId: group.group_id, group: group.name } : u)); setAddParticipantsTarget(null); msg(`${pIds.length} participant${pIds.length > 1 ? "s" : ""} added to "${group.name}".`); }} />
+      <AddParticipantsModal open={!!addParticipantsTarget} onClose={() => setAddParticipantsTarget(null)} group={addParticipantsTarget} users={users} groups={groups} onConfirm={(group, pIds) => { setUsers(p => p.map(u => pIds.includes(u.id) ? { ...u, groupId: group.group_id, group: group.name } : u)); setGroups(prev => prev.map(g => g.group_id === group.group_id ? { ...g, member_count: Number(g.member_count || 0) + pIds.length } : g)); setGroupMembersByGroup(prev => { if (!Array.isArray(prev[group.group_id])) return prev; const additions = users.filter(u => pIds.includes(u.id)).map(u => ({ participant_id: u.id, name: `${u.firstName} ${u.lastName}`.trim() || u.email || "Unknown", joined_at: null })).filter(member => !prev[group.group_id].some(existing => existing.participant_id === member.participant_id)); return { ...prev, [group.group_id]: [...prev[group.group_id], ...additions] }; }); setAddParticipantsTarget(null); msg(`${pIds.length} participant${pIds.length > 1 ? "s" : ""} added to "${group.name}".`); }} />
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"><div><h1 className="text-2xl font-bold text-slate-800">Users & Roles</h1><p className="text-sm text-slate-500 mt-1">Manage accounts, groups, invites, and permissions</p></div><div className="flex items-center gap-2 shrink-0"><button onClick={handleExportCSV} disabled={filtered.length === 0} className="px-4 py-2.5 text-sm font-semibold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl flex items-center gap-2 disabled:opacity-40"><IconDownload /> Export CSV</button><button onClick={() => setShowInvite(true)} className="px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl flex items-center gap-2"><IconMail /> Invite User</button></div></div>
@@ -739,16 +1012,30 @@ export default function UserManagementPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{ROLES.map(r => { const a = activeRole === r.value; return <button key={r.value} onClick={() => setActiveRole(a ? null : r.value)} className={`bg-white rounded-2xl p-5 border shadow-sm transition-all text-left ${a ? `${r.border} ring-2 ring-current ${r.lightBg}` : "border-slate-100 hover:border-slate-200 hover:shadow-md"}`}><div className="flex items-center justify-between mb-3"><div className={`w-10 h-10 rounded-xl flex items-center justify-center ${a ? `${r.color} text-white` : `${r.lightBg} ${r.lightText}`}`}><Ic d={r.icon} c="h-5 w-5" /></div>{a && <span className="text-[10px] font-bold uppercase text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Filtered</span>}</div><p className="text-3xl font-extrabold text-slate-800">{loading ? "—" : counts[r.value]}</p><p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">{r.label}</p></button>; })}</div>
 
       {/* Groups (REAL API) */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><button onClick={() => setGroupsExpanded(!groupsExpanded)} className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center"><IconUsers /></div><div><h2 className="text-base font-bold text-slate-800">Groups & Cohorts</h2><p className="text-xs text-slate-400">{loading ? "Loading…" : `${groups.length} groups`}</p></div></div><div className="flex items-center gap-3"><span onClick={e => { e.stopPropagation(); setShowCreateGroup(true); }} className="text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg flex items-center gap-1"><IconPlus /> New</span><IconChevron open={groupsExpanded} /></div></button>{groupsExpanded && <div className="border-t border-slate-100 divide-y divide-slate-50">{groups.length === 0 ? <div className="px-6 py-8 text-center"><p className="text-sm text-slate-400">No groups yet. Create one above.</p></div> : groups.map(g => <div key={g.group_id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${g.caretaker_id ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}><IconUsers /></div><div><p onClick={(e) => { e.stopPropagation(); setExpandedGroupId(prev => prev === g.group_id ? null : g.group_id); }} className="text-sm font-semibold text-blue-600 hover:text-blue-800 cursor-pointer hover:underline">{g.name}</p><div><p className="text-xs text-slate-500 mt-0.5">{g.description || <span className="italic text-slate-300">No description</span>}</p><span className="text-xs text-slate-400">{(() => { const count = users.filter(u => u.role === "participant" && u.groupId === g.group_id).length; return `${count} member${count !== 1 ? "s" : ""}`; })()}</span></div></div></div><div className="flex items-center gap-2 pl-12 sm:pl-0 flex-wrap">{g.caretaker_name ? <><span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">{g.caretaker_name}</span><button onClick={(e) => { e.stopPropagation(); handleUnassignCaretaker(g); }} className="text-xs font-semibold text-rose-500 hover:text-rose-700">Unassign</button></> : <><span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">No caretaker</span><button onClick={(e) => { e.stopPropagation(); setAssignCaretakerTarget(g); }} className="text-xs font-semibold text-emerald-600 hover:text-emerald-800">Assign</button></>}<button onClick={(e) => { e.stopPropagation(); setEditGroupTarget(g); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Edit</button><button onClick={(e) => { e.stopPropagation(); setAddParticipantsTarget(g); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"><IconPlus /> Add</button><button onClick={(e) => { e.stopPropagation(); setGroupInviteTarget(g); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Invite</button><button onClick={() => handleDeleteGroup(g)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50"><IconTrash /></button></div>{expandedGroupId === g.group_id && (() => { const members = users.filter(u => u.role === "participant" && u.groupId === g.group_id); return <div className="px-6 pb-4 pt-1"><div className="ml-12 bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">{members.length === 0 ? <p className="text-xs text-slate-400 italic p-3">No participants in this group</p> : <div className="divide-y divide-slate-100">{members.map(m => <div key={m.id} className="px-3 py-2.5 flex items-center gap-3"><Avatar name={`${m.firstName} ${m.lastName}`} size="sm" /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-700 truncate">{m.firstName} {m.lastName}</p></div><StatusDot status={m.status} /></div>)}</div>}</div></div>; })()}</div>)}</div>}</div>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><button onClick={() => setGroupsExpanded(!groupsExpanded)} className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center"><IconUsers /></div><div><h2 className="text-base font-bold text-slate-800">Groups & Cohorts</h2><p className="text-xs text-slate-400">{loading ? "Loading…" : `${groups.length} groups`}</p></div></div><div className="flex items-center gap-3"><span onClick={e => { e.stopPropagation(); setShowCreateGroup(true); }} className="text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg flex items-center gap-1"><IconPlus /> New</span><IconChevron open={groupsExpanded} /></div></button>{groupsExpanded && <div className="border-t border-slate-100 divide-y divide-slate-50">{groups.length === 0 ? <div className="px-6 py-8 text-center"><p className="text-sm text-slate-400">No groups yet. Create one above.</p></div> : groups.map(g => { const members = groupMembersByGroup[g.group_id] || []; const membersLoadingState = !!groupMembersLoading[g.group_id]; return <div key={g.group_id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${g.caretaker_id ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}><IconUsers /></div><div><p onClick={(e) => { e.stopPropagation(); handleToggleGroupExpanded(g.group_id); }} className="text-sm font-semibold text-blue-600 hover:text-blue-800 cursor-pointer hover:underline">{g.name}</p><div><p className="text-xs text-slate-500 mt-0.5">{g.description || <span className="italic text-slate-300">No description</span>}</p><span className="text-xs text-slate-400">{`${Number(g.member_count || 0)} member${Number(g.member_count || 0) !== 1 ? "s" : ""}`}</span></div></div></div><div className="flex items-center gap-2 pl-12 sm:pl-0 flex-wrap">{g.caretaker_name ? <><span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">{g.caretaker_name}</span><button onClick={(e) => { e.stopPropagation(); handleUnassignCaretaker(g); }} className="text-xs font-semibold text-rose-500 hover:text-rose-700">Unassign</button></> : <><span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">No caretaker</span><button onClick={(e) => { e.stopPropagation(); setAssignCaretakerTarget(g); }} className="text-xs font-semibold text-emerald-600 hover:text-emerald-800">Assign</button></>}<button onClick={(e) => { e.stopPropagation(); setEditGroupTarget(g); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Edit</button><button onClick={(e) => { e.stopPropagation(); setAddParticipantsTarget(g); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"><IconPlus /> Add</button><button onClick={(e) => { e.stopPropagation(); setGroupInviteTarget(g); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Invite</button><button onClick={() => handleDeleteGroup(g)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50"><IconTrash /></button></div>{expandedGroupId === g.group_id && <div className="px-6 pb-4 pt-1"><div className="ml-12 bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">{membersLoadingState ? <p className="text-xs text-slate-400 italic p-3">Loading participants…</p> : members.length === 0 ? <p className="text-xs text-slate-400 italic p-3">No participants in this group</p> : <div className="divide-y divide-slate-100">{members.map(m => <div key={m.participant_id} className="px-3 py-2.5 flex items-center gap-3"><Avatar name={m.name} size="sm" /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-700 truncate">{m.name}</p></div><StatusDot status="active" /></div>)}</div>}</div></div>}</div>; })}</div>}</div>
 
       {/* Invites Tracker */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><button onClick={() => setInvitesExpanded(!invitesExpanded)} className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center"><IconSend /></div><div><h2 className="text-base font-bold text-slate-800">Invites Tracker</h2><div className="flex items-center gap-2 mt-0.5 flex-wrap">{invites.length === 0 ? <span className="text-xs text-slate-400">{invitesAvailable ? "No invites yet" : "Awaiting backend endpoint"}</span> : <>{inviteCounts.pending > 0 && <span className="text-xs font-semibold text-amber-600">{inviteCounts.pending} pending</span>}{inviteCounts.accepted > 0 && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-emerald-600">{inviteCounts.accepted} accepted</span></>}</>}</div></div></div><IconChevron open={invitesExpanded} /></button>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><button onClick={() => setInvitesExpanded(!invitesExpanded)} className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center"><IconSend /></div><div><h2 className="text-base font-bold text-slate-800">Invites Tracker</h2><div className="flex items-center gap-2 mt-0.5 flex-wrap">{invites.length === 0 ? <span className="text-xs text-slate-400">{invitesAvailable === null || loading ? "Loading…" : invitesAvailable ? "No invites yet" : "Failed to load invites"}</span> : <>{inviteCounts.pending > 0 && <span className="text-xs font-semibold text-amber-600">{inviteCounts.pending} pending</span>}{inviteCounts.accepted > 0 && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-emerald-600">{inviteCounts.accepted} accepted</span></>}</>}</div></div></div><IconChevron open={invitesExpanded} /></button>
         {invitesExpanded && <div className="border-t border-slate-100">
-          {!invitesAvailable && invites.length === 0 ? (
-            <div className="p-6"><ApiPendingBanner endpoint="GET /admin_only/invites" description="Invite tracking will appear here once the backend endpoint is available. Invites you send are still delivered via email." /></div>
+          {(invitesAvailable === null || loading) && invites.length === 0 ? (
+            <div className="px-6 py-8 text-center"><p className="text-sm text-slate-400">Loading invites…</p></div>
+          ) : !invitesAvailable && invites.length === 0 ? (
+            <div className="p-6"><ApiPendingBanner endpoint="GET /admin_only/invites" description="Could not load invites from backend. Try refresh, then check backend logs if it persists." /></div>
           ) : <>
             <div className="px-6 py-3 border-b border-slate-50 space-y-3"><div className="flex gap-1.5 overflow-x-auto pb-0.5">{[{ v: "all", l: "All" }, { v: "pending", l: "Pending" }, { v: "accepted", l: "Accepted" }, { v: "expired", l: "Expired" }, { v: "revoked", l: "Revoked" }].map(t => <button key={t.v} onClick={() => setInviteFilter(t.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 ${inviteFilter === t.v ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{t.l} <span className="opacity-60">({inviteCounts[t.v]})</span></button>)}</div><div className="flex flex-col sm:flex-row gap-2"><div className="relative flex-1"><div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300"><IconSearch /></div><input value={inviteSearch} onChange={e => setInviteSearch(e.target.value)} placeholder="Email or sender…" className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 placeholder:text-slate-300" /></div><select value={inviteRoleFilter} onChange={e => setInviteRoleFilter(e.target.value)} className="px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-600"><option value="all">All Roles</option>{ROLES.map(r => <option key={r.value} value={r.value}>{r.label.replace(/s$/, "")}</option>)}</select><select value={inviteDateFilter} onChange={e => setInviteDateFilter(e.target.value)} className="px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-600"><option value="all">Any Time</option><option value="24h">24h</option><option value="7d">7 days</option><option value="30d">30 days</option></select></div>{hasInvFilters && <div className="flex items-center justify-between"><p className="text-xs text-slate-400">{filteredInvites.length} match</p><button onClick={() => { setInviteSearch(""); setInviteRoleFilter("all"); setInviteGroupFilter("all"); setInviteDateFilter("all"); }} className="text-xs font-semibold text-blue-600">Clear</button></div>}</div>
             {filteredInvites.length === 0 ? <div className="px-6 py-8 text-center"><p className="text-sm text-slate-400">No invites match your filters.</p></div> : <div className="divide-y divide-slate-50">{filteredInvites.map(inv => { const s = INV_STYLES[inv.status] || INV_STYLES.pending; return <div key={inv.invite_id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/50"><div className="flex items-center gap-3 flex-1 min-w-0"><div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${s.bg} ${s.text}`}><IconMail /></div><div className="min-w-0"><div className="flex items-center gap-2 flex-wrap"><p className="text-sm font-semibold text-slate-700 truncate">{inv.email}</p><RoleBadge role={inv.role} /></div><div className="flex items-center gap-2 mt-0.5 flex-wrap">{inv.group_name && <span className="text-xs text-emerald-600 font-medium">{inv.group_name}</span>}{inv.invited_by && <span className="text-xs text-slate-400">by {inv.invited_by}</span>}<span className="flex items-center gap-1 text-xs text-slate-400"><IconClock /> {fmtTime(inv.created_at)}</span></div></div></div><div className="flex items-center gap-2 pl-12 sm:pl-0 shrink-0">{inv.status === "pending" && inv.expires_at && <span className="text-xs text-amber-600 font-medium">{timeUntil(inv.expires_at)}</span>}<span className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${s.bg} ${s.text}`}><span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />{s.label}</span>{inv.status === "pending" && <button onClick={() => setRevokeTarget(inv)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50"><IconBan /></button>}{inv.status === "expired" && <button onClick={() => { setInvites(p => p.map(i => i.invite_id === inv.invite_id ? { ...i, status: "pending", expires_at: new Date(Date.now() + 48 * 3600000).toISOString() } : i)); msg(`Resent to ${inv.email}.`); }} className="p-1.5 rounded-lg text-slate-300 hover:text-blue-500 hover:bg-blue-50"><IconRefresh /></button>}</div></div>; })}</div>}
+            {invitesHasMore && !hasInvFilters && (
+              <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-between">
+                <p className="text-xs text-slate-400">Loaded {invitesOffset} invites</p>
+                <button
+                  onClick={loadMoreInvites}
+                  disabled={invitesLoadingMore}
+                  className="px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-100 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {invitesLoadingMore ? <><Spinner /> Loading…</> : "Load More Invites"}
+                </button>
+              </div>
+            )}
           </>}
         </div>}
       </div>
@@ -823,11 +1110,31 @@ export default function UserManagementPage() {
       {/* Table */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <p className="text-sm font-semibold text-slate-600">{loading ? "Loading…" : `${filtered.length} ${activeRole ? ROLES.find(r => r.value === activeRole)?.label.toLowerCase() : "users"}`}</p>
-          {activeRole && <button onClick={() => setActiveRole(null)} className="text-xs font-semibold text-blue-600 flex items-center gap-1"><IconX /> Clear</button>}
+          <p className="text-sm font-semibold text-slate-600">
+            {loading
+              ? "Loading…"
+              : hasUserFilters
+                ? `${filtered.length} matching filters • ${users.length} loaded${usersTotal ? ` of ${usersTotal}` : ""} users`
+                : `${users.length} shown${usersTotal ? ` of ${usersTotal}` : ""} users`}
+          </p>
+          <div className="flex items-center gap-2">
+            {!loading && hasUserFilters && hasMoreUsers && (
+              <span className="text-[11px] text-slate-400">Searching all users…</span>
+            )}
+            {!loading && usersAvailable && hasMoreUsers && (
+              <button
+                onClick={loadMoreUsers}
+                disabled={usersLoadingMore}
+                className="px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-100 disabled:opacity-50 flex items-center gap-2"
+              >
+                {usersLoadingMore ? <><Spinner /> Loading…</> : "Load More"}
+              </button>
+            )}
+            {activeRole && <button onClick={() => setActiveRole(null)} className="text-xs font-semibold text-blue-600 flex items-center gap-1"><IconX /> Clear</button>}
+          </div>
         </div>
         {loading ? <div className="px-6 py-16 flex flex-col items-center gap-3"><BigSpinner /><p className="text-sm text-slate-400">Loading users…</p></div>
-          : !usersAvailable && users.length === 0 ? <div className="p-6"><ApiPendingBanner endpoint="GET /admin_only/users" description="The user list will populate here once the backend endpoint is available. Groups, invites, and caretakers are already loaded from the live API." /></div>
+          : !usersAvailable && users.length === 0 ? <div className="p-6"><ApiPendingBanner endpoint="GET /admin_only/users (or /admin_only/users/paged)" description={usersError || "Could not load users from backend. Check API/container logs and retry."} /></div>
           : filtered.length === 0 ? <div className="px-6 py-12 text-center"><p className="text-sm text-slate-400">No users match your filters.</p><button onClick={clearFilters} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear all filters</button></div>
           : <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="bg-slate-50/80"><th className="pl-4 pr-2 py-3 w-10"><input type="checkbox" checked={allSel} onChange={toggleAll} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" /></th>{columns.map(col => {
             const sf = colSortMap[col];
@@ -837,7 +1144,22 @@ export default function UserManagementPage() {
               </button> : col}
             </th>;
           })}<th className="px-3 py-3 w-12"></th></tr></thead><tbody className="divide-y divide-slate-50">{filtered.map(user => <tr key={user.id} onClick={() => setDetailUser(user)} className={`transition-colors cursor-pointer ${selected.has(user.id) ? "bg-blue-50/50" : "hover:bg-slate-50"}`}><td className="pl-4 pr-2 py-3" onClick={e => e.stopPropagation()}><input type="checkbox" checked={selected.has(user.id)} onChange={() => toggleOne(user.id)} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" /></td>{columns.map(col => <td key={col} className="px-3 py-3 whitespace-nowrap">{getCell(user, col)}</td>)}<td className="px-3 py-3"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></td></tr>)}</tbody></table></div>}
+        {!loading && usersAvailable && hasMoreUsers && (
+          <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
+            <p className="text-xs text-slate-400">
+              Loaded {usersOffset} of {usersTotal} users
+            </p>
+            <button
+              onClick={loadMoreUsers}
+              disabled={usersLoadingMore}
+              className="px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-100 disabled:opacity-50 flex items-center gap-2"
+            >
+              {usersLoadingMore ? <><Spinner /> Loading…</> : "Load More"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+

@@ -5,7 +5,7 @@ import { useAuth } from "../../contexts/AuthContext";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { refetch } = useAuth();
+  const { refetch, maintenance } = useAuth();
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -56,6 +56,12 @@ export default function LoginPage() {
       {error && (
         <div className="bg-rose-50 border border-rose-100 text-rose-700 text-sm px-4 py-2.5 rounded-lg mb-4">
           {error}
+        </div>
+      )}
+
+      {maintenance && (
+        <div className="bg-amber-50 border border-amber-100 text-amber-700 text-sm px-4 py-2.5 rounded-lg mb-4">
+          Maintenance mode is active. Admins can still sign in.
         </div>
       )}
 

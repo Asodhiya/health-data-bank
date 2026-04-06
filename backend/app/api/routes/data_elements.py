@@ -68,6 +68,13 @@ async def create_data_element(payload: DataElementCreate, db: AsyncSession = Dep
     return await data_element_queries.add_data_element(payload)
 
 
+@router.get("/all-mappings", dependencies=[Depends(require_permissions(ELEMENT_VIEW))])
+async def get_all_mappings(db: AsyncSession = Depends(get_db)):
+    """Return every field→element mapping with form and field labels in one query."""
+    q = DataElementQuery(db)
+    return await q.get_all_field_mappings()
+
+
 @router.get("/{element_id}", dependencies=[Depends(require_permissions(ELEMENT_VIEW))])
 async def get_data_element(element_id: UUID, db: AsyncSession = Depends(get_db)):
     """Fetch a single data element by its UUID.

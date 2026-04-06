@@ -2,8 +2,8 @@
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func, insert, text, delete as sa_delete
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select, update, func, insert, text, delete as sa_delete, or_
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import aliased
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy import TIMESTAMP, Date
@@ -14,6 +14,7 @@ import uuid as uuid_module
 import hashlib
 import json
 import os
+import time
 from zoneinfo import ZoneInfo
 
 from app.db.models import (
@@ -21,7 +22,7 @@ from app.db.models import (
     DataElement, Device, FieldElementMap, FieldOption, FormDeployment,
     FormField, FormSubmission, GoalTemplate, Group, GroupMember,
     HealthDataPoint, HealthGoal, MFAChallenge, MFAMethod, Notification,
-    SystemFeedback,
+    SystemFeedback, SystemMaintenanceSettings,
     ParticipantConsent, ConsentFormTemplate, BackgroundInfoTemplate,
     ParticipantProfile, Permission, Report, ReportFile,
     Reminder, ResearcherProfile, RestoreEvent, Role, RolePermission, Session,
@@ -38,7 +39,10 @@ from app.schemas.admin_schema import (
     CaretakerItem,
     DeleteGroupResponse,
     AdminUserUpdate,
+    MaintenanceSettingsOut,
+    MaintenanceSettingsPayload,
     UserListItem,
+    UserListPage,
     InviteListItem,
     BackupListItem,
     UserReactivateRequest,
@@ -50,6 +54,90 @@ from app.core.config import settings
 from app.core.security import generate_reset_token, hash_reset_token, reset_token_expiry
 from app.core.security import PasswordHash
 from app.services.email_sender import send_reset_email
+from app.services.notification_service import create_notification
+
+# ── Small in-memory caches for hot admin list endpoints ──────────────────────
+
+_CACHE_TTL_SECONDS = 10
+_groups_cache: dict[str, object] = {"payload": None, "captured_at": 0.0}
+_caretakers_cache: dict[str, object] = {"payload": None, "captured_at": 0.0}
+_maintenance_cache: dict[str, object] = {"payload": None, "captured_at": 0.0}
+
+
+def _cache_valid(captured_at: float) -> bool:
+    return (time.monotonic() - captured_at) < _CACHE_TTL_SECONDS
+
+
+def _invalidate_groups_cache() -> None:
+    _groups_cache["payload"] = None
+    _groups_cache["captured_at"] = 0.0
+
+
+def _invalidate_caretakers_cache() -> None:
+    _caretakers_cache["payload"] = None
+    _caretakers_cache["captured_at"] = 0.0
+
+
+def _invalidate_maintenance_cache() -> None:
+    _maintenance_cache["payload"] = None
+    _maintenance_cache["captured_at"] = 0.0
+
+
+def _single_role_link_subquery():
+    """
+    Pick one role row per user without relying on MIN(UUID), which PostgreSQL
+    does not support. Ordering by role_id preserves the same deterministic
+    winner used by migration 0023 when legacy duplicates exist.
+    """
+    return (
+        select(
+            UserRole.user_id.label("user_id"),
+            UserRole.role_id.label("role_id"),
+        )
+        .distinct(UserRole.user_id)
+        .order_by(UserRole.user_id, UserRole.role_id)
+        .subquery()
+    )
+
+
+def _normalize_user_search(search: str | None) -> str | None:
+    normalized = (search or "").strip()
+    return normalized or None
+
+
+def _apply_user_search(statement, search: str | None):
+    normalized = _normalize_user_search(search)
+    if not normalized:
+        return statement
+
+    like = f"%{normalized}%"
+    full_name = func.concat(
+        func.coalesce(User.first_name, ""),
+        " ",
+        func.coalesce(User.last_name, ""),
+    )
+    return statement.where(
+        or_(
+            User.first_name.ilike(like),
+            User.last_name.ilike(like),
+            User.email.ilike(like),
+            full_name.ilike(like),
+        )
+    )
+
+
+def _visible_group_member_user_clause():
+    return ~User.email.ilike("deleted_%@deleted.local")
+
+
+def _default_maintenance_settings() -> MaintenanceSettingsOut:
+    return MaintenanceSettingsOut(
+        enabled=False,
+        message="The system is currently undergoing scheduled maintenance. Please check back shortly.",
+        updated_at=None,
+        updated_by=None,
+    )
+
 
 # ── Backup helpers ─────────────────────────────────────────────────────────────
 
@@ -275,27 +363,90 @@ def _deserialize_row(row: dict, model_class) -> dict:
 
 async def list_groups(db: AsyncSession) -> List[GroupItem]:
     """Return all groups with their assigned caretaker_id."""
-    result = await db.execute(select(Group))
-    groups = result.scalars().all()
-    return [
-        GroupItem(
-            group_id=g.group_id,
-            name=g.name,
-            description=g.description,
-            caretaker_id=g.caretaker_id,
+    cached_payload = _groups_cache.get("payload")
+    captured_at = float(_groups_cache.get("captured_at") or 0.0)
+    if cached_payload is not None and _cache_valid(captured_at):
+        return cached_payload  # type: ignore[return-value]
+
+    member_count_sq = (
+        select(
+            GroupMember.group_id.label("group_id"),
+            func.count(GroupMember.participant_id).label("member_count"),
         )
-        for g in groups
+        .join(ParticipantProfile, ParticipantProfile.participant_id == GroupMember.participant_id)
+        .join(User, User.user_id == ParticipantProfile.user_id)
+        .where(GroupMember.left_at.is_(None))
+        .where(_visible_group_member_user_clause())
+        .group_by(GroupMember.group_id)
+        .subquery()
+    )
+
+    result = await db.execute(
+        select(Group, member_count_sq.c.member_count)
+        .outerjoin(member_count_sq, member_count_sq.c.group_id == Group.group_id)
+    )
+    rows = result.all()
+    payload = [
+        GroupItem(
+            group_id=group.group_id,
+            name=group.name,
+            description=group.description,
+            caretaker_id=group.caretaker_id,
+            member_count=int(member_count or 0),
+        )
+        for group, member_count in rows
+    ]
+    _groups_cache["payload"] = payload
+    _groups_cache["captured_at"] = time.monotonic()
+    return payload
+
+
+async def list_group_members_for_admin(
+    group_id: UUID,
+    db: AsyncSession,
+):
+    group = await db.scalar(select(Group).where(Group.group_id == group_id))
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    result = await db.execute(
+        select(
+            ParticipantProfile.user_id,
+            User.first_name,
+            User.last_name,
+            GroupMember.joined_at,
+        )
+        .join(ParticipantProfile, ParticipantProfile.participant_id == GroupMember.participant_id)
+        .join(User, User.user_id == ParticipantProfile.user_id)
+        .where(GroupMember.group_id == group_id)
+        .where(GroupMember.left_at.is_(None))
+        .where(_visible_group_member_user_clause())
+        .order_by(User.first_name.asc(), User.last_name.asc(), User.email.asc())
+    )
+
+    return [
+        {
+            "participant_id": user_id,
+            "name": f"{first_name or ''} {last_name or ''}".strip() or "Unknown",
+            "joined_at": joined_at,
+        }
+        for user_id, first_name, last_name, joined_at in result.all()
     ]
 
 
 async def list_caretakers(db: AsyncSession) -> List[CaretakerItem]:
     """Return all users who have a caretaker profile."""
+    cached_payload = _caretakers_cache.get("payload")
+    captured_at = float(_caretakers_cache.get("captured_at") or 0.0)
+    if cached_payload is not None and _cache_valid(captured_at):
+        return cached_payload  # type: ignore[return-value]
+
     result = await db.execute(
         select(CaretakerProfile, User.first_name, User.last_name, User.email)
         .join(User, User.user_id == CaretakerProfile.user_id)
     )
     rows = result.all()
-    return [
+    payload = [
         CaretakerItem(
             caretaker_id=profile.caretaker_id,
             user_id=profile.user_id,
@@ -306,6 +457,9 @@ async def list_caretakers(db: AsyncSession) -> List[CaretakerItem]:
         )
         for profile, first_name, last_name, email in rows
     ]
+    _caretakers_cache["payload"] = payload
+    _caretakers_cache["captured_at"] = time.monotonic()
+    return payload
 
 
 async def assign_caretaker_to_group(
@@ -333,8 +487,21 @@ async def assign_caretaker_to_group(
         )
 
     group.caretaker_id = caretaker.caretaker_id
+    await create_notification(
+        db=db,
+        user_id=caretaker.user_id,
+        notification_type="summary",
+        title="New group assignment",
+        message=f"You have been assigned to group '{group.name}'.",
+        link="/caretaker",
+        role_target="caretaker",
+        source_type="group_assignment",
+        source_id=group.group_id,
+    )
     await db.commit()
     await db.refresh(group)
+    _invalidate_groups_cache()
+    _invalidate_caretakers_cache()
 
     return AssignCaretakerResponse(
         group_id=group.group_id,
@@ -367,6 +534,7 @@ async def create_group(
     db.add(new_group)
     await db.commit()
     await db.refresh(new_group)
+    _invalidate_groups_cache()
 
     return GroupItem(
         group_id=new_group.group_id,
@@ -412,6 +580,7 @@ async def delete_group(
 
         await db.delete(group)
         await db.commit()
+        _invalidate_groups_cache()
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
@@ -437,6 +606,7 @@ async def update_group(group_id: UUID, payload: GroupUpdateRequest, db: AsyncSes
         group.description = payload.description
     await db.commit()
     await db.refresh(group)
+    _invalidate_groups_cache()
     return GroupItem(
         group_id=group.group_id,
         name=group.name,
@@ -453,15 +623,40 @@ async def move_participant_group(user_id: UUID, new_group_id: UUID | None, db: A
     if not participant:
         raise HTTPException(status_code=404, detail="Participant not found")
 
+    now = datetime.now(timezone.utc)
+    current_membership = await db.scalar(
+        select(GroupMember)
+        .where(GroupMember.participant_id == participant.participant_id)
+        .where(GroupMember.left_at == None)
+    )
+    previous_group_id = current_membership.group_id if current_membership else None
+
+    if new_group_id is not None and current_membership and current_membership.group_id == new_group_id:
+        group = await db.scalar(select(Group).where(Group.group_id == new_group_id))
+        group_name = group.name if group else "selected group"
+        return {"detail": f"Participant is already in '{group_name}'"}
+
     # Close current active membership
     await db.execute(
         update(GroupMember)
         .where(GroupMember.participant_id == participant.participant_id)
         .where(GroupMember.left_at == None)
-        .values(left_at=datetime.now(timezone.utc))
+        .values(left_at=now)
     )
 
     if new_group_id is None:
+        if participant.user_id and previous_group_id:
+            await create_notification(
+                db=db,
+                user_id=participant.user_id,
+                notification_type="summary",
+                title="Group assignment updated",
+                message="You are no longer assigned to a group.",
+                link="/participant",
+                role_target="participant",
+                source_type="group_membership_changed",
+                source_id=previous_group_id,
+            )
         await db.commit()
         return {"detail": "Participant removed from group"}
 
@@ -469,8 +664,47 @@ async def move_participant_group(user_id: UUID, new_group_id: UUID | None, db: A
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    # Open new membership
-    db.add(GroupMember(group_id=new_group_id, participant_id=participant.participant_id))
+    existing_membership = await db.scalar(
+        select(GroupMember)
+        .where(GroupMember.group_id == new_group_id)
+        .where(GroupMember.participant_id == participant.participant_id)
+    )
+
+    if existing_membership:
+        existing_membership.left_at = None
+        existing_membership.joined_at = now
+    else:
+        db.add(GroupMember(group_id=new_group_id, participant_id=participant.participant_id))
+
+    if participant.user_id:
+        await create_notification(
+            db=db,
+            user_id=participant.user_id,
+            notification_type="summary",
+            title="Group assignment updated",
+            message=f"You have been assigned to group '{group.name}'.",
+            link="/participant",
+            role_target="participant",
+            source_type="group_membership_changed",
+            source_id=new_group_id,
+        )
+
+    if group.caretaker_id:
+        new_caretaker_user_id = await db.scalar(
+            select(CaretakerProfile.user_id).where(CaretakerProfile.caretaker_id == group.caretaker_id)
+        )
+        if new_caretaker_user_id:
+            await create_notification(
+                db=db,
+                user_id=new_caretaker_user_id,
+                notification_type="summary",
+                title="Participant assigned to your group",
+                message=f"A participant was assigned to group '{group.name}'.",
+                link="/caretaker/participants",
+                role_target="caretaker",
+                source_type="group_membership_changed",
+                source_id=new_group_id,
+            )
     await db.commit()
 
     return {"detail": f"Participant moved to '{group.name}'"}
@@ -491,8 +725,25 @@ async def unassign_caretaker_from_group(
     if group.caretaker_id is None:
         raise HTTPException(status_code=400, detail="Group has no caretaker assigned")
 
+    old_caretaker_user_id = await db.scalar(
+        select(CaretakerProfile.user_id).where(CaretakerProfile.caretaker_id == group.caretaker_id)
+    )
     group.caretaker_id = None
+    if old_caretaker_user_id:
+        await create_notification(
+            db=db,
+            user_id=old_caretaker_user_id,
+            notification_type="summary",
+            title="Group unassigned",
+            message=f"You were unassigned from group '{group.name}'.",
+            link="/caretaker",
+            role_target="caretaker",
+            source_type="group_assignment",
+            source_id=group_id,
+        )
     await db.commit()
+    _invalidate_groups_cache()
+    _invalidate_caretakers_cache()
 
     return UnassignCaretakerResponse(
         group_id=group_id,
@@ -769,17 +1020,32 @@ async def preview_backup_by_id(
 
 # ── User Management ────────────────────────────────────────────────────────────
 
-async def list_users(db: AsyncSession) -> list[UserListItem]:
-    """Return all users with their role, group, and caretaker info."""
+async def list_users(
+    db: AsyncSession,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[UserListItem]:
+    """Return users with role/group/caretaker info. Supports pagination."""
     CaretakerUser = aliased(User)
-    self_deactivated_logs = (
+    user_ids_stmt = select(User.user_id).order_by(User.created_at.desc())
+    if limit is not None:
+        user_ids_stmt = user_ids_stmt.limit(limit).offset(offset)
+    user_ids = [row[0] for row in (await db.execute(user_ids_stmt)).all()]
+    if not user_ids:
+        return []
+
+    role_link_sq = _single_role_link_subquery()
+
+    self_deactivated_logs_query = (
         await db.execute(
             select(AuditLog.entity_id, AuditLog.details, AuditLog.created_at)
             .where(AuditLog.action == "USER_SELF_DEACTIVATED")
             .where(AuditLog.entity_type == "user")
+            .where(AuditLog.entity_id.in_(user_ids))
             .order_by(AuditLog.created_at.desc())
         )
-    ).all()
+    )
+    self_deactivated_logs = self_deactivated_logs_query.all()
     deactivation_map: dict[UUID, dict] = {}
     for entity_id, details, created_at in self_deactivated_logs:
         if entity_id and entity_id not in deactivation_map:
@@ -806,13 +1072,14 @@ async def list_users(db: AsyncSession) -> list[UserListItem]:
             ParticipantProfile.dob,
             ParticipantProfile.gender,
         )
-        .outerjoin(UserRole, UserRole.user_id == User.user_id)
-        .outerjoin(Role, Role.role_id == UserRole.role_id)
+        .outerjoin(role_link_sq, role_link_sq.c.user_id == User.user_id)
+        .outerjoin(Role, Role.role_id == role_link_sq.c.role_id)
         .outerjoin(ParticipantProfile, ParticipantProfile.user_id == User.user_id)
         .outerjoin(GroupMember, (GroupMember.participant_id == ParticipantProfile.participant_id) & (GroupMember.left_at == None))
         .outerjoin(Group, Group.group_id == GroupMember.group_id)
         .outerjoin(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
         .outerjoin(CaretakerUser, CaretakerUser.user_id == CaretakerProfile.user_id)
+        .where(User.user_id.in_(user_ids))
         .order_by(User.created_at.desc())
     )
 
@@ -839,6 +1106,187 @@ async def list_users(db: AsyncSession) -> list[UserListItem]:
         )
         for row in rows
     ]
+
+
+async def _list_users_table_page(
+    db: AsyncSession,
+    *,
+    limit: int,
+    offset: int,
+    search: str | None = None,
+) -> list[UserListItem]:
+    """
+    Lean list query for admin table pages.
+    Keeps only fields needed in the list view and defers profile-heavy metadata
+    to single-user detail endpoints.
+    """
+    CaretakerUser = aliased(User)
+    user_ids_stmt = _apply_user_search(
+        select(User.user_id)
+        .order_by(User.created_at.desc())
+        .limit(limit)
+        .offset(offset),
+        search,
+    )
+    user_ids = [row[0] for row in (await db.execute(user_ids_stmt)).all()]
+    if not user_ids:
+        return []
+
+    role_link_sq = _single_role_link_subquery()
+
+    result = await db.execute(
+        select(
+            User.user_id,
+            User.first_name,
+            User.last_name,
+            User.email,
+            User.phone,
+            User.status,
+            User.locked_until,
+            User.created_at,
+            Role.role_name,
+            Group.group_id,
+            Group.name.label("group_name"),
+            CaretakerProfile.caretaker_id,
+            func.concat(CaretakerUser.first_name, " ", CaretakerUser.last_name).label("caretaker_name"),
+        )
+        .outerjoin(role_link_sq, role_link_sq.c.user_id == User.user_id)
+        .outerjoin(Role, Role.role_id == role_link_sq.c.role_id)
+        .outerjoin(ParticipantProfile, ParticipantProfile.user_id == User.user_id)
+        .outerjoin(GroupMember, (GroupMember.participant_id == ParticipantProfile.participant_id) & (GroupMember.left_at == None))
+        .outerjoin(Group, Group.group_id == GroupMember.group_id)
+        .outerjoin(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+        .outerjoin(CaretakerUser, CaretakerUser.user_id == CaretakerProfile.user_id)
+        .where(User.user_id.in_(user_ids))
+        .order_by(User.created_at.desc())
+    )
+
+    rows = result.all()
+    return [
+        UserListItem(
+            id=row.user_id,
+            first_name=row.first_name,
+            last_name=row.last_name,
+            email=row.email,
+            phone=row.phone,
+            role=row.role_name,
+            status=row.status,
+            locked_until=row.locked_until,
+            joined_at=row.created_at,
+            group_id=row.group_id,
+            group=row.group_name,
+            caretaker_id=row.caretaker_id,
+            caretaker=row.caretaker_name.strip() if row.caretaker_name else None,
+            dob=None,
+            gender=None,
+            anonymized_from=None,
+            self_deactivated_at=None,
+        )
+        for row in rows
+    ]
+
+
+async def _get_users_total_cached(db: AsyncSession, search: str | None = None) -> int:
+    # Keep this live for correctness in admin UX; count cache can drift after rapid user changes.
+    total_stmt = _apply_user_search(select(func.count(User.user_id)), search)
+    total = (await db.execute(total_stmt)).scalar_one() or 0
+    return int(total)
+
+
+async def get_user_item(
+    user_id: UUID,
+    db: AsyncSession,
+) -> UserListItem | None:
+    """Return a single user row with role/group/caretaker info."""
+    CaretakerUser = aliased(User)
+
+    deactivation_row = (
+        await db.execute(
+            select(AuditLog.details, AuditLog.created_at)
+            .where(AuditLog.action == "USER_SELF_DEACTIVATED")
+            .where(AuditLog.entity_type == "user")
+            .where(AuditLog.entity_id == user_id)
+            .order_by(AuditLog.created_at.desc())
+            .limit(1)
+        )
+    ).first()
+    deactivation_details = (deactivation_row[0] if deactivation_row else {}) or {}
+    self_deactivated_at = deactivation_row[1] if deactivation_row else None
+
+    role_link_sq = _single_role_link_subquery()
+
+    row = (
+        await db.execute(
+            select(
+                User.user_id,
+                User.first_name,
+                User.last_name,
+                User.email,
+                User.phone,
+                User.status,
+                User.locked_until,
+                User.created_at,
+                Role.role_name,
+                Group.group_id,
+                Group.name.label("group_name"),
+                CaretakerProfile.caretaker_id,
+                func.concat(CaretakerUser.first_name, " ", CaretakerUser.last_name).label("caretaker_name"),
+                ParticipantProfile.dob,
+                ParticipantProfile.gender,
+            )
+            .outerjoin(role_link_sq, role_link_sq.c.user_id == User.user_id)
+            .outerjoin(Role, Role.role_id == role_link_sq.c.role_id)
+            .outerjoin(ParticipantProfile, ParticipantProfile.user_id == User.user_id)
+            .outerjoin(GroupMember, (GroupMember.participant_id == ParticipantProfile.participant_id) & (GroupMember.left_at == None))
+            .outerjoin(Group, Group.group_id == GroupMember.group_id)
+            .outerjoin(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .outerjoin(CaretakerUser, CaretakerUser.user_id == CaretakerProfile.user_id)
+            .where(User.user_id == user_id)
+            .limit(1)
+        )
+    ).first()
+
+    if not row:
+        return None
+
+    return UserListItem(
+        id=row.user_id,
+        first_name=row.first_name,
+        last_name=row.last_name,
+        email=row.email,
+        phone=row.phone,
+        role=row.role_name,
+        status=row.status,
+        locked_until=row.locked_until,
+        joined_at=row.created_at,
+        group_id=row.group_id,
+        group=row.group_name,
+        caretaker_id=row.caretaker_id,
+        caretaker=row.caretaker_name.strip() if row.caretaker_name else None,
+        dob=row.dob,
+        gender=row.gender,
+        anonymized_from=deactivation_details.get("original_email"),
+        self_deactivated_at=self_deactivated_at,
+    )
+
+
+async def list_users_paginated(
+    db: AsyncSession,
+    limit: int = 50,
+    offset: int = 0,
+    search: str | None = None,
+) -> UserListPage:
+    safe_limit = max(1, min(limit, 200))
+    safe_offset = max(0, offset)
+    normalized_search = _normalize_user_search(search)
+    total = await _get_users_total_cached(db, search=normalized_search)
+    items = await _list_users_table_page(
+        db,
+        limit=safe_limit,
+        offset=safe_offset,
+        search=normalized_search,
+    )
+    return UserListPage(total=int(total), limit=safe_limit, offset=safe_offset, items=items)
 
 
 async def get_onboarding_stats(db: AsyncSession) -> dict:
@@ -1019,19 +1467,79 @@ async def get_survey_completion_stats(db: AsyncSession) -> dict:
     }
 
 
-async def update_user(user_id: UUID, payload: AdminUserUpdate, db: AsyncSession) -> User:
-    """Update a user's basic info. Validates email uniqueness if changed."""
+async def update_user(user_id: UUID, payload: AdminUserUpdate, actor_id: UUID, db: AsyncSession) -> User:
+    """Update a user's basic info and optional role change. Validates email uniqueness if changed."""
     user = await db.scalar(select(User).where(User.user_id == user_id))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    requested_role = (payload.role or "").strip().lower() if payload.role else None
 
     if payload.email and payload.email != user.email:
         existing = await db.scalar(select(User).where(User.email == payload.email))
         if existing:
             raise HTTPException(status_code=409, detail="Email already in use")
 
-    for field, value in payload.model_dump(exclude_none=True).items():
+    for field, value in payload.model_dump(exclude_none=True, exclude={"role"}).items():
         setattr(user, field, value)
+
+    if requested_role:
+        allowed_roles = {"admin", "researcher", "caretaker", "participant"}
+        if requested_role not in allowed_roles:
+            raise HTTPException(status_code=400, detail="Invalid role")
+
+        target_role = await db.scalar(
+            select(Role).where(func.lower(Role.role_name) == requested_role)
+        )
+        if not target_role:
+            raise HTTPException(status_code=404, detail="Target role not found")
+
+        current_roles = (
+            await db.execute(
+                select(UserRole, Role.role_name)
+                .join(Role, Role.role_id == UserRole.role_id)
+                .where(UserRole.user_id == user_id)
+            )
+        ).all()
+        current_role_names = {
+            (role_name or "").strip().lower()
+            for _, role_name in current_roles
+            if role_name
+        }
+
+        if requested_role not in current_role_names or len(current_roles) != 1:
+            if current_roles:
+                keep_link = current_roles[0][0]
+                keep_link.role_id = target_role.role_id
+                for extra_link, _ in current_roles[1:]:
+                    await db.delete(extra_link)
+            else:
+                db.add(UserRole(user_id=user_id, role_id=target_role.role_id))
+
+            role_to_profile_model = {
+                "participant": ParticipantProfile,
+                "researcher": ResearcherProfile,
+                "caretaker": CaretakerProfile,
+                "admin": AdminProfile,
+            }
+            profile_model = role_to_profile_model.get(requested_role)
+            if profile_model is not None:
+                existing_profile = await db.scalar(
+                    select(profile_model).where(profile_model.user_id == user_id)
+                )
+                if not existing_profile:
+                    db.add(profile_model(user_id=user_id))
+
+            from app.services.audit_service import write_audit_log
+            await write_audit_log(
+                db,
+                action="USER_ROLE_CHANGED",
+                actor_user_id=actor_id,
+                entity_type="user",
+                entity_id=user_id,
+                details={"new_role": requested_role, "email": user.email},
+                commit=False,
+            )
 
     await db.commit()
     await db.refresh(user)
@@ -1193,11 +1701,15 @@ async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession
 
 # ── Invite Management ──────────────────────────────────────────────────────────
 
-async def list_invites(db: AsyncSession) -> list[InviteListItem]:
+async def list_invites(
+    db: AsyncSession,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[InviteListItem]:
     """Return all invites with role, group, and derived status."""
     now = datetime.now(timezone.utc)
 
-    result = await db.execute(
+    stmt = (
         select(
             SignupInvite.invite_id,
             SignupInvite.email,
@@ -1213,6 +1725,10 @@ async def list_invites(db: AsyncSession) -> list[InviteListItem]:
         .outerjoin(Group, Group.group_id == SignupInvite.group_id)
         .order_by(SignupInvite.created_at.desc())
     )
+    if limit is not None:
+        stmt = stmt.limit(limit).offset(max(0, offset))
+
+    result = await db.execute(stmt)
 
     rows = result.all()
     return [
@@ -1251,12 +1767,23 @@ async def revoke_invite(invite_id: UUID, db: AsyncSession) -> dict:
 
 # ── Backup History ─────────────────────────────────────────────────────────────
 
-async def list_backups(db: AsyncSession) -> list[BackupListItem]:
-    """Return all backup records ordered by newest first."""
-    result = await db.execute(
-        select(Backup).order_by(Backup.created_at.desc())
+async def list_backups(db: AsyncSession, limit: int | None = None) -> list[BackupListItem]:
+    """Return backup records ordered by newest first without loading full snapshot blobs."""
+    stmt = (
+        select(
+            Backup.backup_id,
+            Backup.storage_path,
+            Backup.created_at,
+            Backup.checksum,
+            Backup.created_by,
+            Backup.snapshot_content.is_not(None).label("can_inline_restore"),
+        )
+        .order_by(Backup.created_at.desc())
     )
-    backups = result.scalars().all()
+    if limit is not None:
+        stmt = stmt.limit(limit)
+
+    backups = (await db.execute(stmt)).all()
     return [
         BackupListItem(
             backup_id=b.backup_id,
@@ -1264,7 +1791,7 @@ async def list_backups(db: AsyncSession) -> list[BackupListItem]:
             created_at=b.created_at,
             checksum=b.checksum,
             created_by=b.created_by,
-            can_inline_restore=bool(b.snapshot_content),
+            can_inline_restore=bool(b.can_inline_restore),
         )
         for b in backups
     ]
@@ -1297,6 +1824,70 @@ async def delete_backup(backup_id: UUID, db: AsyncSession) -> dict:
     await db.delete(backup)
     await db.commit()
     return {"detail": "Backup deleted successfully"}
+
+
+async def get_maintenance_settings(db: AsyncSession) -> MaintenanceSettingsOut:
+    cached_payload = _maintenance_cache.get("payload")
+    captured_at = float(_maintenance_cache.get("captured_at") or 0.0)
+    if cached_payload is not None and _cache_valid(captured_at):
+        return cached_payload  # type: ignore[return-value]
+
+    try:
+        settings_row = await db.scalar(select(SystemMaintenanceSettings).limit(1))
+    except ProgrammingError:
+        # The app may be running before alembic revision 0024 has been applied.
+        # Fall back to "maintenance off" so the API remains usable until the DB
+        # schema catches up.
+        payload = _default_maintenance_settings()
+        _maintenance_cache["payload"] = payload
+        _maintenance_cache["captured_at"] = time.monotonic()
+        return payload
+
+    payload = (
+        MaintenanceSettingsOut(
+            enabled=bool(settings_row.enabled),
+            message=settings_row.message,
+            updated_at=settings_row.updated_at,
+            updated_by=settings_row.updated_by,
+        )
+        if settings_row
+        else _default_maintenance_settings()
+    )
+    _maintenance_cache["payload"] = payload
+    _maintenance_cache["captured_at"] = time.monotonic()
+    return payload
+
+
+async def update_maintenance_settings(
+    payload: MaintenanceSettingsPayload,
+    actor_id: UUID,
+    db: AsyncSession,
+) -> MaintenanceSettingsOut:
+    settings_row = await db.scalar(select(SystemMaintenanceSettings).limit(1))
+    if not settings_row:
+        settings_row = SystemMaintenanceSettings()
+        db.add(settings_row)
+
+    settings_row.enabled = payload.enabled
+    settings_row.message = payload.message
+    settings_row.updated_at = datetime.now(timezone.utc)
+    settings_row.updated_by = actor_id
+    await db.flush()
+
+    from app.services.audit_service import write_audit_log
+    await write_audit_log(
+        db,
+        action="MAINTENANCE_MODE_UPDATED",
+        actor_user_id=actor_id,
+        entity_type="system_maintenance_settings",
+        entity_id=settings_row.setting_id,
+        details=payload.model_dump(),
+        commit=False,
+    )
+    await db.commit()
+    await db.refresh(settings_row)
+    _invalidate_maintenance_cache()
+    return await get_maintenance_settings(db)
 
 
 async def get_backup_schedule_settings(db: AsyncSession) -> BackupScheduleSettingsOut:

@@ -90,6 +90,26 @@ class AdminProfileOut(BaseModel):
         from_attributes = True
 
 
+class MaintenanceSettingsPayload(BaseModel):
+    enabled: bool
+    message: str
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Maintenance message cannot be empty.")
+        if len(normalized) > 500:
+            raise ValueError("Maintenance message must be 500 characters or fewer.")
+        return normalized
+
+
+class MaintenanceSettingsOut(MaintenanceSettingsPayload):
+    updated_at: Optional[datetime] = None
+    updated_by: Optional[UUID] = None
+
+
 # ── User Management schemas ──────────────────────────────────────────────────
 
 class UserListItem(BaseModel):
@@ -115,11 +135,19 @@ class UserListItem(BaseModel):
         from_attributes = True
 
 
+class UserListPage(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    items: list[UserListItem]
+
+
 class AdminUserUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    role: Optional[str] = None
 
 
 class UserStatusUpdate(BaseModel):

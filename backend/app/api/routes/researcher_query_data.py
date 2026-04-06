@@ -60,5 +60,7 @@ async def download_survey_results_excel(
 
 @router.get("/available-surveys", response_model=List[AvailableSurvey], dependencies=[Depends(require_permissions(FORM_VIEW))])
 async def list_available_surveys(db: AsyncSession = Depends(get_db)):
-    """Get a list of all available (published) surveys for dropdowns on query param section"""
+    """Get a list of all surveys with submissions (any status) for the data filter dropdown"""
     return await get_available_surveys(db)
+
+

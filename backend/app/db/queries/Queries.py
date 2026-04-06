@@ -604,6 +604,32 @@ class DataElementQuery:
         await self.db.refresh(mapping)
         return mapping
 
+    async def get_all_field_mappings(self):
+        from app.db.models import FormField, SurveyForm
+        result = await self.db.execute(
+            select(
+                FieldElementMap.element_id,
+                FieldElementMap.field_id,
+                FormField.label.label("field_label"),
+                SurveyForm.form_id,
+                SurveyForm.title.label("form_title"),
+                SurveyForm.status.label("form_status"),
+            )
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
+        )
+        return [
+            {
+                "element_id": str(row.element_id),
+                "field_id": str(row.field_id),
+                "field_label": row.field_label,
+                "form_id": str(row.form_id),
+                "form_title": row.form_title,
+                "form_status": row.form_status,
+            }
+            for row in result.all()
+        ]
+
     async def get_field_mappings(self, field_id: uuid.UUID):
         # Verify the field exists
         from app.db.models import FormField

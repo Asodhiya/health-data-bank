@@ -25,10 +25,10 @@ def calculate_age(born):
 
 
 async def get_available_surveys(db: AsyncSession):
-    """Fetches published forms that have at least one completed submission."""
-    published_stmt = (
+    """Fetches forms (any status) that have at least one completed submission."""
+    stmt = (
         select(SurveyForm)
-        .where(SurveyForm.status == 'PUBLISHED')
+        .where(SurveyForm.status.in_(['PUBLISHED', 'ARCHIVED', 'DELETED']))
         .where(
             select(func.count(FormSubmission.submission_id))
             .where(
@@ -40,8 +40,8 @@ async def get_available_surveys(db: AsyncSession):
         )
     )
 
-    published_result = await db.execute(published_stmt)
-    forms = published_result.scalars().all()
+    result = await db.execute(stmt)
+    forms = result.scalars().all()
 
     if forms:
         form_ids = [f.form_id for f in forms]
@@ -57,6 +57,7 @@ async def get_available_surveys(db: AsyncSession):
             form.deployed_groups = group_map.get(form.form_id, [])
 
     return forms
+
 
 
 async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, filters: ParticipantFilter = None):
