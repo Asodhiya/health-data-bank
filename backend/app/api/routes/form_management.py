@@ -159,7 +159,26 @@ async def archive_form(
 
 @router.get("/groups", dependencies=[Depends(require_permissions(FORM_PUBLISH))])
 async def list_groups_for_publish(db: AsyncSession = Depends(get_db)):
-    """List all groups available for publishing"""
-    result = await db.execute(select(Group))
-    groups = result.scalars().all()
-    return [{"group_id": str(g.group_id), "name": g.name} for g in groups]
+    """List all groups with description and active member count."""
+    from app.db.models import GroupMember
+    from sqlalchemy import func, outerjoin
+    result = await db.execute(
+        select(
+            Group.group_id,
+            Group.name,
+            Group.description,
+            func.count(GroupMember.participant_id).filter(GroupMember.left_at == None).label("member_count"),
+        )
+        .outerjoin(GroupMember, GroupMember.group_id == Group.group_id)
+        .group_by(Group.group_id, Group.name, Group.description)
+        .order_by(Group.name)
+    )
+    return [
+        {
+            "group_id": str(row.group_id),
+            "name": row.name,
+            "description": row.description or "",
+            "member_count": row.member_count,
+        }
+        for row in result.all()
+    ]

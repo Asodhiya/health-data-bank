@@ -5,7 +5,7 @@ Researchers and admins define goal templates linked to a DataElement.
 Participants browse these templates and add them to their dashboard as
 personal HealthGoal instances.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
@@ -45,6 +45,58 @@ async def update_goal_template(
 ):
     """Update name, description, default target, or active status of a template."""
     return await GoalTemplateQuery(db).update_template(template_id, payload)
+
+
+@router.get("/{template_id}/stats")
+async def get_goal_template_stats(
+    template_id: UUID,
+    granularity: str = Query(default="month", pattern="^(week|month|year)$"),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
+):
+    """Return participant tracking stats and chart data for a goal template."""
+    return await GoalTemplateQuery(db).get_template_stats(template_id, granularity)
+
+
+@router.get("/{template_id}/raw")
+async def get_raw_datapoints(
+    template_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
+):
+    """Return raw individual data points for this template's metric."""
+    return await GoalTemplateQuery(db).get_raw_datapoints(template_id)
+
+
+@router.get("/{template_id}/export/summary")
+async def export_summary(
+    template_id: UUID,
+    granularity: str = Query(default="month", pattern="^(week|month|year)$"),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
+):
+    """Download progress-over-time chart data as CSV."""
+    csv = await GoalTemplateQuery(db).export_summary_csv(template_id, granularity)
+    return Response(
+        content=csv,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=goal_summary_{template_id}.csv"},
+    )
+
+
+@router.get("/{template_id}/export/raw")
+async def export_raw(
+    template_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
+):
+    """Download all individual data points for this template's metric as CSV."""
+    csv = await GoalTemplateQuery(db).export_raw_csv(template_id)
+    return Response(
+        content=csv,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=goal_raw_{template_id}.csv"},
+    )
 
 
 @router.delete("/{template_id}")

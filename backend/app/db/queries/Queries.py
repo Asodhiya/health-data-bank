@@ -527,6 +527,170 @@ class GoalTemplateQuery:
         template.is_active = False
         await self.db.flush()
 
+    async def get_template_stats(self, template_id: uuid.UUID, granularity: str = "month"):
+        template = await self.db.get(GoalTemplate, template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="Goal template not found")
+
+        element_id = template.element_id
+        default_target = float(template.default_target) if template.default_target is not None else None
+
+        # Participants currently tracking this template
+        goals_result = await self.db.execute(
+            select(HealthGoal).where(
+                HealthGoal.template_id == template_id,
+                HealthGoal.status == "active",
+            )
+        )
+        active_goals = goals_result.scalars().all()
+        participants_tracking = len(active_goals)
+
+        # Per-participant latest value for this element
+        latest_subq = (
+            select(
+                HealthDataPoint.participant_id,
+                func.max(HealthDataPoint.observed_at).label("latest_at"),
+            )
+            .where(HealthDataPoint.element_id == element_id)
+            .group_by(HealthDataPoint.participant_id)
+            .subquery()
+        )
+        latest_vals_result = await self.db.execute(
+            select(HealthDataPoint.participant_id, HealthDataPoint.value_number)
+            .join(
+                latest_subq,
+                and_(
+                    HealthDataPoint.participant_id == latest_subq.c.participant_id,
+                    HealthDataPoint.observed_at == latest_subq.c.latest_at,
+                ),
+            )
+            .where(HealthDataPoint.element_id == element_id)
+        )
+        latest_vals = latest_vals_result.all()
+        values = [float(r.value_number) for r in latest_vals if r.value_number is not None]
+
+        avg_current = round(sum(values) / len(values), 2) if values else None
+        completion_rate = None
+        if values and default_target is not None:
+            meeting = sum(1 for v in values if v >= default_target)
+            completion_rate = round(meeting / len(values) * 100)
+
+        # Time series — granularity controls bucket size and lookback window
+        if granularity == "week":
+            trunc = "week"
+            lookback = timedelta(weeks=12)
+            fmt_str = lambda d: f"W{d.isocalendar()[1]} {d.strftime('%b %Y')}"
+        elif granularity == "year":
+            trunc = "year"
+            lookback = timedelta(days=365 * 5)
+            fmt_str = lambda d: d.strftime("%Y")
+        else:  # month (default)
+            trunc = "month"
+            lookback = timedelta(days=365)
+            fmt_str = lambda d: d.strftime("%b %Y")
+
+        since = datetime.now(timezone.utc) - lookback
+        period_expr = func.date_trunc(trunc, HealthDataPoint.observed_at)
+        period_result = await self.db.execute(
+            select(
+                period_expr.label("period"),
+                func.avg(HealthDataPoint.value_number).label("avg_val"),
+            )
+            .where(
+                HealthDataPoint.element_id == element_id,
+                HealthDataPoint.observed_at >= since,
+                HealthDataPoint.value_number.is_not(None),
+            )
+            .group_by(period_expr)
+            .order_by(period_expr)
+        )
+        progress_over_time = [
+            {"month": fmt_str(row.period), "avg": round(float(row.avg_val), 2)}
+            for row in period_result.all()
+        ]
+
+        # Distribution buckets
+        distribution = []
+        if values and default_target is not None:
+            bucket_size = default_target / 4 if default_target > 0 else 1
+            buckets = {}
+            for v in values:
+                bucket = int(v // bucket_size) * bucket_size
+                label = f"{int(bucket)}–{int(bucket + bucket_size)}"
+                buckets[label] = buckets.get(label, 0) + 1
+            distribution = [{"range": k, "count": v} for k, v in sorted(buckets.items())]
+
+        return {
+            "template_id": str(template_id),
+            "participants_tracking": participants_tracking,
+            "avg_current_value": avg_current,
+            "completion_rate": completion_rate,
+            "default_target": default_target,
+            "progress_over_time": progress_over_time,
+            "distribution": distribution,
+        }
+
+    async def get_raw_datapoints(self, template_id: uuid.UUID) -> list:
+        """Return raw data points for the template's element as JSON."""
+        template = await self.db.get(GoalTemplate, template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="Goal template not found")
+
+        result = await self.db.execute(
+            select(
+                HealthDataPoint.value_number,
+                HealthDataPoint.observed_at,
+                HealthDataPoint.source_type,
+            )
+            .where(
+                HealthDataPoint.element_id == template.element_id,
+                HealthDataPoint.value_number.is_not(None),
+            )
+            .order_by(HealthDataPoint.observed_at.desc())
+        )
+        return [
+            {
+                "value": float(r.value_number),
+                "observed_at": r.observed_at.strftime("%Y-%m-%d %H:%M"),
+                "source": r.source_type or "",
+            }
+            for r in result.all()
+        ]
+
+    async def export_summary_csv(self, template_id: uuid.UUID, granularity: str = "month") -> str:
+        """Return progress-over-time chart data as a CSV string."""
+        stats = await self.get_template_stats(template_id, granularity)
+        lines = ["Period,Avg Value"]
+        for row in stats["progress_over_time"]:
+            lines.append(f'{row["month"]},{row["avg"]}')
+        return "\n".join(lines)
+
+    async def export_raw_csv(self, template_id: uuid.UUID) -> str:
+        """Return all individual HealthDataPoint rows for this template's element as a CSV string."""
+        template = await self.db.get(GoalTemplate, template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="Goal template not found")
+
+        result = await self.db.execute(
+            select(
+                HealthDataPoint.value_number,
+                HealthDataPoint.observed_at,
+                HealthDataPoint.source_type,
+            )
+            .where(
+                HealthDataPoint.element_id == template.element_id,
+                HealthDataPoint.value_number.is_not(None),
+            )
+            .order_by(HealthDataPoint.observed_at)
+        )
+        rows = result.all()
+        lines = ["Value,Observed At,Source"]
+        for r in rows:
+            lines.append(
+                f'{r.value_number},{r.observed_at.strftime("%Y-%m-%d %H:%M:%S")},{r.source_type or ""}'
+            )
+        return "\n".join(lines)
+
 
 class DataElementQuery:
 
@@ -565,11 +729,54 @@ class DataElementQuery:
         element = result.scalar_one_or_none()
         if not element:
             raise HTTPException(status_code=404, detail="Data element not found")
-        try:
-            await self.db.delete(element)
-            await self.db.flush()
-        except IntegrityError:
-            raise HTTPException(status_code=409, detail="Cannot delete data element: it is referenced by existing mappings or health data points")
+
+        # Non-survey references always require soft delete to preserve data integrity
+        has_goal_template = await self.db.scalar(
+            select(GoalTemplate.element_id).where(GoalTemplate.element_id == element_id).limit(1)
+        )
+        has_health_goal = await self.db.scalar(
+            select(HealthGoal.element_id).where(HealthGoal.element_id == element_id).limit(1)
+        )
+        has_health_data = await self.db.scalar(
+            select(HealthDataPoint.element_id).where(HealthDataPoint.element_id == element_id).limit(1)
+        )
+        if any([has_goal_template, has_health_goal, has_health_data]):
+            element.is_active = False
+            await self.db.commit()
+            return {"msg": "data element deactivated", "deleted": False}
+
+        # Check field mappings and the status of their parent forms
+        mapping_result = await self.db.execute(
+            select(FieldElementMap, SurveyForm.status)
+            .join(FormField, FieldElementMap.field_id == FormField.field_id)
+            .join(SurveyForm, FormField.form_id == SurveyForm.form_id)
+            .where(FieldElementMap.element_id == element_id)
+        )
+        mappings = mapping_result.all()
+
+        if mappings:
+            has_non_draft = any(status in ("PUBLISHED", "ARCHIVED") for _, status in mappings)
+            if has_non_draft:
+                # Soft delete — linked to a published/archived survey, preserve those mappings
+                # but remove any draft-only mappings since drafts have no submissions
+                for mapping, status in mappings:
+                    if status == "DRAFT":
+                        await self.db.delete(mapping)
+                element.is_active = False
+                await self.db.commit()
+                return {"msg": "data element deactivated", "deleted": False}
+            else:
+                # Only DRAFT mappings — safe to remove all mappings and hard delete
+                for mapping, _ in mappings:
+                    await self.db.delete(mapping)
+                await self.db.delete(element)
+                await self.db.commit()
+                return {"msg": "data element deleted", "deleted": True}
+
+        # No references at all — hard delete
+        await self.db.delete(element)
+        await self.db.commit()
+        return {"msg": "data element deleted", "deleted": True}
 
     async def map_field(self, field_id: uuid.UUID, element_id: uuid.UUID, transform_rule: dict | None = None):
         # Verify the field exists
@@ -614,6 +821,7 @@ class DataElementQuery:
                 SurveyForm.form_id,
                 SurveyForm.title.label("form_title"),
                 SurveyForm.status.label("form_status"),
+                SurveyForm.version.label("form_version"),
             )
             .join(FormField, FormField.field_id == FieldElementMap.field_id)
             .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
@@ -626,6 +834,7 @@ class DataElementQuery:
                 "form_id": str(row.form_id),
                 "form_title": row.form_title,
                 "form_status": row.form_status,
+                "form_version": row.form_version,
             }
             for row in result.all()
         ]

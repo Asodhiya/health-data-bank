@@ -67,11 +67,11 @@ const DataElementManager = () => {
       const mappings = await api.getAllMappings();
       const countMap = {};
       const linksMap = {};
-      (mappings || []).forEach(({ element_id, field_id, field_label, form_id, form_title, form_status }) => {
+      (mappings || []).forEach(({ element_id, field_id, field_label, form_id, form_title, form_status, form_version }) => {
         if (!countMap[element_id]) countMap[element_id] = new Set();
         countMap[element_id].add(form_id);
         if (!linksMap[element_id]) linksMap[element_id] = [];
-        linksMap[element_id].push({ form_id, form_title, form_status, field_id, field_label });
+        linksMap[element_id].push({ form_id, form_title, form_status, form_version, field_id, field_label });
       });
       setSurveyCountMap(
         Object.fromEntries(Object.entries(countMap).map(([k, v]) => [k, v.size]))
@@ -195,7 +195,7 @@ const DataElementManager = () => {
                   <span className="font-semibold text-blue-700">Health Goals</span> — participants set targets against them.
                 </p>
                 <p className="text-xs text-blue-600 mt-2 pt-2 border-t border-blue-200">
-                  Once a data element is mapped to a survey question or health goal, it cannot be deleted.
+                  If a data element is in use (mapped to a survey or health goal), deleting it will deactivate it instead of removing it permanently. Deactivated elements disappear from this list and cannot be newly mapped, but existing data is preserved.
                 </p>
               </div>
             </div>
@@ -478,7 +478,7 @@ const DataElementManager = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <p className="text-xs text-blue-700 leading-relaxed">
-                    Once a data element is mapped to a survey question or health goal, it cannot be deleted.
+                    If this element is later mapped to a survey or health goal, deleting it will deactivate it rather than permanently remove it.
                     Make sure the code and type are correct before saving.
                   </p>
                 </div>
@@ -534,27 +534,12 @@ const DataElementManager = () => {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                {(() => {
-                  const elId = selectedEl.element_id || selectedEl.id;
-                  const linkedToPublished = (elementLinksMap[elId] || []).some(
-                    (l) => l.form_status === "PUBLISHED"
-                  );
-                  return linkedToPublished ? (
-                    <span
-                      title="Cannot delete: linked to a published survey"
-                      className="text-xs text-slate-300 font-semibold px-2 py-1 cursor-not-allowed select-none"
-                    >
-                      Delete
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => handleDelete(selectedEl)}
-                      className="text-xs text-red-400 hover:text-red-600 font-semibold px-2 py-1 hover:bg-red-50 rounded transition"
-                    >
-                      Delete
-                    </button>
-                  );
-                })()}
+                <button
+                  onClick={() => handleDelete(selectedEl)}
+                  className="text-xs text-red-400 hover:text-red-600 font-semibold px-2 py-1 hover:bg-red-50 rounded transition"
+                >
+                  Delete
+                </button>
                 <button
                   onClick={() => setSelectedEl(null)}
                   className="text-slate-400 hover:text-slate-600 transition ml-1"
@@ -571,8 +556,8 @@ const DataElementManager = () => {
               const elId = selectedEl.element_id || selectedEl.id;
               const links = elementLinksMap[elId] || [];
               const byForm = {};
-              links.forEach(({ form_id, form_title, form_status, field_label }) => {
-                if (!byForm[form_id]) byForm[form_id] = { form_title, form_status, fields: [] };
+              links.forEach(({ form_id, form_title, form_status, form_version, field_label }) => {
+                if (!byForm[form_id]) byForm[form_id] = { form_title, form_status, form_version, fields: [] };
                 byForm[form_id].fields.push(field_label);
               });
               const surveyCount = Object.keys(byForm).length;
@@ -631,36 +616,50 @@ const DataElementManager = () => {
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {Object.entries(byForm).map(([fid, { form_title, form_status, fields }]) => {
+                        {Object.entries(byForm).map(([fid, { form_title, form_status, form_version, fields }]) => {
                           const published = form_status === "PUBLISHED";
+                          const archived = form_status === "ARCHIVED";
+                          const cardStyle = published
+                            ? "border-emerald-100 bg-emerald-50"
+                            : archived
+                            ? "border-slate-200 bg-slate-50"
+                            : "border-orange-100 bg-orange-50";
+                          const titleStyle = published
+                            ? "text-emerald-900"
+                            : archived
+                            ? "text-slate-700"
+                            : "text-orange-900";
+                          const fieldStyle = published
+                            ? "text-emerald-700 border-emerald-200"
+                            : archived
+                            ? "text-slate-600 border-slate-200"
+                            : "text-orange-700 border-orange-200";
+                          const badgeStyle = published
+                            ? "bg-emerald-200 text-emerald-700"
+                            : archived
+                            ? "bg-slate-200 text-slate-600"
+                            : "bg-orange-200 text-orange-700";
                           return (
                             <div
                               key={fid}
-                              className={`rounded-xl border px-4 py-3 ${
-                                published
-                                  ? "border-emerald-100 bg-emerald-50"
-                                  : "border-orange-100 bg-orange-50"
-                              }`}
+                              className={`rounded-xl border px-4 py-3 ${cardStyle}`}
                             >
                               <div className="flex items-center gap-2 mb-2">
-                                <p className={`text-sm font-semibold ${published ? "text-emerald-900" : "text-orange-900"}`}>
+                                <p className={`text-sm font-semibold ${titleStyle}`}>
                                   {form_title}
+                                  {form_version > 1 && (
+                                    <span className="ml-1 font-normal text-xs opacity-60">v{form_version}</span>
+                                  )}
                                 </p>
-                                {!published && (
-                                  <span className="text-[10px] font-bold uppercase tracking-wide bg-orange-200 text-orange-700 px-1.5 py-0.5 rounded">
-                                    Draft
-                                  </span>
-                                )}
+                                <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${badgeStyle}`}>
+                                  {form_status === "PUBLISHED" ? "Published" : form_status === "ARCHIVED" ? "Archived" : "Draft"}
+                                </span>
                               </div>
                               <div className="flex flex-wrap gap-1.5">
                                 {fields.map((fl, idx) => (
                                   <span
                                     key={idx}
-                                    className={`text-[11px] bg-white border px-2.5 py-0.5 rounded-full font-medium ${
-                                      published
-                                        ? "text-emerald-700 border-emerald-200"
-                                        : "text-orange-700 border-orange-200"
-                                    }`}
+                                    className={`text-[11px] bg-white border px-2.5 py-0.5 rounded-full font-medium ${fieldStyle}`}
                                   >
                                     {fl}
                                   </span>
@@ -682,33 +681,47 @@ const DataElementManager = () => {
 
       {/* ── Delete confirmation modal ── */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/30" onClick={() => !deleting && setDeleteTarget(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
-            <div className="flex items-center justify-center w-11 h-11 rounded-full bg-red-50 mx-auto mb-4">
-              <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
+        <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={() => !deleting && setDeleteTarget(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 pt-6 pb-4">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center shrink-0">
+                  <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">Delete <span className="font-mono">{deleteTarget.code}</span>?</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">{deleteTarget.label}</p>
+                </div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5 text-xs text-slate-600">
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 font-bold text-[10px]">!</span>
+                  <span>This element will be removed from the list and can no longer be mapped to new survey fields.</span>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 font-bold text-[10px]">!</span>
+                  <span>Any <strong>draft</strong> survey fields mapped to this element will be unlinked automatically.</span>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-bold text-[10px]">✓</span>
+                  <span>Published surveys and all collected health data remain intact.</span>
+                </div>
+              </div>
             </div>
-            <p className="text-base font-bold text-slate-900 text-center mb-1">Delete element?</p>
-            <p className="text-sm text-slate-500 text-center mb-1">
-              <span className="font-mono font-semibold text-slate-700">{deleteTarget.code}</span>
-            </p>
-            <p className="text-xs text-slate-400 text-center mb-6">
-              This will permanently remove the element and cannot be undone.
-            </p>
-            <div className="flex gap-3">
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
               <button
                 onClick={() => setDeleteTarget(null)}
                 disabled={deleting}
-                className="flex-1 py-2.5 border rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition"
+                className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDelete}
                 disabled={deleting}
-                className="flex-1 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-semibold disabled:opacity-50 transition"
+                className="px-4 py-2 text-sm font-semibold text-white bg-red-500 hover:bg-red-600 rounded-xl transition shadow-sm disabled:opacity-50"
               >
                 {deleting ? "Deleting…" : "Delete"}
               </button>

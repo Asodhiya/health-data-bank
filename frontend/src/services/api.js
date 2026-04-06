@@ -668,6 +668,46 @@ export const api = {
       method: "DELETE",
     }),
 
+  getGoalTemplateStats: (templateId, granularity = "month") =>
+    request(`/goal-templates/${templateId}/stats?granularity=${granularity}`),
+
+  getGoalRawDatapoints: (templateId) =>
+    request(`/goal-templates/${templateId}/raw`),
+
+  exportGoalSummary: async (templateId, granularity = "month", templateName = "goal") => {
+    const res = await fetch(
+      `${API_BASE}/goal-templates/${templateId}/export/summary?granularity=${granularity}`,
+      { credentials: "include" },
+    );
+    if (!res.ok) throw new Error("Export failed");
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${templateName}_summary_${granularity}_${new Date().toISOString().split("T")[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  exportGoalRaw: async (templateId, templateName = "goal") => {
+    const res = await fetch(
+      `${API_BASE}/goal-templates/${templateId}/export/raw`,
+      { credentials: "include" },
+    );
+    if (!res.ok) throw new Error("Export failed");
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${templateName}_raw_${new Date().toISOString().split("T")[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
   // ── Participant: Surveys ──
   getAssignedSurveys: () => request("/participant/surveys/assigned"),
 
