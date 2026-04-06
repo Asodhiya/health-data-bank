@@ -826,5 +826,19 @@ export const api = {
 
   getMyElementsData: () => request("/stats/me/elements"),
 
+  getMyHealthTimeseries: (params = {}) => {
+    const qs = new URLSearchParams();
+    if (Array.isArray(params.element_ids)) {
+      params.element_ids.forEach((id) => qs.append("element_ids", id));
+    }
+    if (params.date_from) {
+      qs.set("date_from", params.date_from);
+    }
+    if (params.date_to) {
+      qs.set("date_to", params.date_to);
+    }
+    return request(`/stats/me/health-timeseries${qs.toString() ? `?${qs.toString()}` : ""}`);
+  },
+
   getMyVsGroupStats: () => request("/stats/me/vs-group"),
 };

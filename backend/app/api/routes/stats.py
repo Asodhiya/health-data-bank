@@ -48,6 +48,23 @@ async def get_my_elements(
     return await StatsQuery(db).get_participant_element_stats(participant_id, element_ids, date_from, date_to)
 
 
+@router.get("/me/health-timeseries")
+async def get_my_health_timeseries(
+    element_ids: Optional[list[UUID]] = Query(default=None),
+    date_from: Optional[date] = Query(default=None),
+    date_to: Optional[date] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(STATS_VIEW)),
+):
+    participant_id = get_participant_id(current_user)
+    return await StatsQuery(db).get_participant_health_timeseries(
+        participant_id,
+        element_ids,
+        date_from,
+        date_to,
+    )
+
+
 @router.get("/me/vs-group")
 async def get_my_vs_group(
     element_ids: Optional[list[UUID]] = Query(default=None),
