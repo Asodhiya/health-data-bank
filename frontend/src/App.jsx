@@ -26,6 +26,7 @@ import IntakePage from "./pages/onboarding/IntakePage";
 // ── Shared pages ──
 import ProfilePage from "./pages/shared/ProfilePage";
 import SurveyBuilderPage from "./pages/shared/SurveyBuilderPage";
+import MaintenancePage from "./pages/shared/MaintenancePage";
 
 // ── Participant pages ──
 import FormListPage from "./pages/participant/FormListPage";
@@ -40,6 +41,8 @@ import AuditLogPage from "./pages/admin/AuditLogPage";
 import BackupRestorePage from "./pages/admin/BackupRestorePage";
 import SystemSettingsPage from "./pages/admin/SystemSettingsPage";
 import AdminOnboardingPage from "./pages/admin/AdminOnboardingPage";
+import AdminInsightsPage from "./pages/admin/AdminInsightsPage";
+import AdminMessagesPage from "./pages/admin/AdminMessagesPage";
 
 // --- Researcher pages ---
 import ResearcherOnboardingPage from "./pages/researcher/ResearcherOnboardingPage";
@@ -82,6 +85,7 @@ function App() {
         <Route path="/" element={<DefaultRoute />} />
         <Route path="/dashboard" element={<DefaultRoute />} />
         <Route path="/logout" element={<Navigate to="/login" replace />} />
+        <Route path="/maintenance" element={<MaintenancePage />} />
 
         {/* ── Admin ── */}
         <Route element={<AdminRoute />}>
@@ -97,6 +101,8 @@ function App() {
             <Route path="/admin/users/:id" element={<UserDetailPage />} />
             <Route path="/audit-logs" element={<AuditLogPage />} /> 
             <Route path="/settings" element={<SystemSettingsPage />} />
+            <Route path="/admin/insights" element={<AdminInsightsPage />} />
+            <Route path="/admin/messages" element={<AdminMessagesPage />} />
             <Route path="/backup" element={<BackupRestorePage />} />
           </Route>
         </Route>

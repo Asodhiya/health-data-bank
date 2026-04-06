@@ -118,6 +118,7 @@ class UserRole(Base):
     __tablename__ = "user_roles"
     __table_args__ = (
         PrimaryKeyConstraint("user_id", "role_id", name="pk_user_roles"),
+        UniqueConstraint("user_id", name="uq_user_roles_user_id"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -503,6 +504,26 @@ class BackupScheduleSettings(Base):
     notify_on_success: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("TRUE"))
     notify_on_failure: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("TRUE"))
     anchor_at_utc: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL")
+    )
+
+
+class SystemMaintenanceSettings(Base):
+    __tablename__ = "system_maintenance_settings"
+
+    setting_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    message: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'The system is currently undergoing scheduled maintenance. Please check back shortly.'"),
+    )
     updated_at: Mapped[datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )

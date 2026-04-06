@@ -27,6 +27,7 @@ export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null);
   const [roles, setRoles]     = useState([]);
   const [role, setRole]       = useState(null);
+  const [maintenance, setMaintenance] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const hydrate = useCallback(async () => {
@@ -37,14 +38,16 @@ export function AuthProvider({ children }) {
       setUser(data);
       setRoles(availableRoles);
       setRole(activeRole);
+      setMaintenance(null);
       if (activeRole) {
         window.localStorage.setItem(ACTIVE_ROLE_STORAGE_KEY, activeRole);
       }
       return data;
-    } catch {
+    } catch (error) {
       setUser(null);
       setRoles([]);
       setRole(null);
+      setMaintenance(error?.status === 503 && error?.maintenance ? error.maintenance : null);
     } finally {
       setLoading(false);
     }
@@ -57,6 +60,7 @@ export function AuthProvider({ children }) {
     setUser(null);
     setRoles([]);
     setRole(null);
+    setMaintenance(null);
     window.localStorage.removeItem(ACTIVE_ROLE_STORAGE_KEY);
   }, []);
 
@@ -69,7 +73,7 @@ export function AuthProvider({ children }) {
   }, [roles]);
 
   return (
-    <AuthContext.Provider value={{ user, role, roles, loading, refetch: hydrate, logout, switchRole }}>
+    <AuthContext.Provider value={{ user, role, roles, loading, maintenance, refetch: hydrate, logout, switchRole }}>
       {children}
     </AuthContext.Provider>
   );
