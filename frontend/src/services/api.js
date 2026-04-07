@@ -158,6 +158,7 @@ export const api = {
     }),
 
   listGroups: () => request("/form_management/groups"),
+  getGroupSurveys: (groupId) => request(`/form_management/groups/${groupId}/surveys`),
 
   publishForm: (formId, groupId) =>
     request(`/form_management/${formId}/publish?group_id=${groupId}`, {
@@ -667,6 +668,11 @@ export const api = {
     request(`/goal-templates/${templateId}`, {
       method: "DELETE",
     }),
+
+  listDeletedGoalTemplates: () => request("/goal-templates/deleted"),
+
+  restoreGoalTemplate: (templateId) =>
+    request(`/goal-templates/${templateId}/restore`, { method: "POST" }),
 
   getGoalTemplateStats: (templateId, granularity = "month") =>
     request(`/goal-templates/${templateId}/stats?granularity=${granularity}`),

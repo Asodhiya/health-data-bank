@@ -520,12 +520,44 @@ class GoalTemplateQuery:
         await self.db.refresh(template)
         return template
 
+    async def list_deleted_templates(self):
+        result = await self.db.execute(
+            select(GoalTemplate, DataElement)
+            .join(DataElement, DataElement.element_id == GoalTemplate.element_id)
+            .where(GoalTemplate.is_active == False)
+        )
+        return [
+            {**tpl.__dict__, "element": element}
+            for tpl, element in result.all()
+        ]
+
     async def delete_template(self, template_id: uuid.UUID):
         template = await self.db.get(GoalTemplate, template_id)
         if not template:
             raise HTTPException(status_code=404, detail="Goal template not found")
-        template.is_active = False
-        await self.db.flush()
+
+        # Hard delete if no participants have ever adopted this template
+        has_goals = await self.db.scalar(
+            select(HealthGoal.goal_id).where(HealthGoal.template_id == template_id).limit(1)
+        )
+        if has_goals:
+            template.is_active = False
+            await self.db.commit()
+            return {"deleted": False, "msg": "Template deactivated"}
+        else:
+            await self.db.delete(template)
+            await self.db.commit()
+            return {"deleted": True, "msg": "Template permanently deleted"}
+
+    async def restore_template(self, template_id: uuid.UUID):
+        template = await self.db.get(GoalTemplate, template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="Goal template not found")
+        if template.is_active:
+            raise HTTPException(status_code=400, detail="Template is already active")
+        template.is_active = True
+        await self.db.commit()
+        return {"msg": "Template restored"}
 
     async def get_template_stats(self, template_id: uuid.UUID, granularity: str = "month"):
         template = await self.db.get(GoalTemplate, template_id)

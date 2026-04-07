@@ -3,6 +3,9 @@ import { api } from "../../services/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+const toTitleCase = (str = "") =>
+  str.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+
 const normalizeType = (dt = "") => {
   const d = dt.toLowerCase();
   if (d === "boolean" || d === "bool") return "boolean";
@@ -40,6 +43,13 @@ const DataElementManager = () => {
 
   // Info banner
   const [showInfo, setShowInfo] = useState(true);
+  const [showHelp, setShowHelp] = useState(false);
+
+  // Initial load error
+  const [loadError, setLoadError] = useState(false);
+
+  // Mapping load error
+  const [mappingError, setMappingError] = useState(false);
 
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState(null); // element object to delete
@@ -51,12 +61,14 @@ const DataElementManager = () => {
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const els = await api.listElements();
       setElements(els || []);
-      buildSurveyCounts();
+      await buildSurveyCounts();
     } catch (err) {
       console.error("Load error:", err);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -77,8 +89,10 @@ const DataElementManager = () => {
         Object.fromEntries(Object.entries(countMap).map(([k, v]) => [k, v.size]))
       );
       setElementLinksMap(linksMap);
+      setMappingError(false);
     } catch (err) {
       console.error("Survey count error:", err);
+      setMappingError(true);
     }
   };
 
@@ -103,7 +117,9 @@ const DataElementManager = () => {
       return matchSearch && matchType && matchMapping;
     }).sort((a, b) => {
       if (sort === "alpha") return (a.label || a.name || "").localeCompare(b.label || b.name || "");
-      return new Date(b.created_at) - new Date(a.created_at);
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return tb - ta;
     });
   }, [elements, search, typeFilter, mappingFilter, surveyCountMap, sort]);
 
@@ -156,6 +172,65 @@ const DataElementManager = () => {
   return (
     <div className="min-h-screen bg-white">
 
+      {/* Help modal */}
+      {showHelp && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowHelp(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 pt-6 pb-4 border-b border-slate-100 flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">How Data Elements Work</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">A quick guide for researchers</p>
+                </div>
+              </div>
+              <button onClick={() => setShowHelp(false)} className="text-slate-300 hover:text-slate-500 transition-colors shrink-0">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4 text-sm text-slate-600">
+              <div className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">1</span>
+                <div>
+                  <p className="font-semibold text-slate-800">What is a data element?</p>
+                  <p className="text-slate-500 text-xs mt-0.5">A data element is a standardised variable (e.g. <span className="font-mono bg-slate-100 px-1 rounded">blood_pressure</span>, <span className="font-mono bg-slate-100 px-1 rounded">sleep_hours</span>) that acts as the common language across the system. Every survey question must be mapped to one.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">2</span>
+                <div>
+                  <p className="font-semibold text-slate-800">Mapped vs Unmapped</p>
+                  <p className="text-slate-500 text-xs mt-0.5">A <span className="font-semibold text-emerald-700">Mapped</span> element is linked to at least one survey question. An <span className="font-semibold text-slate-600">Unmapped</span> element exists but isn't collecting data yet — assign it to a survey question in the Survey Builder.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">3</span>
+                <div>
+                  <p className="font-semibold text-slate-800">Click a row to inspect</p>
+                  <p className="text-slate-500 text-xs mt-0.5">Clicking any row opens a detail panel showing the element's type, unit, description, and every survey it is currently linked to.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">!</span>
+                <div>
+                  <p className="font-semibold text-slate-800">Deleting an element</p>
+                  <p className="text-slate-500 text-xs mt-0.5">If an element is mapped to a published survey or health goal, it is deactivated rather than permanently deleted — all collected data is preserved.</p>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100">
+              <button onClick={() => setShowHelp(false)} className="w-full py-2 text-sm font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 transition">Got it</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Page header ── */}
       <div className="px-6 pt-8 pb-2">
         <div className="flex items-start justify-between mb-4">
@@ -165,12 +240,21 @@ const DataElementManager = () => {
               Browse and manage your standardized metrics library
             </p>
           </div>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-1.5 bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-800 transition"
-          >
-            + Add Element
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setShowHelp(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition"
+            >
+              <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">?</span>
+              How it works
+            </button>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="flex items-center gap-1.5 bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-800 transition"
+            >
+              + Add Element
+            </button>
+          </div>
         </div>
 
         {/* Info banner */}
@@ -199,6 +283,17 @@ const DataElementManager = () => {
                 </p>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Mapping error warning */}
+        {mappingError && (
+          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5 text-sm text-amber-800">
+            <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <span>Could not load survey mappings. Mapped/Unmapped counts may be inaccurate.</span>
+            <button onClick={buildSurveyCounts} className="ml-auto text-xs font-semibold text-amber-700 hover:underline shrink-0">Retry</button>
           </div>
         )}
 
@@ -298,6 +393,11 @@ const DataElementManager = () => {
       <div className="px-6 pb-10">
         {loading ? (
           <div className="py-20 text-center text-slate-400 text-sm">Loading…</div>
+        ) : loadError ? (
+          <div className="py-20 text-center text-sm">
+            <p className="text-slate-400">Failed to load data elements.</p>
+            <button onClick={loadData} className="mt-2 text-xs text-blue-500 hover:underline">Retry</button>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="py-20 text-center text-slate-300 text-sm">No elements found.</div>
         ) : (
@@ -324,7 +424,7 @@ const DataElementManager = () => {
                     className="cursor-pointer hover:bg-slate-50 transition-colors group"
                   >
                     <td className="px-4 py-3.5 font-semibold text-slate-800">
-                      {el.label || el.name}
+                      {toTitleCase(el.label || el.name)}
                     </td>
                     <td className="px-4 py-3.5">
                       <span className="inline-block font-mono text-sm text-blue-700 bg-blue-50 border border-blue-200 px-3 py-0.5 rounded-full">
@@ -525,7 +625,7 @@ const DataElementManager = () => {
                 </span>
                 <div>
                   <p className="text-base font-bold text-slate-900">
-                    {selectedEl.label || selectedEl.name}
+                    {toTitleCase(selectedEl.label || selectedEl.name)}
                   </p>
                   <p className="text-xs text-slate-400">
                     {typeLabel(selectedEl.datatype)}
@@ -692,7 +792,7 @@ const DataElementManager = () => {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-800">Delete <span className="font-mono">{deleteTarget.code}</span>?</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">{deleteTarget.label}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{toTitleCase(deleteTarget.label)}</p>
                 </div>
               </div>
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5 text-xs text-slate-600">

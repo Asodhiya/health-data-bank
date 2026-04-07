@@ -102,10 +102,10 @@ export default function ResearcherDashboard() {
       .catch((err) => console.error("API Error:", err))
       .finally(() => setLoading(false));
 
-    // Results load in the background — page is already visible by the time this finishes
+    // Results load in the background — apply default age range so only valid participants show
     setFiltering(true);
     api
-      .getResearcherResults()
+      .getResearcherResults({ age_min: 18, age_max: 100 })
       .then((resultsRes) =>
         setQueryData({
           columns: (resultsRes.columns || []).filter(
@@ -354,7 +354,7 @@ export default function ResearcherDashboard() {
       occupation_status: "",
     });
     api
-      .getResearcherResults()
+      .getResearcherResults({ age_min: 18, age_max: 100 })
       .then((res) =>
         setQueryData({
           columns: (res.columns || []).filter(
@@ -370,6 +370,8 @@ export default function ResearcherDashboard() {
   };
 
   const [isExporting, setIsExporting] = useState(false);
+  const [filterError, setFilterError] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -399,6 +401,7 @@ export default function ResearcherDashboard() {
     }
 
     setFiltering(true);
+    setFilterError(false);
     const activeFilters = {};
 
     Object.entries(filters).forEach(([key, value]) => {
@@ -421,16 +424,75 @@ export default function ResearcherDashboard() {
           data: res.data || [],
         }),
       )
-      .catch((err) => console.error("Filter Error:", err))
+      .catch((err) => { console.error("Filter Error:", err); setFilterError(true); })
       .finally(() => setFiltering(false));
   };
 
   return (
     <div className="w-full space-y-6">
+      {/* Help modal */}
+      {showHelp && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowHelp(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 pt-6 pb-4 border-b border-slate-100 flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">How the Dashboard Works</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">A quick guide for researchers</p>
+                </div>
+              </div>
+              <button onClick={() => setShowHelp(false)} className="text-slate-300 hover:text-slate-500 transition-colors shrink-0">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4 text-sm text-slate-600">
+              <div className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">1</span>
+                <div>
+                  <p className="font-semibold text-slate-800">Participant data table</p>
+                  <p className="text-slate-500 text-xs mt-0.5">The table shows anonymised participant response data. Each row is one participant. You can sort by any column and hide columns you don't need.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">2</span>
+                <div>
+                  <p className="font-semibold text-slate-800">Filtering results</p>
+                  <p className="text-slate-500 text-xs mt-0.5">Use the filter panel to narrow results by survey, group, demographics (age, gender, language), and more. Filters apply automatically after a short delay.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">3</span>
+                <div>
+                  <p className="font-semibold text-slate-800">Charts view</p>
+                  <p className="text-slate-500 text-xs mt-0.5">Switch to the Charts tab to see a visual breakdown of gender and age distribution for the current filtered dataset.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">4</span>
+                <div>
+                  <p className="font-semibold text-slate-800">Exporting data</p>
+                  <p className="text-slate-500 text-xs mt-0.5">Click Export CSV to download the current filtered results. Hidden columns are excluded from the export. Only participants aged 18–100 are included by default.</p>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100">
+              <button onClick={() => setShowHelp(false)} className="w-full py-2 text-sm font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 transition">Got it</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* PAGE HEADER & EXPORT */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">
+          <h1 className="text-2xl font-bold text-slate-900">
             Welcome, {user?.first_name || "Researcher"}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
@@ -438,34 +500,32 @@ export default function ResearcherDashboard() {
           </p>
         </div>
 
-        <button
-          onClick={handleExport}
-          disabled={isExporting || stats.count === 0}
-          className={`px-5 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-2 w-fit shadow-sm text-sm ${isExporting || stats.count === 0 ? "bg-slate-300 text-slate-500 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white active:scale-95"}`}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-4 w-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setShowHelp(true)}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-            />
-          </svg>
-          {isExporting ? "Exporting..." : `Export ${stats.count} Rows (CSV)`}
-        </button>
+            <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">?</span>
+            How it works
+          </button>
+          <button
+            onClick={handleExport}
+            disabled={isExporting || stats.count === 0}
+            className={`px-5 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-2 w-fit shadow-sm text-sm ${isExporting || stats.count === 0 ? "bg-slate-300 text-slate-500 cursor-not-allowed" : "bg-blue-700 hover:bg-blue-800 text-white active:scale-95"}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            {isExporting ? "Exporting..." : `Export ${stats.count} Rows (CSV)`}
+          </button>
+        </div>
       </div>
       {/* ── NEW DATA FILTERS UI (MOCKUP STYLE) ── */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-3">
-            <h2 className="text-[15px] font-bold text-slate-800 flex items-center gap-2">
+            <h2 className="text-[15px] font-bold text-slate-900 flex items-center gap-2">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 className="h-5 w-5 text-blue-500"
@@ -1109,7 +1169,7 @@ export default function ResearcherDashboard() {
           {/* Apply Button */}
           <button
             onClick={applyFilters}
-            className="w-full bg-[#1e5899] hover:bg-blue-800 text-white py-3 rounded-lg text-sm font-bold transition shadow-md active:scale-[0.99] mt-4 flex justify-center items-center gap-2"
+            className="w-full bg-blue-700 hover:bg-blue-800 text-white py-3 rounded-lg text-sm font-bold transition shadow-md active:scale-[0.99] mt-4 flex justify-center items-center gap-2"
           >
             {loading ? "Applying filters..." : "Apply filters"}
           </button>
@@ -1119,7 +1179,7 @@ export default function ResearcherDashboard() {
       {/* SECTION A: THE ATTRIBUTE SELECTOR */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5 pb-4 border-b border-slate-100">
-          <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+          <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               className="h-5 w-5 text-blue-500"
@@ -1225,7 +1285,7 @@ export default function ResearcherDashboard() {
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               Filtered Results
             </p>
-            <p className="text-xl font-extrabold text-slate-800">
+            <p className="text-2xl font-bold text-slate-900">
               {stats.count} Rows
             </p>
           </div>
@@ -1253,7 +1313,7 @@ export default function ResearcherDashboard() {
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               Total Participants
             </p>
-            <p className="text-xl font-extrabold text-slate-800">
+            <p className="text-2xl font-bold text-slate-900">
               {stats.totalParticipants} Unique
             </p>
           </div>
@@ -1285,7 +1345,7 @@ export default function ResearcherDashboard() {
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               Active Groups
             </p>
-            <p className="text-xl font-extrabold text-slate-800">
+            <p className="text-2xl font-bold text-slate-900">
               {stats.activeGroupsText}
             </p>
           </div>
@@ -1309,6 +1369,17 @@ export default function ResearcherDashboard() {
             📊 Analytics & Charts
           </button>
         </div>
+
+        {/* Filter error banner */}
+        {filterError && (
+          <div className="mx-6 mb-4 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+            <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <span>Filter failed to apply. Results shown may not reflect current filters.</span>
+            <button onClick={() => setFilterError(false)} className="ml-auto text-amber-600 hover:text-amber-800 font-bold text-xs">✕</button>
+          </div>
+        )}
 
         {/* CONDITIONALLY RENDER TABLE OR CHARTS */}
         <div className="p-0">

@@ -193,7 +193,7 @@ function LikertConfig({ field, onChange }) {
 /* ═══════════════════════════════════════════
    DATA ELEMENT SELECTOR — searchable dropdown
    ═══════════════════════════════════════════ */
-function CreateDataElementModal({ onClose, onCreated, onLinked }) {
+export function CreateDataElementModal({ onClose, onCreated, onLinked }) {
   const [newLabel, setNewLabel] = useState('');
   const [newCode, setNewCode] = useState('');
   const [newDatatype, setNewDatatype] = useState('numeric');
@@ -296,7 +296,7 @@ function CreateDataElementModal({ onClose, onCreated, onLinked }) {
   );
 }
 
-function SearchDataElementModal({ value, dataElements, onChange, onCreated, onClose }) {
+export function SearchDataElementModal({ value, dataElements, onChange, onCreated, onClose }) {
   const [search, setSearch] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
 
@@ -318,7 +318,7 @@ function SearchDataElementModal({ value, dataElements, onChange, onCreated, onCl
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col min-h-[70vh] max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-5 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-800">Link Data Element</h3>

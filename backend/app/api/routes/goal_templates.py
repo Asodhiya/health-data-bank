@@ -47,6 +47,25 @@ async def update_goal_template(
     return await GoalTemplateQuery(db).update_template(template_id, payload)
 
 
+@router.get("/deleted")
+async def list_deleted_templates(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
+):
+    """List all soft-deleted goal templates."""
+    return await GoalTemplateQuery(db).list_deleted_templates()
+
+
+@router.post("/{template_id}/restore")
+async def restore_goal_template(
+    template_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permissions(GOAL_TEMPLATE_EDIT)),
+):
+    """Restore a soft-deleted goal template."""
+    return await GoalTemplateQuery(db).restore_template(template_id)
+
+
 @router.get("/{template_id}/stats")
 async def get_goal_template_stats(
     template_id: UUID,

@@ -51,6 +51,9 @@ function StatusBadge({ status }) {
 }
 
 
+const toTitleCase = (str = '') =>
+  str.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+
 /* ── HELPERS: Data Transformation ── */
 const transformForSave = (form) => {
   return {
@@ -120,7 +123,7 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
   return (
     <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-slate-800 mb-2">{title}</h3>
+        <h3 className="text-lg font-bold text-slate-900 mb-2">{title}</h3>
         <p className="text-sm text-slate-500 mb-4">{message}</p>
         {children}
         <div className="flex justify-end gap-2 mt-4">
@@ -141,6 +144,7 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
    #6 tab counts, #7 sort, #8 publish date, #9 empty state
    ══════════════════════════════════════════════ */
 function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, onUnpublish, onArchive, groups, pageTitle = 'Survey Forms' }) {
+  const [showHelp, setShowHelp]         = useState(false);
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sort, setSort]                 = useState('edited');
@@ -163,6 +167,8 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
   const [publishGroupSearch, setPublishGroupSearch] = useState('');
   const [publishError, setPublishError] = useState('');
   const [expandedHistory, setExpandedHistory] = useState(new Set());
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   const hasDateFilter  = dateFrom || dateTo;
   const hasGroupFilter = groupFilter !== 'ALL';
@@ -233,6 +239,11 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
   };
   const clearFilters = () => { setDateFrom(''); setDateTo(''); setGroupFilter('ALL'); setShowFilters(false); };
 
+  useEffect(() => { setPage(1); }, [search, statusFilter, sort, groupFilter, dateFrom, dateTo]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const paginated  = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   const selectedForms     = forms.filter((f) => selected.has(f.form_id));
   const selectedDrafts    = selectedForms.filter((f) => f.status === 'DRAFT');
   const selectedPublished = selectedForms.filter((f) => f.status === 'PUBLISHED');
@@ -268,18 +279,18 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
     return (
       <div>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-slate-800">{pageTitle}</h2>
+          <h2 className="text-2xl font-bold text-slate-900">{pageTitle}</h2>
         </div>
         <div className="text-center py-20">
           <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-5">
             <Svg size={36} sw={1.5} stroke="#3b82f6" d={<><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></>} />
           </div>
-          <h3 className="text-lg font-bold text-slate-800 mb-2">Create your first survey</h3>
+          <h3 className="text-lg font-bold text-slate-900 mb-2">Create your first survey</h3>
           <p className="text-sm text-slate-500 max-w-sm mx-auto mb-6">
             Build a survey form with questions, then publish it to a participant group to start collecting responses.
           </p>
           <button onClick={onCreate}
-            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition">
+            className="inline-flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition">
             <PlusIco /> New Form
           </button>
         </div>
@@ -295,14 +306,51 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
           <div className="flex items-center gap-1.5 text-xs mb-1">
             <span className="text-slate-400">Dashboard</span><span className="text-slate-300">/</span><span className="text-slate-600 font-medium">Surveys</span>
           </div>
-          <h2 className="text-xl font-bold text-slate-800">{pageTitle}</h2>
+          <h2 className="text-2xl font-bold text-slate-900">{pageTitle}</h2>
           <p className="text-sm text-slate-500 mt-0.5">{families.length} form{families.length !== 1 ? 's' : ''} total</p>
         </div>
-        <button onClick={onCreate}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors">
-          <PlusIco /> New Form
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => setShowHelp(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition">
+            <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">?</span>
+            How it works
+          </button>
+          <button onClick={onCreate}
+            className="flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors">
+            <PlusIco /> New Form
+          </button>
+        </div>
       </div>
+
+      {/* Help Modal */}
+      {showHelp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowHelp(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <span className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center text-base font-bold shrink-0">?</span>
+              <h3 className="text-lg font-bold text-slate-900">How Survey Builder Works</h3>
+            </div>
+            <ol className="space-y-3 text-sm text-slate-700">
+              <li className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">1</span>
+                <div><span className="font-semibold text-slate-900">Create a form.</span> Click <em>New Form</em>, give it a lowercase title, and save it as a draft while you build questions.</div>
+              </li>
+              <li className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">2</span>
+                <div><span className="font-semibold text-slate-900">Build your questions.</span> Add fields using the editor — text, multiple choice, Likert scale, and more. Questions auto-save as you type.</div>
+              </li>
+              <li className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">3</span>
+                <div><span className="font-semibold text-slate-900">Publish to a group.</span> Once ready, publish the form to a participant group. Only published forms collect responses.</div>
+              </li>
+              <li className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">4</span>
+                <div><span className="font-semibold text-slate-900">Version history.</span> Each form tracks versions. You can branch from any prior version to create an updated variant without losing history.</div>
+              </li>
+            </ol>
+            <button onClick={() => setShowHelp(false)} className="mt-6 w-full py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-sm font-semibold text-slate-700 transition">Got it</button>
+          </div>
+        </div>
+      )}
 
       {/* Search + Status + Sort + Filters */}
       <div className="flex flex-col gap-3 mb-5">
@@ -311,14 +359,14 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><SearchIco /></span>
             <input value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder="Search forms…"
-              className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition" />
+              className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-slate-400 transition" />
           </div>
 
           {/* #6 — Tabs with counts */}
           <div className="flex gap-0.5 bg-slate-100 p-1 rounded-xl shrink-0 self-start">
             {['ALL', 'DRAFT', 'PUBLISHED', 'ARCHIVED'].map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${statusFilter === f ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${statusFilter === f ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 {f === 'ALL' ? 'All' : f.charAt(0) + f.slice(1).toLowerCase()}
                 <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${statusFilter === f ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-400'}`}>
                   {counts[f]}
@@ -465,7 +513,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
       {/* Form cards */}
       <div className="space-y-3">
-        {sorted.map(({ latest: form, history, rootId }) => {
+        {paginated.map(({ latest: form, history, rootId }) => {
           const isSel = selected.has(form.form_id);
           const fieldCount = form.field_count ?? (form.fields ? form.fields.length : 0);
           const histExpanded = expandedHistory.has(rootId);
@@ -485,7 +533,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2.5 mb-1">
-                    <h3 className="text-sm font-bold text-slate-800 truncate group-hover:text-blue-600 transition-colors">{form.title}</h3>
+                    <h3 className="text-sm font-bold text-slate-900 truncate group-hover:text-blue-600 transition-colors">{toTitleCase(form.title)}</h3>
                     <StatusBadge status={form.status} />
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 shrink-0">
                       v{form.version || 1}
@@ -593,7 +641,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                           <div className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer" onClick={() => onEdit(v, { locked: true })}>
                             <span className="font-bold text-violet-700 bg-violet-50 border border-violet-100 px-1.5 py-0.5 rounded text-[10px] shrink-0">v{v.version || 1}</span>
                             <StatusBadge status={v.status} />
-                            <span className="flex-1 truncate font-medium">{v.title}</span>
+                            <span className="flex-1 truncate font-medium">{toTitleCase(v.title)}</span>
                             <span className="text-slate-400 shrink-0">{new Date(v.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                             {v.submission_count > 0 && <span className="text-slate-400 shrink-0">{v.submission_count} responses</span>}
                           </div>
@@ -624,17 +672,53 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
         )}
       </div>
 
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <span className="text-xs text-slate-400">
+            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} of {sorted.length} forms
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-40 transition"
+            >
+              ‹ Prev
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPage(p)}
+                className={`w-8 h-8 text-xs rounded-lg font-semibold transition ${
+                  p === page ? "bg-blue-600 text-white" : "border border-slate-200 text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-40 transition"
+            >
+              Next ›
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── DELETE MODAL ── */}
       {modal?.type === 'delete' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="px-6 pt-6 pb-4">
-              <h3 className="text-base font-bold text-slate-800 mb-1">
+              <h3 className="text-base font-bold text-slate-900 mb-1">
                 {modal.ids.length === 1 ? 'Delete Form' : 'Delete Forms'}
               </h3>
               <p className="text-sm text-slate-500 mb-4">
                 {modal.formTitle
-                  ? `You are about to delete "${modal.formTitle}". This cannot be undone.`
+                  ? `You are about to delete "${toTitleCase(modal.formTitle)}". This cannot be undone.`
                   : `You are about to delete ${modal.ids.length} form${modal.ids.length > 1 ? 's' : ''}. This cannot be undone.`}
               </p>
               {modal.isPublished && (
@@ -654,7 +738,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                       <Svg size={15} sw={2} stroke="#dc2626" d={<><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></>} />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">Delete this version only</p>
+                      <p className="text-sm font-semibold text-slate-900">Delete this version only</p>
                       <p className="text-xs text-slate-500 mt-0.5">Remove v{modal.version} — the previous version becomes the current one.</p>
                     </div>
                   </button>
@@ -665,7 +749,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                       <Svg size={15} sw={2} stroke="#64748b" d={<><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></>} />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">Delete all versions</p>
+                      <p className="text-sm font-semibold text-slate-900">Delete all versions</p>
                       <p className="text-xs text-slate-500 mt-0.5">Permanently remove every version of this form and its history.</p>
                     </div>
                   </button>
@@ -696,8 +780,8 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
       {/* ── PUBLISH MODAL (multi-group) ── */}
       {modal?.type === 'publish' && (
-        <ConfirmModal title={modal.formTitle ? `Publish "${modal.formTitle}"` : 'Publish Forms'}
-          message={modal.formTitle ? `Assign "${modal.formTitle}" to one or more groups.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select groups to assign.`}
+        <ConfirmModal title={modal.formTitle ? `Publish "${toTitleCase(modal.formTitle)}"` : 'Publish Forms'}
+          message={modal.formTitle ? `Assign "${toTitleCase(modal.formTitle)}" to one or more groups.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select groups to assign.`}
           confirmLabel={publishGroups.size > 1 ? `Publish to ${publishGroups.size} Groups` : 'Publish'}
           confirmClass="bg-emerald-600 hover:bg-emerald-700" onConfirm={handleConfirmPublish}
           onClose={() => { setModal(null); setPublishGroups(new Set()); setPublishGroupSearch(''); }} disabled={publishGroups.size === 0}>
@@ -748,8 +832,8 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
       {/* ── UNPUBLISH MODAL ── */}
       {modal?.type === 'unpublish' && (
-        <ConfirmModal title={modal.formTitle ? `Unpublish "${modal.formTitle}"` : 'Unpublish Forms'}
-          message={modal.formTitle ? `Unpublish "${modal.formTitle}"? It will be archived.` : `Unpublish ${selectedPublished.length} form${selectedPublished.length > 1 ? 's' : ''}?`}
+        <ConfirmModal title={modal.formTitle ? `Unpublish "${toTitleCase(modal.formTitle)}"` : 'Unpublish Forms'}
+          message={modal.formTitle ? `Unpublish "${toTitleCase(modal.formTitle)}"? It will be archived.` : `Unpublish ${selectedPublished.length} form${selectedPublished.length > 1 ? 's' : ''}?`}
           confirmLabel="Unpublish" confirmClass="bg-amber-600 hover:bg-amber-700" onConfirm={handleConfirmUnpublish} onClose={() => setModal(null)}>
           <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600">
             <div className="flex items-start gap-2">
@@ -762,7 +846,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
       {/* ── ARCHIVE MODAL ── */}
       {modal?.type === 'archive' && (
-        <ConfirmModal title={`Archive "${modal.formTitle}"`}
+        <ConfirmModal title={`Archive "${toTitleCase(modal.formTitle)}"`}
           message={null}
           confirmLabel="Archive" confirmClass="bg-slate-600 hover:bg-slate-700"
           onConfirm={() => { onArchive(modal.ids[0]); setModal(null); }}
@@ -823,7 +907,7 @@ function PreviewView({ title, description, fields }) {
           { k: 'phone',   ico: <PhoneIco />,   l: 'Phone' },
         ].map((d) => (
           <button key={d.k} onClick={() => setDevice(d.k)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${device === d.k ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${device === d.k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
             {d.ico} {d.l}
           </button>
         ))}
@@ -917,7 +1001,7 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
   return (
     <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-slate-800 mb-1">Publish Survey</h3>
+        <h3 className="text-lg font-bold text-slate-900 mb-1">Publish Survey</h3>
         <p className="text-sm text-slate-500 mb-4">
           {formTitle ? `Assign "${formTitle}" to one or more groups.` : 'Select groups to assign this survey to.'}
         </p>
@@ -1051,12 +1135,12 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
     }, 5000);
   }, [title, desc, fields, form]);
 
-  const handleTitleChange = (v) => { setTitle(v); triggerAutoSave(); };
+  const handleTitleChange = (v) => { setTitle(v.toLowerCase()); triggerAutoSave(); };
   const handleDescChange = (v) => { setDesc(v); triggerAutoSave(); };
 
   /* #1 — Unsaved changes warning */
   const handleBackClick = () => {
-    if (isDirtyRef.current) {
+    if (form?.status === 'DRAFT' && isDirtyRef.current) {
       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
       setShowUnsavedModal(true);
     } else onBack();
@@ -1064,7 +1148,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
 
   /* #1 — beforeunload protection */
   useEffect(() => {
-    const handler = (e) => { if (isDirtyRef.current) { e.preventDefault(); e.returnValue = ''; } };
+    const handler = (e) => { if (form?.status === 'DRAFT' && isDirtyRef.current) { e.preventDefault(); e.returnValue = ''; } };
     window.addEventListener('beforeunload', handler);
     return () => { window.removeEventListener('beforeunload', handler); if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
   }, []);
@@ -1211,8 +1295,8 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
               {isDraft ? (
                 <>
                   <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg">
-                    <button onClick={() => setMode('edit')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'edit' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>Edit</button>
-                    <button onClick={() => setMode('preview')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'preview' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>Preview</button>
+                    <button onClick={() => setMode('edit')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'edit' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Edit</button>
+                    <button onClick={() => setMode('preview')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'preview' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Preview</button>
                   </div>
                   <button onClick={handleSaveDraft} className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm flex items-center gap-1.5">
                     <SaveIco /> Save Draft
@@ -1374,7 +1458,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                   <Svg size={20} sw={2} stroke="#475569" d={<><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></>} />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-800">Archive this form?</h3>
+                  <h3 className="text-base font-bold text-slate-900">Archive this form?</h3>
                   <p className="text-xs text-slate-500 mt-0.5">This action affects participants immediately.</p>
                 </div>
               </div>
@@ -1414,7 +1498,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
               <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Svg size={24} sw={2} d="M12 9v2m0 4h.01M12 3a9 9 0 100 18 9 9 0 000-18z" stroke="#d97706" />
               </div>
-              <h3 className="text-base font-bold text-slate-800 text-center mb-1">Unsaved changes</h3>
+              <h3 className="text-base font-bold text-slate-900 text-center mb-1">Unsaved changes</h3>
               <p className="text-sm text-slate-500 text-center">You have changes that haven't been saved. What would you like to do?</p>
             </div>
             <div className="flex flex-col gap-2 px-6 pb-6">
@@ -1706,7 +1790,7 @@ export default function SurveyBuilderPage() {
                   <Svg size={20} sw={2} stroke="#7c3aed" d={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-800">Update this survey?</h3>
+                  <h3 className="text-base font-bold text-slate-900">Update this survey?</h3>
                   <p className="text-xs text-slate-500 mt-0.5">
                     v{(branchModal.form.version || 1) + 1} will be created as a draft
                   </p>

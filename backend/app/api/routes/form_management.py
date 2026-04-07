@@ -10,7 +10,8 @@ from sqlalchemy import select
 from app.db.session import get_db
 from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import FORM_VIEW, FORM_CREATE, FORM_GET, FORM_UPDATE, FORM_DELETE, FORM_PUBLISH, FORM_UNPUBLISH
-from app.db.models import User, Group
+from app.db.models import User, Group, FormDeployment, SurveyForm
+from sqlalchemy import func
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
 from app.services.form_management_service import (
     list_researcher_forms,
@@ -179,6 +180,50 @@ async def list_groups_for_publish(db: AsyncSession = Depends(get_db)):
             "name": row.name,
             "description": row.description or "",
             "member_count": row.member_count,
+        }
+        for row in result.all()
+    ]
+
+
+@router.get("/groups/{group_id}/surveys", dependencies=[Depends(require_permissions(FORM_PUBLISH))])
+async def list_surveys_for_group(group_id: UUID, db: AsyncSession = Depends(get_db)):
+    """List all survey forms deployed to a specific group."""
+    from app.db.models import FormSubmission
+    result = await db.execute(
+        select(
+            SurveyForm.form_id,
+            SurveyForm.title,
+            SurveyForm.status,
+            SurveyForm.version,
+            FormDeployment.deployed_at,
+            FormDeployment.revoked_at,
+            func.count(FormSubmission.submission_id).label("submission_count"),
+        )
+        .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
+        .outerjoin(
+            FormSubmission,
+            (FormSubmission.form_id == SurveyForm.form_id) & (FormSubmission.group_id == group_id),
+        )
+        .where(FormDeployment.group_id == group_id)
+        .group_by(
+            SurveyForm.form_id,
+            SurveyForm.title,
+            SurveyForm.status,
+            SurveyForm.version,
+            FormDeployment.deployed_at,
+            FormDeployment.revoked_at,
+        )
+        .order_by(FormDeployment.deployed_at.desc())
+    )
+    return [
+        {
+            "form_id": str(row.form_id),
+            "title": row.title,
+            "status": "UNPUBLISHED" if row.revoked_at else row.status,
+            "version": row.version,
+            "deployed_at": row.deployed_at.isoformat() if row.deployed_at else None,
+            "revoked_at": row.revoked_at.isoformat() if row.revoked_at else None,
+            "submission_count": row.submission_count,
         }
         for row in result.all()
     ]

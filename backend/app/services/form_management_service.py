@@ -359,8 +359,9 @@ async def branch_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
 
 async def get_publish_preview(form_id: UUID, group_ids: List[UUID], db: AsyncSession) -> List[dict]:
     """
-    For each group, return how many participants have an IN_PROGRESS submission
-    on any older version of this form family — so the UI can warn before publishing.
+    Return in-progress submission counts across ALL groups that have an older version deployed,
+    not just the target group. Publishing v2 supersedes v1 globally, so the UI must warn about
+    every group that will lose access to older versions.
     """
     form = await get_form_by_id(form_id, db)
     if not form:
@@ -375,18 +376,22 @@ async def get_publish_preview(form_id: UUID, group_ids: List[UUID], db: AsyncSes
     )
     sibling_ids = [row[0] for row in sibling_result.all()]
     if not sibling_ids:
-        return [{"group_id": str(gid), "in_progress_count": 0} for gid in group_ids]
+        return [{"group_id": str(gid), "in_progress_count": 0, "currently_deployed": False} for gid in group_ids]
 
+    # Find all groups that currently have an older version deployed
+    affected_groups_result = await db.execute(
+        select(FormDeployment.group_id).where(
+            FormDeployment.form_id.in_(sibling_ids)
+        ).distinct()
+    )
+    affected_group_ids = {row[0] for row in affected_groups_result.all()}
+
+    all_group_ids = list({*group_ids, *affected_group_ids})
     results = []
-    for gid in group_ids:
+    for gid in all_group_ids:
         count_result = await db.execute(
             select(func.count(FormSubmission.submission_id))
             .join(GroupMember, GroupMember.participant_id == FormSubmission.participant_id)
-            .join(
-                FormDeployment,
-                (FormDeployment.form_id == FormSubmission.form_id) &
-                (FormDeployment.group_id == gid)
-            )
             .where(
                 FormSubmission.form_id.in_(sibling_ids),
                 FormSubmission.submitted_at.is_(None),  # IN_PROGRESS = no submitted_at
@@ -394,7 +399,11 @@ async def get_publish_preview(form_id: UUID, group_ids: List[UUID], db: AsyncSes
                 GroupMember.left_at.is_(None),
             )
         )
-        results.append({"group_id": str(gid), "in_progress_count": count_result.scalar() or 0})
+        results.append({
+            "group_id": str(gid),
+            "in_progress_count": count_result.scalar() or 0,
+            "currently_deployed": gid in affected_group_ids,
+        })
     return results
 
 
@@ -417,36 +426,28 @@ async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: 
     if existing_deployment.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="This form is already deployed to that group.")
 
-    # If this is a newer version, remove older versions of the same family from this group
+    # Publishing a new version supersedes all older versions in the family globally:
+    # remove their deployments from every group and archive them.
     root_id = form.parent_form_id or form.form_id
     sibling_result = await db.execute(
-        select(SurveyForm.form_id).where(
+        select(SurveyForm).where(
             (SurveyForm.parent_form_id == root_id) | (SurveyForm.form_id == root_id),
             SurveyForm.form_id != form_id
         )
     )
-    sibling_ids = [row[0] for row in sibling_result.all()]
-    if sibling_ids:
+    siblings = sibling_result.scalars().all()
+    if siblings:
+        sibling_ids = [s.form_id for s in siblings]
         old_deployments_result = await db.execute(
             select(FormDeployment).where(
-                FormDeployment.form_id.in_(sibling_ids),
-                FormDeployment.group_id == group_id
+                FormDeployment.form_id.in_(sibling_ids)
             )
         )
         for old_dep in old_deployments_result.scalars().all():
-            old_form_id = old_dep.form_id
             await db.delete(old_dep)
-            # Archive older form if it has no remaining deployments
-            remaining = await db.execute(
-                select(FormDeployment).where(
-                    FormDeployment.form_id == old_form_id,
-                    FormDeployment.deployment_id != old_dep.deployment_id
-                )
-            )
-            if not remaining.scalars().first():
-                old_form = await db.get(SurveyForm, old_form_id)
-                if old_form:
-                    old_form.status = "ARCHIVED"
+        for sibling in siblings:
+            if sibling.status == "PUBLISHED":
+                sibling.status = "ARCHIVED"
 
     deployment = FormDeployment(
         form_id=form_id,
