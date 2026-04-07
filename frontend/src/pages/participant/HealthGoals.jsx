@@ -44,9 +44,7 @@ const TargetIco = () => (
   />
 );
 const CloseIco = () => <Svg d="M18 6L6 18M6 6l12 12" size={20} />;
-const CheckIco = () => (
-  <Svg stroke="#10b981" sw={2.5} d="M20 6L9 17l-5-5" size={18} />
-);
+
 const FireIco = () => (
   <Svg d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
 );
@@ -91,8 +89,10 @@ export default function HealthGoals() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
 
-  // 🟢 NEW: State to hold the dynamic input values for each card
   const [logInputs, setLogInputs] = useState({});
+  const [logErrors, setLogErrors] = useState({});
+  const [addErrors, setAddErrors] = useState({});
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const MAX_GOALS = 10;
   const isAtLimit = activeGoals.length >= MAX_GOALS;
@@ -119,25 +119,45 @@ export default function HealthGoals() {
 
   const handleAddGoal = async (templateId) => {
     if (isAtLimit) return;
+    setAddErrors((prev) => ({ ...prev, [templateId]: null }));
     try {
       setActionLoading(templateId);
       await api.addGoalFromTemplate(templateId);
       await fetchData();
     } catch (err) {
-      console.error("Failed to add goal:", err);
+      const msg =
+        err?.response?.status === 409
+          ? "You already track this metric with another goal."
+          : err?.response?.status === 400
+            ? "You've reached the 10-goal limit."
+            : err?.message || "Failed to add goal. Please try again.";
+      setAddErrors((prev) => ({ ...prev, [templateId]: msg }));
     } finally {
       setActionLoading(null);
     }
   };
 
-  // 🟢 UPDATED: Dynamically handle numbers, text, or booleans
   const handleLogProgress = async (goalId, customValue = 1) => {
     if (customValue === "" || customValue === null) return;
+
+    // Clear any previous error for this goal
+    setLogErrors((prev) => ({ ...prev, [goalId]: null }));
+
+    // Client-side validation: backend requires value_number > 0
+    if (typeof customValue === "string" && !isNaN(customValue) && customValue.trim() !== "") {
+      const num = Number(customValue);
+      if (num <= 0) {
+        setLogErrors((prev) => ({ ...prev, [goalId]: "Value must be greater than 0." }));
+        return;
+      }
+    } else if (typeof customValue === "number" && customValue <= 0) {
+      setLogErrors((prev) => ({ ...prev, [goalId]: "Value must be greater than 0." }));
+      return;
+    }
 
     try {
       setActionLoading(`log_${goalId}`);
 
-      // Parse numbers if needed, otherwise send text directly
       let finalValue = customValue;
       if (
         typeof customValue === "string" &&
@@ -154,24 +174,25 @@ export default function HealthGoals() {
 
       await api.logGoalProgress(goalId, payload);
 
-      // Clear the input field for this specific goal
       setLogInputs((prev) => ({ ...prev, [goalId]: "" }));
       await fetchData();
     } catch (err) {
-      console.error("Failed to log progress:", err);
+      const msg = err?.message || "Failed to save. Please try again.";
+      setLogErrors((prev) => ({ ...prev, [goalId]: msg }));
     } finally {
       setActionLoading(null);
     }
   };
 
   const handleDeleteGoal = async (goalId) => {
-    if (!window.confirm("Remove this goal from your dashboard?")) return;
     try {
       setActionLoading(`del_${goalId}`);
       await api.deleteParticipantGoal(goalId);
+      setConfirmDeleteId(null);
       await fetchData();
     } catch (err) {
       console.error("Failed to delete goal:", err);
+      setConfirmDeleteId(null);
     } finally {
       setActionLoading(null);
     }
@@ -282,19 +303,42 @@ export default function HealthGoals() {
                   : 0;
             const isCompleted = Boolean(goal.is_completed);
 
+            const isConfirming = confirmDeleteId === activeGoalId;
+
             return (
               <div
                 key={activeGoalId}
-                className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col relative group transition-all hover:shadow-md hover:border-blue-200"
+                className={`bg-white rounded-2xl p-6 shadow-sm border flex flex-col relative group transition-all hover:shadow-md ${
+                  isConfirming ? "border-rose-200 shadow-rose-50" : "border-slate-200 hover:border-blue-200"
+                }`}
               >
-                <button
-                  onClick={() => handleDeleteGoal(activeGoalId)}
-                  disabled={actionLoading === `del_${activeGoalId}`}
-                  className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100 disabled:opacity-50"
-                  title="Remove Goal"
-                >
-                  <TrashIco />
-                </button>
+                {/* Delete button / inline confirm */}
+                {isConfirming ? (
+                  <div className="absolute top-3 right-3 flex items-center gap-2 bg-white border border-rose-200 rounded-xl px-3 py-2 shadow-md z-10">
+                    <span className="text-xs font-semibold text-slate-600 mr-1">Remove goal?</span>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="text-xs font-bold text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-slate-50 transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleDeleteGoal(activeGoalId)}
+                      disabled={actionLoading === `del_${activeGoalId}`}
+                      className="text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 px-3 py-1 rounded-lg transition-all disabled:opacity-50"
+                    >
+                      {actionLoading === `del_${activeGoalId}` ? "Removing…" : "Remove"}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeleteId(activeGoalId)}
+                    className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100"
+                    title="Remove Goal"
+                  >
+                    <TrashIco />
+                  </button>
+                )}
 
                 <div className="flex items-start gap-4 mb-3">
                   <div
@@ -358,136 +402,105 @@ export default function HealthGoals() {
                   )}
                 </div>
 
-                {/* 🟢 DYNAMIC LOGGING UI ── */}
+                {/* ── Logging / Completion UI ── */}
                 {isCompleted && !isTextGoal ? (
-                  <button
-                    disabled
-                    className="w-full py-2.5 rounded-xl text-sm font-bold bg-emerald-50 text-emerald-600 cursor-default border border-emerald-100 flex items-center justify-center gap-2"
-                  >
-                    <CheckIco size={16} /> Completed Today
-                  </button>
+                  <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 px-4 py-4 text-center space-y-1">
+                    <div className="flex justify-center text-2xl mb-1">🎉</div>
+                    <p className="text-sm font-bold text-emerald-700">Goal Reached Today!</p>
+                    <p className="text-xs text-emerald-600">Amazing work — keep the streak going.</p>
+                  </div>
                 ) : (
-                  <div className="flex gap-2">
-                    {/* UI for Text input */}
-                    {datatype === "text" && (
-                      <div className="flex flex-col gap-2 w-full">
-                        <input
-                          type="text"
-                          placeholder="Write your entry..."
-                          value={logInputs[activeGoalId] || ""}
-                          onChange={(e) =>
-                            setLogInputs({
-                              ...logInputs,
-                              [activeGoalId]: e.target.value,
-                            })
-                          }
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <button
-                          onClick={() =>
-                            handleLogProgress(
-                              activeGoalId,
-                              logInputs[activeGoalId],
-                            )
-                          }
-                          disabled={
-                            actionLoading === `log_${activeGoalId}` ||
-                            !logInputs[activeGoalId]
-                          }
-                          className="w-full py-2.5 rounded-xl text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50"
-                        >
-                          {actionLoading === `log_${activeGoalId}`
-                            ? "Saving..."
-                            : "Save Entry"}
-                        </button>
-                      </div>
-                    )}
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      {/* Text entry */}
+                      {datatype === "text" && (
+                        <div className="flex flex-col gap-2 w-full">
+                          <input
+                            type="text"
+                            placeholder="Write your entry..."
+                            value={logInputs[activeGoalId] || ""}
+                            onChange={(e) => {
+                              setLogInputs({ ...logInputs, [activeGoalId]: e.target.value });
+                              setLogErrors((prev) => ({ ...prev, [activeGoalId]: null }));
+                            }}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <button
+                            onClick={() => handleLogProgress(activeGoalId, logInputs[activeGoalId])}
+                            disabled={actionLoading === `log_${activeGoalId}` || !logInputs[activeGoalId]}
+                            className="w-full py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-all"
+                          >
+                            {actionLoading === `log_${activeGoalId}` ? "Saving..." : "Save Entry"}
+                          </button>
+                        </div>
+                      )}
 
-                    {/* UI for Large Numbers (e.g. 2000ml) */}
-                    {datatype === "number" && progressMode === "absolute" && (
-                      <>
-                        <input
-                          type="number"
-                          placeholder={`Current value`}
-                          value={logInputs[activeGoalId] || ""}
-                          onChange={(e) =>
-                            setLogInputs({
-                              ...logInputs,
-                              [activeGoalId]: e.target.value,
-                            })
-                          }
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <button
-                          onClick={() =>
-                            handleLogProgress(
-                              activeGoalId,
-                              logInputs[activeGoalId],
-                            )
-                          }
-                          disabled={
-                            actionLoading === `log_${activeGoalId}` ||
-                            !logInputs[activeGoalId]
-                          }
-                          className="px-5 py-2.5 rounded-xl text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50"
-                        >
-                          {actionLoading === `log_${activeGoalId}`
-                            ? "..."
-                            : "Set Value"}
-                        </button>
-                      </>
-                    )}
+                      {/* Absolute number (e.g. set current value to 2000 ml) */}
+                      {datatype === "number" && progressMode === "absolute" && (
+                        <>
+                          <input
+                            type="number"
+                            min="0.01"
+                            placeholder={`Current${unitText ? ` (${unit})` : ""}`}
+                            value={logInputs[activeGoalId] || ""}
+                            onChange={(e) => {
+                              setLogInputs({ ...logInputs, [activeGoalId]: e.target.value });
+                              setLogErrors((prev) => ({ ...prev, [activeGoalId]: null }));
+                            }}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <button
+                            onClick={() => handleLogProgress(activeGoalId, logInputs[activeGoalId])}
+                            disabled={actionLoading === `log_${activeGoalId}` || !logInputs[activeGoalId]}
+                            className="px-5 py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-all"
+                          >
+                            {actionLoading === `log_${activeGoalId}` ? "..." : "Set"}
+                          </button>
+                        </>
+                      )}
 
-                    {datatype === "number" &&
-                      progressMode !== "absolute" &&
-                      target > 10 && (
-                      <>
-                        <input
-                          type="number"
-                          placeholder={`Amount`}
-                          value={logInputs[activeGoalId] || ""}
-                          onChange={(e) =>
-                            setLogInputs({
-                              ...logInputs,
-                              [activeGoalId]: e.target.value,
-                            })
-                          }
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <button
-                          onClick={() =>
-                            handleLogProgress(
-                              activeGoalId,
-                              logInputs[activeGoalId],
-                            )
-                          }
-                          disabled={
-                            actionLoading === `log_${activeGoalId}` ||
-                            !logInputs[activeGoalId]
-                          }
-                          className="px-5 py-2.5 rounded-xl text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50"
-                        >
-                          {actionLoading === `log_${activeGoalId}`
-                            ? "..."
-                            : "Log"}
-                        </button>
-                      </>
-                    )}
+                      {/* Incremental number with large target (e.g. +250 ml steps) */}
+                      {datatype === "number" && progressMode !== "absolute" && target > 10 && (
+                        <>
+                          <input
+                            type="number"
+                            min="0.01"
+                            placeholder={`Add amount${unitText ? ` (${unit})` : ""}`}
+                            value={logInputs[activeGoalId] || ""}
+                            onChange={(e) => {
+                              setLogInputs({ ...logInputs, [activeGoalId]: e.target.value });
+                              setLogErrors((prev) => ({ ...prev, [activeGoalId]: null }));
+                            }}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <button
+                            onClick={() => handleLogProgress(activeGoalId, logInputs[activeGoalId])}
+                            disabled={actionLoading === `log_${activeGoalId}` || !logInputs[activeGoalId]}
+                            className="px-5 py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-all"
+                          >
+                            {actionLoading === `log_${activeGoalId}` ? "..." : "Log"}
+                          </button>
+                        </>
+                      )}
 
-                    {/* UI for Small Numbers (e.g. 5 veggies) or Booleans */}
-                    {(datatype === "boolean" ||
-                      (datatype === "number" &&
-                        progressMode !== "absolute" &&
-                        target <= 10)) && (
-                      <button
-                        onClick={() => handleLogProgress(activeGoalId, 1)}
-                        disabled={actionLoading === `log_${activeGoalId}`}
-                        className="w-full py-2.5 rounded-xl text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white transition-all shadow-sm"
-                      >
-                        {actionLoading === `log_${activeGoalId}`
-                          ? "Logging..."
-                          : `+1 Log Progress`}
-                      </button>
+                      {/* Boolean or small-step number (e.g. +1 tap) */}
+                      {(datatype === "boolean" ||
+                        (datatype === "number" && progressMode !== "absolute" && target <= 10)) && (
+                        <button
+                          onClick={() => handleLogProgress(activeGoalId, 1)}
+                          disabled={actionLoading === `log_${activeGoalId}`}
+                          className="w-full py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-sm disabled:opacity-50"
+                        >
+                          {actionLoading === `log_${activeGoalId}` ? "Logging..." : "+1  Log Progress"}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Inline error */}
+                    {logErrors[activeGoalId] && (
+                      <p className="text-xs text-rose-500 font-medium flex items-center gap-1">
+                        <AlertIco size={12} /> {logErrors[activeGoalId]}
+                      </p>
                     )}
                   </div>
                 )}
@@ -561,6 +574,7 @@ export default function HealthGoals() {
                 (g) => g.template_id === tId,
               );
               const isLoading = actionLoading === tId;
+              const addError = addErrors[tId];
 
               return (
                 <div
@@ -617,6 +631,11 @@ export default function HealthGoals() {
                           : "+ Add Goal"}
                     </button>
                   </div>
+                  {addError && (
+                    <p className="mt-2 text-xs text-rose-500 font-medium flex items-center gap-1">
+                      <AlertIco size={12} /> {addError}
+                    </p>
+                  )}
                 </div>
               );
             })

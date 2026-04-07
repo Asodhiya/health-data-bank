@@ -105,8 +105,6 @@ function App() {
             <Route path="/audit-logs" element={<AuditLogPage />} /> 
             <Route path="/onboarding-management" element={<OnboardingManagementPage />} />
             <Route path="/settings" element={<SystemSettingsPage />} />
-            <Route path="/admin/insights" element={<AdminInsightsPage />} />
-            <Route path="/admin/messages" element={<AdminMessagesPage />} />
             <Route path="/backup" element={<BackupRestorePage />} />
           </Route>
         </Route>

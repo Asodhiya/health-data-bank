@@ -50,7 +50,7 @@ export default function ParticipantDashboard() {
   const { user } = useOutletContext();
 
   const [surveys, setSurveys] = useState([]);
-  const [stats, setStats] = useState(null);
+  const [goals, setGoals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [weather, setWeather] = useState(null);
 
@@ -58,13 +58,13 @@ export default function ParticipantDashboard() {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        const [surveyData, statsData] = await Promise.all([
+        const [surveyData, goalsData] = await Promise.all([
           api.getAssignedSurveys(),
-          api.getMyStats(),
+          api.listParticipantGoals().catch(() => []),
         ]);
 
         setSurveys(surveyData || []);
-        setStats(statsData || null);
+        setGoals(Array.isArray(goalsData) ? goalsData : []);
       } catch (err) {
         console.error("Dashboard Sync Error:", err);
       } finally {
@@ -147,10 +147,15 @@ export default function ParticipantDashboard() {
   const newSurveys = surveys.filter((s) => s.status === "NEW").length;
   const totalSurveys = surveys.length;
 
+  // Goal counts derived from individual goal statuses (accurate for incremental + direction goals)
+  const activeGoalsCount = goals.length;
+  const goalsMetCount = goals.filter((g) => g.is_completed).length;
+  const goalsRemainingCount = activeGoalsCount - goalsMetCount;
+
   // Daily success card: total assigned surveys vs goals
   const todaySurveyTarget = totalSurveys;
-  const totalTarget = todaySurveyTarget + (stats?.active_goals || 0);
-  const totalDone = (stats?.forms_filled || 0) + (stats?.goals_met || 0);
+  const totalTarget = todaySurveyTarget + activeGoalsCount;
+  const totalDone = completedSurveys + goalsMetCount;
   const dailyPercent =
     totalTarget > 0 ? Math.round((totalDone / totalTarget) * 100) : 0;
   const tasksLeft = totalTarget - totalDone;
@@ -293,8 +298,8 @@ export default function ParticipantDashboard() {
 
                 {/* Goals ring — today's target vs met */}
                 <DonutRing
-                  filled={stats?.goals_met || 0}
-                  total={stats?.active_goals || 0}
+                  filled={goalsMetCount}
+                  total={activeGoalsCount}
                   color="#86efac"
                   label="Health Goals"
                   sublabel="met today"
@@ -302,11 +307,11 @@ export default function ParticipantDashboard() {
                   <div className="flex justify-center gap-3 text-xs mt-1">
                     <span className="flex items-center gap-1 text-slate-500">
                       <span className="inline-block w-2 h-2 rounded-full bg-green-300" />
-                      {stats?.goals_met || 0} Met
+                      {goalsMetCount} Met
                     </span>
                     <span className="flex items-center gap-1 text-slate-500">
                       <span className="inline-block w-2 h-2 rounded-full bg-slate-300" />
-                      {stats?.goal_remaining || 0} Remaining
+                      {goalsRemainingCount} Remaining
                     </span>
                   </div>
                 </DonutRing>
@@ -356,10 +361,10 @@ export default function ParticipantDashboard() {
               {/* Survey / Goal split pills */}
               <div className="flex justify-center gap-3 pt-1">
                 <span className="flex items-center gap-1.5 bg-sky-50 text-sky-700 px-2.5 py-1 rounded-lg text-xs font-semibold border border-sky-100">
-                  📋 {stats?.forms_filled || 0} / {todaySurveyTarget} surveys
+                  📋 {completedSurveys} / {todaySurveyTarget} surveys
                 </span>
                 <span className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg text-xs font-semibold border border-emerald-100">
-                  🎯 {stats?.goals_met || 0} / {stats?.active_goals || 0} goals
+                  🎯 {goalsMetCount} / {activeGoalsCount} goals
                 </span>
               </div>
             </div>
