@@ -32,7 +32,9 @@ function transformParticipant(listItem, groupName, enrolledAt) {
   return {
     id: listItem.participant_id,
     firstName, lastName,
-    email: null, phone: null, dob: null,
+    email: listItem.email || null,
+    phone: listItem.phone || null,
+    dob: listItem.dob || null,
     age: listItem.age != null ? Math.round(listItem.age) : null,
     gender: listItem.gender || null,
     status: isActive ? "active" : "inactive",
@@ -40,7 +42,7 @@ function transformParticipant(listItem, groupName, enrolledAt) {
     activityLabel,
     groupName: groupName || null,
     groupId: listItem.group_id || null,
-    enrolledAt: enrolledAt || null,
+    enrolledAt: enrolledAt || listItem.enrolled_at || null,
     lastActive: listItem.last_login_at || listItem.last_submission_at || null,
     surveyProgress: listItem.survey_progress || "not_started",
     goalProgress: listItem.goal_progress || "not_started",
@@ -203,7 +205,7 @@ function OverviewTab({ p, trends }) {
           {(!p.email && !p.phone) && (
             <div className="mt-3 flex items-start gap-2 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <p className="text-xs text-slate-400">Contact details are not available in the caretaker view.</p>
+              <p className="text-xs text-slate-400">No contact details have been provided by the participant yet.</p>
             </div>
           )}
         </div>
@@ -937,7 +939,8 @@ export default function ParticipantDetailPage() {
       // 3. Get joined_at from group members
       let enrolledAt = null;
       try {
-        const members = await api.caretakerGetGroupMembers(firstGroup.group_id);
+        const targetGroupId = thisParticipant.group_id || firstGroup.group_id;
+        const members = await api.caretakerGetGroupMembers(targetGroupId);
         const thisMember = Array.isArray(members)
           ? members.find(m => m.participant_id === participantId)
           : null;

@@ -134,6 +134,23 @@ async def delete_goal(
     return {"detail": "Goal deleted"}
 
 
+@router.get("/goals/{goal_id}/logs")
+async def get_goal_logs(
+    goal_id: uuid.UUID,
+    days: int = 7,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
+):
+    """
+    Return raw log entries for a goal over the last N days (default 7).
+
+    Also returns daily_totals — a dict of date → summed value — for
+    rendering a bar chart. Entries are ordered oldest-first.
+    """
+    participant_id = get_participant_id(current_user)
+    return await ParticipantQuery(db).get_goal_logs(goal_id, participant_id, days=days)
+
+
 @router.post("/goals/{goal_id}/log")
 async def log_goal_progress(
     goal_id: uuid.UUID,
@@ -206,7 +223,7 @@ async def list_notifications(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
 ):
-    rows = await list_notifications_for_user(db, current_user.user_id)
+    rows = await list_notifications_for_user(db, current_user.user_id, role_target="participant")
     return [
         NotificationItem(
             notification_id=n.notification_id,

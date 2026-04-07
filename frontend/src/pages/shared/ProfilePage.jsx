@@ -972,15 +972,15 @@ export default function ProfilePage({ role = 'participant' }) {
         // Load caretaker-specific data from real endpoints
         if (role === 'caretaker') {
           try {
-            const [caretakerProfile, groupData, participantData] = await Promise.all([
+            const [caretakerProfile, groupData, participantSummary] = await Promise.all([
               api.caretakerGetProfile().catch(() => null),
               api.caretakerGetGroups().catch(() => []),
-              api.caretakerListParticipants().catch(() => []),
+              api.caretakerGetParticipantsSummary().catch(() => ({ total: 0, active: 0 })),
             ]);
             if (cancelled) return;
             const groups = Array.isArray(groupData) ? groupData : [];
-            const participants = Array.isArray(participantData) ? participantData : [];
-            const activeCount = participants.filter(p => p.status !== 'inactive').length;
+            const totalCount = Number(participantSummary?.total || 0);
+            const activeCount = Number(participantSummary?.active || 0);
             setProfile((prev) => ({
               ...prev,
               ...(caretakerProfile ? {
@@ -998,7 +998,7 @@ export default function ProfilePage({ role = 'participant' }) {
                 availableDays: caretakerProfile.available_days || [],
               } : {}),
               groupName: groups.length === 1 ? groups[0].name : `${groups.length} groups`,
-              participantCount: participants.length,
+              participantCount: totalCount,
               activeParticipants: activeCount,
             }));
           } catch {

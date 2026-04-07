@@ -647,7 +647,8 @@ export default function BackupRestorePage() {
   const fetchBackups = useCallback(async () => {
     try {
       setBackupsLoading(true);
-      const data = await api.listBackups();
+      // Keep initial admin load light; full history can be added with pagination later.
+      const data = await api.listBackups(50);
       setBackups(data);
     } catch (err) {
       console.error("Failed to load backup history:", err);

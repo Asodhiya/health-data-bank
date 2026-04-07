@@ -5,11 +5,12 @@ from uuid import UUID
 from datetime import date
 
 from app.db.session import get_db
-from app.db.models import User
+from app.db.models import User, SignupInvite, Role, Group
 from app.core.dependency import require_permissions
 from app.core.permissions import (
     GROUP_READ,
     CARETAKER_READ,
+    SEND_INVITE,
 )
 from app.schemas.caretaker_response_schema import (
     GroupItem,
@@ -20,17 +21,22 @@ from app.schemas.caretaker_response_schema import (
     NoteCreateRequest, NoteItem, NoteUpdateRequest,
     ReportGenerateRequest, ReportResponse, ReportListItem,
     SubmissionListItem, SubmissionDetailItem, SubmissionAnswerItem,
+    GroupDeployedFormItem,
     CaretakerProfileUpdate, CaretakerProfileOut,
 )
+from app.schemas.survey_schema import SurveyDetailOut
 from app.schemas.notification_schema import NotificationItem
 from app.db.queries.Queries import CaretakersQuery
 from app.db.models import CaretakerProfile, ParticipantProfile, CaretakerNote
 from sqlalchemy import select, update, delete
+from app.services.form_management_service import get_form_by_id
 from app.services.notification_service import (
     list_notifications_for_user,
     mark_notification_read_for_user,
     create_notification,
 )
+from app.schemas.admin_schema import InviteListItem
+from datetime import datetime, timezone
 
 router = APIRouter()
 
@@ -159,46 +165,129 @@ async def list_group_elements(
     ]
 
 
+@router.get("/forms", response_model=list[GroupDeployedFormItem])
+async def list_group_forms(
+    group_id: Optional[UUID] = Query(default=None),
+    limit: Optional[int] = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    rows = await CaretakersQuery(db).get_group_forms(
+        caretaker_user_id=current_user.user_id,
+        group_id=group_id,
+        limit=limit,
+        offset=offset,
+    )
+    items = []
+    for row in rows:
+        participant_count = int(row.participant_count or 0)
+        submitted_count = int(row.submitted_count or 0)
+        completion_rate = 0.0
+        if participant_count > 0:
+            completion_rate = round((submitted_count / participant_count) * 100, 1)
+        items.append(
+            GroupDeployedFormItem(
+                deployment_id=row.deployment_id,
+                form_id=row.form_id,
+                group_id=row.group_id,
+                group_name=row.group_name,
+                form_title=row.form_title,
+                form_description=row.form_description,
+                form_status=row.form_status,
+                deployed_at=row.deployed_at,
+                revoked_at=row.revoked_at,
+                is_active=row.revoked_at is None,
+                participant_count=participant_count,
+                submitted_count=submitted_count,
+                completion_rate=completion_rate,
+            )
+        )
+    return items
+
+
+@router.get("/forms/{form_id}", response_model=SurveyDetailOut)
+async def get_group_form_detail(
+    form_id: UUID,
+    group_id: Optional[UUID] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    allowed_group_ids = await CaretakersQuery(db).get_caretaker_form_group_ids(
+        form_id=form_id,
+        caretaker_user_id=current_user.user_id,
+        group_id=group_id,
+    )
+    if not allowed_group_ids:
+        raise HTTPException(status_code=404, detail="Form not found in your assigned groups")
+
+    form = await get_form_by_id(form_id, db)
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+
+    # Do not leak deployments outside this caretaker's assigned groups.
+    form.deployed_group_ids = [gid for gid in (form.deployed_group_ids or []) if gid in allowed_group_ids]
+    return form
+
+
 # ── Participants ──────────────────────────────────────────────────────────────
 
 @router.get("/participants", response_model=list[ParticipantListItem])
 async def list_participants(
     group_id: Optional[UUID] = Query(default=None),
-    status: Optional[Literal["highly_active", "moderately_active", "low_active", "inactive"]] = Query(default=None),
+    q: Optional[str] = Query(default=None),
+    status: Optional[Literal["active", "highly_active", "moderately_active", "low_active", "inactive"]] = Query(default=None),
     gender: Optional[str] = Query(default=None),
     age_min: Optional[int] = Query(default=None),
     age_max: Optional[int] = Query(default=None),
     has_alerts: Optional[bool] = Query(default=None),
-    survey_progress: Optional[Literal["not_started", "in_progress", "completed"]] = Query(default=None),
+    survey_progress: Optional[Literal["not_started", "in_progress", "completed", "below_50", "above_50"]] = Query(default=None),
+    goal_progress: Optional[Literal["not_started", "in_progress", "completed", "no_goals"]] = Query(default=None),
     submission_date_from: Optional[date] = Query(default=None),
     submission_date_to: Optional[date] = Query(default=None),
     sort_by: Optional[Literal["name", "age", "status", "gender", "surveys", "goals", "last_active", "enrolled", "submission_date"]] = Query(default=None),
+    sort_dir: Literal["asc", "desc"] = Query(default="asc"),
+    limit: Optional[int] = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
     rows = await CaretakersQuery(db).get_participants(
         user_id=current_user.user_id,
         group_id=group_id,
+        q=q,
         status=status,
         gender=gender,
         age_min=age_min,
         age_max=age_max,
         has_alerts=has_alerts,
         survey_progress=survey_progress,
+        goal_progress=goal_progress,
         sort_by=sort_by,
+        sort_dir=sort_dir,
         submission_date_from=submission_date_from,
         submission_date_to=submission_date_to,
+        limit=limit,
+        offset=offset,
     )
     return [
         ParticipantListItem(
             participant_id=row.participant_id,
             name=f"{row.first_name or ''} {row.last_name or ''}".strip(),
+            email=row.email,
+            phone=row.phone,
+            dob=row.dob,
             gender=row.gender,
             age=row.age,
             status=row.status,
             group_id=row.group_id,
+            enrolled_at=row.enrolled_at,
             survey_progress=row.survey_progress,
             goal_progress=row.goal_progress,
+            survey_submitted_count=row.survey_submitted_count,
+            survey_deployed_count=row.survey_deployed_count,
+            goals_completed_count=row.goals_completed_count,
+            goals_total_count=row.goals_total_count,
             last_login_at=row.last_login_at,
             last_submission_at=row.last_submission_at,
         )
@@ -631,7 +720,7 @@ async def list_notifications(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    rows = await list_notifications_for_user(db, current_user.user_id)
+    rows = await list_notifications_for_user(db, current_user.user_id, role_target="caretaker")
     return [
         NotificationItem(
             notification_id=n.notification_id,
@@ -664,3 +753,100 @@ async def mark_notification_read(
         created_at=n.created_at,
         is_read=(n.status == "read"),
     )
+
+
+# ── Invite Management (caretaker-scoped) ─────────────────────────────────────
+
+@router.get("/invites", response_model=list[InviteListItem])
+async def list_my_invites(
+    limit: Optional[int] = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(SEND_INVITE)),
+):
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(
+            SignupInvite.invite_id,
+            SignupInvite.email,
+            SignupInvite.group_id,
+            SignupInvite.invited_by,
+            SignupInvite.created_at,
+            SignupInvite.expires_at,
+            SignupInvite.used,
+            Role.role_name,
+            Group.name.label("group_name"),
+        )
+        .outerjoin(Role, Role.role_id == SignupInvite.role_id)
+        .outerjoin(Group, Group.group_id == SignupInvite.group_id)
+        .where(SignupInvite.invited_by == current_user.user_id)
+        .order_by(SignupInvite.created_at.desc())
+    )
+    if limit is not None:
+        stmt = stmt.limit(limit).offset(max(0, offset))
+
+    rows = (await db.execute(stmt)).all()
+    return [
+        InviteListItem(
+            invite_id=row.invite_id,
+            email=row.email,
+            role=row.role_name,
+            group_id=row.group_id,
+            group_name=row.group_name,
+            invited_by=row.invited_by,
+            created_at=row.created_at,
+            expires_at=row.expires_at,
+            used=row.used,
+            status="accepted" if row.used else ("expired" if row.expires_at < now else "pending"),
+        )
+        for row in rows
+    ]
+
+
+@router.get("/participants-summary")
+async def get_participant_summary(
+    group_id: Optional[UUID] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    return await CaretakersQuery(db).get_participant_summary(
+        user_id=current_user.user_id,
+        group_id=group_id,
+    )
+
+
+@router.get("/forms-summary")
+async def get_forms_summary(
+    group_id: Optional[UUID] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    return await CaretakersQuery(db).get_group_forms_summary(
+        caretaker_user_id=current_user.user_id,
+        group_id=group_id,
+    )
+
+
+@router.delete("/invites/{invite_id}")
+async def revoke_my_invite(
+    invite_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(SEND_INVITE)),
+):
+    now = datetime.now(timezone.utc)
+    invite = await db.scalar(
+        select(SignupInvite).where(
+            SignupInvite.invite_id == invite_id,
+            SignupInvite.invited_by == current_user.user_id,
+        )
+    )
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    if invite.used:
+        raise HTTPException(status_code=400, detail="Invite has already been used")
+    if invite.expires_at < now:
+        raise HTTPException(status_code=400, detail="Invite has already expired")
+
+    await db.delete(invite)
+    await db.commit()
+    return {"detail": "Invite revoked successfully"}

@@ -72,12 +72,21 @@ async def list_notifications_for_user(
     user_id: UUID,
     *,
     limit: int = 100,
+    role_target: Optional[str] = None,
 ) -> list[Notification]:
-    result = await db.execute(
+    stmt = (
         select(Notification)
         .where(Notification.user_id == user_id)
         .order_by(Notification.created_at.desc())
         .limit(limit)
+    )
+    if role_target:
+        # Keep legacy notifications (NULL role_target) visible while enforcing role-specific rows.
+        stmt = stmt.where(
+            (Notification.role_target.is_(None)) | (Notification.role_target == role_target)
+        )
+    result = await db.execute(
+        stmt
     )
     return result.scalars().all()
 

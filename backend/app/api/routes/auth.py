@@ -520,4 +520,25 @@ async def signup_invite(
         },
     )
 
+    admin_rows = await db.execute(
+        select(User.user_id)
+        .join(UserRole, UserRole.user_id == User.user_id)
+        .join(Role, Role.role_id == UserRole.role_id)
+        .where(Role.role_name == "admin")
+        .where(User.user_id != current_user.user_id)
+    )
+    admin_ids = [row[0] for row in admin_rows.all()]
+    if admin_ids:
+        await create_notifications_bulk(
+            db=db,
+            user_ids=admin_ids,
+            notification_type="invite",
+            title="New invite sent",
+            message=f"{Payload.email} was invited as {target_role}.",
+            link="/admin/users",
+            role_target="admin",
+            source_type="invite_sent",
+            source_id=None,
+        )
+
     return result

@@ -11,7 +11,7 @@ from app.db.session import get_db
 from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import ONBOARDING_READ, ONBOARDING_SUBMIT, ONBOARDING_EDIT
 from app.db.models import (
-    User, SurveyForm, FormField, FormSubmission,
+    User, SurveyForm, FormField, FieldOption, FormSubmission,
     ParticipantProfile, FieldElementMap, HealthDataPoint
 )
 from app.services.participant_survey_service import _get_participant, _build_answer_records, _apply_transform
@@ -30,7 +30,9 @@ from app.schemas.onboarding_schema import (
     ConsentSubmitIn,
     ConsentTemplateUpdateIn,
     BackgroundInfoUpdateIn,
+    IntakeFormUpdateIn,
 )
+from app.services.notification_service import create_notifications_bulk
 
 router = APIRouter()
 
@@ -271,6 +273,27 @@ async def complete_onboarding_route(
         await complete_onboarding(current_user.user_id, db)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    admin_rows = await db.execute(
+        select(User.user_id)
+        .join(UserRole, UserRole.user_id == User.user_id)
+        .join(Role, Role.role_id == UserRole.role_id)
+        .where(Role.role_name == "admin")
+    )
+    admin_ids = [row[0] for row in admin_rows.all()]
+    if admin_ids:
+        display_name = f"{current_user.first_name or ''} {current_user.last_name or ''}".strip() or "A participant"
+        await create_notifications_bulk(
+            db=db,
+            user_ids=admin_ids,
+            notification_type="summary",
+            title="Participant completed onboarding",
+            message=f"{display_name} completed onboarding.",
+            link="/admin/system-insights",
+            role_target="admin",
+            source_type="onboarding_completed",
+            source_id=current_user.user_id,
+        )
     return {"message": "Onboarding completed."}
 
 
@@ -308,3 +331,71 @@ async def update_background_template_route(
         db=db,
     )
     return {"message": "Background template updated.", "version": template.version, "template_id": str(template.template_id)}
+
+
+@router.get("/admin/intake-form", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
+async def get_admin_intake_form(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Return the intake form with all fields and options (admin view)."""
+    form = await _get_intake_form(db)
+    return {
+        "form_id": str(form.form_id),
+        "title": form.title,
+        "fields": [
+            {
+                "field_id": str(f.field_id),
+                "label": f.label,
+                "field_type": f.field_type,
+                "is_required": f.is_required,
+                "display_order": f.display_order,
+                "options": [
+                    {"label": o.label, "value": o.value, "display_order": o.display_order}
+                    for o in sorted(f.options, key=lambda x: x.display_order)
+                ],
+            }
+            for f in sorted(form.fields, key=lambda x: x.display_order)
+        ],
+    }
+
+
+@router.put("/admin/intake-form", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
+async def update_intake_form_route(
+    payload: IntakeFormUpdateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Update the intake form fields in-place (replaces all fields)."""
+    form = await _get_intake_form(db)
+
+    # Delete existing fields (cascades to options via FK)
+    existing_fields = (await db.execute(
+        select(FormField).where(FormField.form_id == form.form_id)
+    )).scalars().all()
+    for f in existing_fields:
+        await db.delete(f)
+    await db.flush()
+
+    # Create new fields and options
+    for i, field_data in enumerate(payload.fields):
+        new_field = FormField(
+            form_id=form.form_id,
+            label=field_data["label"],
+            field_type=field_data["field_type"],
+            is_required=field_data.get("is_required", False),
+            display_order=field_data.get("display_order", i + 1),
+        )
+        db.add(new_field)
+        await db.flush()
+
+        for j, opt in enumerate(field_data.get("options") or []):
+            db.add(FieldOption(
+                field_id=new_field.field_id,
+                label=opt.get("label", ""),
+                value=opt.get("value", j),
+                display_order=opt.get("display_order", j),
+            ))
+
+    await db.commit()
+    return {"message": "Intake form updated."}

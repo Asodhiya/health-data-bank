@@ -26,6 +26,12 @@ export const DASHBOARD_NAV = [
   },
 
   {
+    label: "Onboarding",
+    to: "/onboarding-management",
+    roles: ["admin"],
+  },
+
+  {
     label: "Surveys",
     to: "/surveys",
     roles: ["admin"],
@@ -34,6 +40,18 @@ export const DASHBOARD_NAV = [
   {
     label: "System Settings",
     to: "/settings",
+    roles: ["admin"],
+  },
+
+  {
+    label: "System Insights",
+    to: "/admin/insights",
+    roles: ["admin"],
+  },
+
+  {
+    label: "Messages & Feedback",
+    to: "/admin/messages",
     roles: ["admin"],
   },
 

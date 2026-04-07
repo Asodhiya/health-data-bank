@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 
@@ -9,10 +9,10 @@ function transformParticipant(p, groupsMap) {
   const firstName = nameParts[0] || "";
   const lastName = nameParts.slice(1).join(" ") || "";
   const isActive = p.status !== "inactive";
-  const surveyMap = { not_started: 0, in_progress: 50, completed: 100 };
-  const goalMap = { not_started: 0, in_progress: 50, completed: 100 };
-  const surveyPct = surveyMap[p.survey_progress] ?? 0;
-  const goalPct = goalMap[p.goal_progress] ?? 0;
+  const surveysDone = Number(p.survey_submitted_count ?? 0);
+  const surveysTotal = Number(p.survey_deployed_count ?? 0);
+  const goalsDone = Number(p.goals_completed_count ?? 0);
+  const goalsTotal = Number(p.goals_total_count ?? 0);
   const flags = [];
   if (p.status === "inactive") flags.push("Inactive");
   if (p.status === "low_active") flags.push("Low activity");
@@ -29,10 +29,10 @@ function transformParticipant(p, groupsMap) {
     status: isActive ? "active" : "inactive",
     enrolledAt: p.enrolled_at || null,
     lastActive: p.last_login_at || p.last_submission_at || null,
-    healthGoals: goalPct === 100 ? 1 : 0,
-    healthGoalsTotal: goalPct > 0 ? 1 : 0,
-    surveysDone: surveyPct,
-    surveysTotal: 100,
+    healthGoals: goalsDone,
+    healthGoalsTotal: goalsTotal,
+    surveysDone,
+    surveysTotal,
     latestMetrics: null,
     flags,
     groupId: p.group_id || null,
@@ -42,6 +42,39 @@ function transformParticipant(p, groupsMap) {
 
 function transformGroup(g) {
   return { id: g.group_id, name: g.name, description: g.description || "" };
+}
+
+function transformGroupForm(f) {
+  return {
+    deploymentId: f.deployment_id,
+    formId: f.form_id,
+    groupId: f.group_id,
+    groupName: f.group_name,
+    title: f.form_title,
+    description: f.form_description || "",
+    formStatus: f.form_status || "unknown",
+    deployedAt: f.deployed_at || null,
+    revokedAt: f.revoked_at || null,
+    isActive: Boolean(f.is_active),
+    participantCount: Number(f.participant_count || 0),
+    submittedCount: Number(f.submitted_count || 0),
+    completionRate: Number(f.completion_rate || 0),
+  };
+}
+
+function transformInvite(inv) {
+  return {
+    id: inv.invite_id,
+    email: inv.email,
+    status: inv.status,
+    sentAt: inv.created_at || null,
+    expiresAt: inv.expires_at || null,
+    acceptedAt: inv.status === "accepted" ? (inv.created_at || null) : null,
+    revokedAt: null,
+    role: inv.role || null,
+    groupId: inv.group_id || null,
+    groupName: inv.group_name || null,
+  };
 }
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
@@ -139,6 +172,160 @@ function InviteStatusBadge({ status }) {
     revoked: <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>,
   };
   return <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${styles[status] || styles.pending}`}>{icons[status]} {status}</span>;
+}
+
+function FormStatusBadge({ isActive }) {
+  return (
+    <span
+      className={`inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full border ${
+        isActive
+          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+          : "bg-slate-100 text-slate-600 border-slate-200"
+      }`}
+    >
+      {isActive ? "Active" : "Revoked"}
+    </span>
+  );
+}
+
+function FormsPanel({ forms, groups, onViewForm, hasMore, loadingMore, onLoadMore, loading }) {
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100">
+        <div className="px-6 py-12 text-center">
+          <p className="text-sm text-slate-500">Loading forms...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!forms.length) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100">
+        <div className="px-6 py-12 text-center">
+          <p className="text-sm text-slate-500">No deployed forms found for this scope.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+        <p className="text-sm font-semibold text-slate-700">Deployed Forms</p>
+        <p className="text-xs text-slate-400">{forms.length} total</p>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {forms.map((f) => {
+          const submitted = Math.min(f.submittedCount, f.participantCount);
+          return (
+            <div key={f.deploymentId} className="px-4 py-4">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-800 truncate">{f.title}</p>
+                  <div className="mt-1 flex items-center gap-2 flex-wrap">
+                    <GroupBadge groupId={f.groupId} groupName={f.groupName} groups={groups} />
+                    <FormStatusBadge isActive={f.isActive} />
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Deployed: <span className="font-medium text-slate-600">{fmt(f.deployedAt)}</span>
+                </p>
+              </div>
+                <div className="mt-3">
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-slate-500">
+                    Completion {submitted}/{f.participantCount}
+                  </span>
+                  <span className="font-semibold text-slate-700">{Math.round(f.completionRate)}%</span>
+                </div>
+                <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                  <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${Math.min(100, Math.max(0, f.completionRate))}%` }} />
+                </div>
+                </div>
+              <div className="mt-3 flex justify-end">
+                <button
+                  onClick={() => onViewForm?.(f)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12H9m12 0A9 9 0 113 12a9 9 0 0118 0z" /></svg>
+                  View Questions
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {hasMore && (
+        <div className="px-4 py-3 border-t border-slate-100 flex justify-end">
+          <button
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50"
+          >
+            {loadingMore ? "Loading..." : "Load More Forms"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FormDetailModal({ form, loading, error, onClose }) {
+  if (!form && !loading && !error) return null;
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
+      <div className="absolute inset-x-4 top-8 bottom-8 max-w-3xl mx-auto bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-slate-800 truncate">{form?.title || "Form Details"}</p>
+            {form?.description && <p className="text-xs text-slate-500 mt-0.5 truncate">{form.description}</p>}
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-500 flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div className="p-5 overflow-y-auto flex-1">
+          {loading && <p className="text-sm text-slate-500">Loading questions...</p>}
+          {!loading && error && <p className="text-sm text-rose-600">{error}</p>}
+          {!loading && !error && form && (
+            <div className="space-y-3">
+              {(form.fields || [])
+                .slice()
+                .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+                .map((field, idx) => (
+                  <div key={field.field_id || idx} className="border border-slate-200 rounded-xl p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-800">
+                        {idx + 1}. {field.label}
+                        {field.is_required ? <span className="text-rose-500 ml-1">*</span> : null}
+                      </p>
+                      <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                        {field.field_type}
+                      </span>
+                    </div>
+                    {Array.isArray(field.options) && field.options.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {field.options
+                          .slice()
+                          .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+                          .map((opt) => (
+                            <span key={opt.option_id || `${field.field_id}-${opt.value}`} className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
+                              {opt.label}
+                            </span>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              {(form.fields || []).length === 0 && <p className="text-sm text-slate-500">No questions found for this form.</p>}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── NEW: Group Badge ───────────────────────────────────────────────────────────
@@ -433,7 +620,7 @@ function NoteModal({ participant, onSave, onCancel }) {
 
 // ─── Invites Panel ──────────────────────────────────────────────────────────────
 
-function InvitesPanel({ invites, onRevoke, onResend, onOpenInviteModal }) {
+function InvitesPanel({ invites, onRevoke, onResend, onOpenInviteModal, hasMore, loadingMore, onLoadMore }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [sort, setSort] = useState({ field: "sentAt", dir: "desc" });
@@ -571,6 +758,17 @@ function InvitesPanel({ invites, onRevoke, onResend, onOpenInviteModal }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {hasMore && (
+        <div className="flex justify-end">
+          <button
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50"
+          >
+            {loadingMore ? "Loading..." : "Load More Invites"}
+          </button>
         </div>
       )}
     </div>
@@ -782,6 +980,7 @@ function ErrorPlaceholder({ onRetry }) {
 // ─── Main Page ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_FILTERS = { status: "all", gender: "all", flagged: "all", ageMin: "", ageMax: "", surveyProgress: "all", goalProgress: "all" };
+const PAGE_SIZE = 10;
 
 export default function MyParticipantsPage() {
   const { user } = useOutletContext();
@@ -790,6 +989,17 @@ export default function MyParticipantsPage() {
   const [groups, setGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("all");
   const [invites, setInvites] = useState([]);
+  const [forms, setForms] = useState([]);
+  const [participantsHasMore, setParticipantsHasMore] = useState(false);
+  const [participantsOffset, setParticipantsOffset] = useState(0);
+  const [participantsLoadingMore, setParticipantsLoadingMore] = useState(false);
+  const [invitesHasMore, setInvitesHasMore] = useState(false);
+  const [invitesOffset, setInvitesOffset] = useState(0);
+  const [invitesLoadingMore, setInvitesLoadingMore] = useState(false);
+  const [formsHasMore, setFormsHasMore] = useState(false);
+  const [formsOffset, setFormsOffset] = useState(0);
+  const [formsLoadingMore, setFormsLoadingMore] = useState(false);
+  const [formsLoading, setFormsLoading] = useState(false);
   const [view, setView] = useState("participants");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -801,6 +1011,14 @@ export default function MyParticipantsPage() {
   const [noteTarget, setNoteTarget] = useState(null);
   const [showInvite, setShowInvite] = useState(false);
   const [toast, setToast] = useState(null);
+  const [formModalOpen, setFormModalOpen] = useState(false);
+  const [formDetailLoading, setFormDetailLoading] = useState(false);
+  const [formDetailError, setFormDetailError] = useState("");
+  const [selectedFormDetail, setSelectedFormDetail] = useState(null);
+  const hasBootstrappedRef = useRef(false);
+  const groupsMapRef = useRef({});
+  const [participantSummary, setParticipantSummary] = useState({ total: 0, active: 0, inactive: 0, flagged: 0 });
+  const [formsSummary, setFormsSummary] = useState({ total: 0, active: 0, revoked: 0 });
 
   function showToastMsg(msg) { setToast(msg); setTimeout(() => setToast(null), 3000); }
 
@@ -834,46 +1052,173 @@ export default function MyParticipantsPage() {
     setShowInvite(false);
   }
 
+  async function handleViewForm(formRow) {
+    setFormModalOpen(true);
+    setFormDetailLoading(true);
+    setFormDetailError("");
+    setSelectedFormDetail({
+      title: formRow.title,
+      description: formRow.description,
+      fields: [],
+    });
+    try {
+      const detail = await api.caretakerGetFormDetail(formRow.formId, formRow.groupId);
+      setSelectedFormDetail(detail);
+    } catch (err) {
+      setFormDetailError(err?.message || "Failed to load form questions.");
+    } finally {
+      setFormDetailLoading(false);
+    }
+  }
+
+  async function handleLoadMoreParticipants() {
+    if (participantsLoadingMore || !participantsHasMore) return;
+    setParticipantsLoadingMore(true);
+    await loadParticipantsPage({
+      reset: false,
+      offsetValue: participantsOffset,
+    });
+    setParticipantsLoadingMore(false);
+  }
+
+  async function handleLoadMoreForms() {
+    if (formsLoadingMore || !formsHasMore) return;
+    setFormsLoadingMore(true);
+    await loadFormsPage({ reset: false, offsetValue: formsOffset });
+    setFormsLoadingMore(false);
+  }
+
+  async function handleLoadMoreInvites() {
+    if (invitesLoadingMore || !invitesHasMore) return;
+    setInvitesLoadingMore(true);
+    await loadInvitesPage({ reset: false, offsetValue: invitesOffset });
+    setInvitesLoadingMore(false);
+  }
+
   // ── Data fetching ──────────────────────────────────────────────────────────
+
+  const selectedGroupQuery = selectedGroupId !== "all" ? selectedGroupId : null;
+
+  const loadSummaries = useCallback(async () => {
+    const [pSummary, fSummary] = await Promise.all([
+      api.caretakerGetParticipantsSummary(selectedGroupQuery).catch(() => ({ total: 0, active: 0, inactive: 0, flagged: 0 })),
+      api.caretakerGetFormsSummary(selectedGroupQuery).catch(() => ({ total: 0, active: 0, revoked: 0 })),
+    ]);
+    setParticipantSummary({
+      total: Number(pSummary?.total || 0),
+      active: Number(pSummary?.active || 0),
+      inactive: Number(pSummary?.inactive || 0),
+      flagged: Number(pSummary?.flagged || 0),
+    });
+    setFormsSummary({
+      total: Number(fSummary?.total || 0),
+      active: Number(fSummary?.active || 0),
+      revoked: Number(fSummary?.revoked || 0),
+    });
+  }, [selectedGroupQuery]);
+
+  const loadParticipantsPage = useCallback(async ({ reset = false, groupsMapOverride = null, offsetValue = 0, queryParamsOverride = {} } = {}) => {
+    const nextOffset = reset ? 0 : offsetValue;
+    const params = {
+      limit: PAGE_SIZE,
+      offset: nextOffset,
+      ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
+      ...queryParamsOverride,
+    };
+    const participantData = await api.caretakerListParticipants(params).catch(() => []);
+    const page = Array.isArray(participantData) ? participantData : [];
+    const groupsMap = groupsMapOverride || groupsMapRef.current || {};
+    const transformed = page.map((p) => transformParticipant(p, groupsMap));
+    setParticipants((prev) => (reset ? transformed : [...prev, ...transformed]));
+    setParticipantsOffset(nextOffset + transformed.length);
+    setParticipantsHasMore(transformed.length === PAGE_SIZE);
+  }, [selectedGroupQuery]);
+
+  const loadFormsPage = useCallback(async ({ reset = false, offsetValue = 0 } = {}) => {
+    if (reset) setFormsLoading(true);
+    const nextOffset = reset ? 0 : offsetValue;
+    try {
+      const formData = await api.caretakerListForms(selectedGroupQuery, {
+        limit: PAGE_SIZE,
+        offset: nextOffset,
+      }).catch(() => []);
+      const page = Array.isArray(formData) ? formData : [];
+      const transformed = page.map(transformGroupForm);
+      setForms((prev) => (reset ? transformed : [...prev, ...transformed]));
+      setFormsOffset(nextOffset + transformed.length);
+      setFormsHasMore(transformed.length === PAGE_SIZE);
+    } finally {
+      if (reset) setFormsLoading(false);
+    }
+  }, [selectedGroupQuery]);
+
+  const loadInvitesPage = useCallback(async ({ reset = false, offsetValue = 0 } = {}) => {
+    const nextOffset = reset ? 0 : offsetValue;
+    const inviteData = await api.caretakerListInvites(PAGE_SIZE, nextOffset).catch(() => []);
+    const page = Array.isArray(inviteData) ? inviteData : [];
+    const transformed = page.map(transformInvite);
+    setInvites((prev) => (reset ? transformed : [...prev, ...transformed]));
+    setInvitesOffset(nextOffset + transformed.length);
+    setInvitesHasMore(transformed.length === PAGE_SIZE);
+  }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
-      const [participantData, groupData] = await Promise.all([
-        api.caretakerListParticipants().catch(() => []),
-        api.caretakerGetGroups().catch(() => []),
-      ]);
-
-      // Build groups list and lookup map
+      const groupData = await api.caretakerGetGroups().catch(() => []);
       const transformedGroups = Array.isArray(groupData) ? groupData.map(transformGroup) : [];
       setGroups(transformedGroups);
-
-      const gMap = {};
-      (Array.isArray(groupData) ? groupData : []).forEach(g => { gMap[g.group_id] = g; });
-
-      // Transform participants with group info
-      const transformed = Array.isArray(participantData)
-        ? participantData.map(p => transformParticipant(p, gMap))
-        : [];
-      setParticipants(transformed);
+      const initialGroupMap = {};
+      transformedGroups.forEach((g) => { initialGroupMap[g.id] = { group_id: g.id, name: g.name }; });
+      groupsMapRef.current = initialGroupMap;
+      setParticipants([]);
+      setParticipantsOffset(0);
+      await loadParticipantsPage({ reset: true, groupsMapOverride: initialGroupMap, offsetValue: 0 });
+      await loadSummaries();
+      // Lazy tabs: do not load invites/forms until user opens those tabs.
+      setInvites([]);
+      setInvitesOffset(0);
+      setInvitesHasMore(false);
+      setForms([]);
+      setFormsOffset(0);
+      setFormsHasMore(false);
+      setFormsLoading(false);
+      hasBootstrappedRef.current = true;
     } catch (err) {
       console.error("Failed to load caretaker data:", err);
       setError(true);
     }
-
-    // Fetch invites separately (non-blocking)
-    try {
-      const inviteData = await api.caretakerListInvites();
-      setInvites(Array.isArray(inviteData) ? inviteData : []);
-    } catch {
-      setInvites([]);
-    }
-
     setLoading(false);
+  }, [loadParticipantsPage, loadSummaries]);
+
+  useEffect(() => {
+    fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    if (view === "forms" && forms.length === 0) {
+      loadFormsPage({ reset: true, offsetValue: 0 });
+    }
+    if (view === "invites" && invites.length === 0) {
+      loadInvitesPage({ reset: true, offsetValue: 0 });
+    }
+  }, [view, forms.length, invites.length, loadFormsPage, loadInvitesPage]);
+
+  useEffect(() => {
+    if (!hasBootstrappedRef.current) return;
+    // when group changes, reset paged datasets
+    setForms([]);
+    setFormsOffset(0);
+    setFormsHasMore(false);
+    setFormsLoading(view === "forms");
+    loadParticipantsPage({ reset: true, offsetValue: 0 });
+    loadSummaries();
+    if (view === "forms") {
+      loadFormsPage({ reset: true, offsetValue: 0 });
+    }
+  }, [selectedGroupQuery, view, loadParticipantsPage, loadSummaries, loadFormsPage]);
 
   // ── Sort handler ────────────────────────────────────────────────────────────
 
@@ -883,61 +1228,74 @@ export default function MyParticipantsPage() {
 
   // ── Group pre-filter ───────────────────────────────────────────────────────
 
-  const groupFiltered = useMemo(() => {
-    if (selectedGroupId === "all") return participants;
-    return participants.filter(p => p.groupId === selectedGroupId);
-  }, [participants, selectedGroupId]);
+  const groupFiltered = useMemo(() => participants, [participants]);
 
-  // ── Filter + Sort logic ─────────────────────────────────────────────────────
-
+  // ── Filter + Sort logic (client-side, instant UX) ─────────────────────────
   const processed = useMemo(() => {
-    let list = groupFiltered.filter(p => {
-      const q = search.toLowerCase();
-      if (q && !`${p.firstName} ${p.lastName} ${p.email}`.toLowerCase().includes(q)) return false;
+    let rows = [...groupFiltered];
+    const q = search.trim().toLowerCase();
+    rows = rows.filter((p) => {
+      if (q && !`${p.firstName || ""} ${p.lastName || ""} ${p.email || ""}`.toLowerCase().includes(q)) return false;
       if (filters.status !== "all" && p.status !== filters.status) return false;
-      if (filters.gender !== "all" && p.gender !== filters.gender) return false;
+      if (filters.gender !== "all" && (p.gender || "").toLowerCase() !== filters.gender.toLowerCase()) return false;
       if (filters.flagged === "flagged" && p.flags.length === 0) return false;
       if (filters.flagged === "clear" && p.flags.length > 0) return false;
-      if (filters.ageMin) { const age = p.age ?? getAge(p.dob); if (age === null || age < Number(filters.ageMin)) return false; }
-      if (filters.ageMax) { const age = p.age ?? getAge(p.dob); if (age === null || age > Number(filters.ageMax)) return false; }
-      const sp = pct(p.surveysDone, p.surveysTotal);
-      if (filters.surveyProgress === "complete" && sp < 100) return false;
-      if (filters.surveyProgress === "in_progress" && (sp <= 0 || sp >= 100)) return false;
-      if (filters.surveyProgress === "not_started" && sp > 0) return false;
-      if (filters.surveyProgress === "below_50" && sp >= 50) return false;
-      if (filters.surveyProgress === "above_50" && sp < 50) return false;
-      if (filters.goalProgress === "complete" && (p.healthGoalsTotal === 0 || p.healthGoals < p.healthGoalsTotal)) return false;
-      if (filters.goalProgress === "in_progress" && (p.healthGoalsTotal === 0 || p.healthGoals >= p.healthGoalsTotal)) return false;
-      if (filters.goalProgress === "no_goals" && p.healthGoalsTotal > 0) return false;
+      const age = p.age ?? getAge(p.dob);
+      if (filters.ageMin && (age === null || age < Number(filters.ageMin))) return false;
+      if (filters.ageMax && (age === null || age > Number(filters.ageMax))) return false;
+      const surveyRatio = p.surveysTotal > 0 ? (p.surveysDone / p.surveysTotal) * 100 : 0;
+      if (filters.surveyProgress === "complete" && surveyRatio < 100) return false;
+      if (filters.surveyProgress === "in_progress" && (surveyRatio <= 0 || surveyRatio >= 100)) return false;
+      if (filters.surveyProgress === "not_started" && surveyRatio > 0) return false;
+      if (filters.surveyProgress === "below_50" && surveyRatio >= 50) return false;
+      if (filters.surveyProgress === "above_50" && surveyRatio < 50) return false;
+      const hasGoals = (p.healthGoalsTotal || 0) > 0;
+      const goalRatio = hasGoals ? (p.healthGoals / p.healthGoalsTotal) * 100 : 0;
+      if (filters.goalProgress === "complete" && (!hasGoals || goalRatio < 100)) return false;
+      if (filters.goalProgress === "in_progress" && (!hasGoals || goalRatio <= 0 || goalRatio >= 100)) return false;
+      if (filters.goalProgress === "no_goals" && hasGoals) return false;
       return true;
     });
-    const dir = sort.dir === "asc" ? 1 : -1;
-    list.sort((a, b) => {
+
+    const statusOrder = { active: 0, inactive: 1 };
+    rows.sort((a, b) => {
+      const dir = sort.dir === "desc" ? -1 : 1;
       switch (sort.field) {
-        case "name": return dir * `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
-        case "age": return dir * ((a.age ?? getAge(a.dob) ?? 0) - (b.age ?? getAge(b.dob) ?? 0));
-        case "status": return dir * a.status.localeCompare(b.status);
-        case "gender": return dir * (a.gender || "").localeCompare(b.gender || "");
-        case "surveys": return dir * (pct(a.surveysDone, a.surveysTotal) - pct(b.surveysDone, b.surveysTotal));
-        case "goals": return dir * (pct(a.healthGoals, a.healthGoalsTotal) - pct(b.healthGoals, b.healthGoalsTotal));
-        case "lastActive": return dir * (new Date(a.lastActive || 0) - new Date(b.lastActive || 0));
-        case "enrolled": return dir * (new Date(a.enrolledAt || 0) - new Date(b.enrolledAt || 0));
-        default: return 0;
+        case "name":
+          return dir * `${a.firstName || ""} ${a.lastName || ""}`.localeCompare(`${b.firstName || ""} ${b.lastName || ""}`);
+        case "age":
+          return dir * ((a.age ?? -1) - (b.age ?? -1));
+        case "status":
+          return dir * ((statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99));
+        case "gender":
+          return dir * (a.gender || "").localeCompare(b.gender || "");
+        case "surveys":
+          return dir * ((a.surveysTotal ? a.surveysDone / a.surveysTotal : 0) - (b.surveysTotal ? b.surveysDone / b.surveysTotal : 0));
+        case "goals":
+          return dir * ((a.healthGoalsTotal ? a.healthGoals / a.healthGoalsTotal : 0) - (b.healthGoalsTotal ? b.healthGoals / b.healthGoalsTotal : 0));
+        case "lastActive":
+          return dir * ((new Date(a.lastActive || 0).getTime()) - (new Date(b.lastActive || 0).getTime()));
+        case "enrolled":
+          return dir * ((new Date(a.enrolledAt || 0).getTime()) - (new Date(b.enrolledAt || 0).getTime()));
+        default:
+          return 0;
       }
     });
-    return list;
-  }, [groupFiltered, search, filters, sort]);
+
+    return rows;
+  }, [groupFiltered, sort, search, filters]);
 
   const counts = useMemo(() => ({
-    total: groupFiltered.length,
-    active: groupFiltered.filter(p => p.status === "active").length,
-    inactive: groupFiltered.filter(p => p.status === "inactive").length,
-    flagged: groupFiltered.filter(p => p.flags.length > 0).length,
-  }), [groupFiltered]);
+    total: participantSummary.total,
+    active: participantSummary.active,
+    inactive: participantSummary.inactive,
+    flagged: participantSummary.flagged,
+  }), [participantSummary]);
 
   const activeFilterCount = [filters.status !== "all", filters.gender !== "all", filters.flagged !== "all", filters.ageMin || filters.ageMax, filters.surveyProgress !== "all", filters.goalProgress !== "all"].filter(Boolean).length;
   const showGroupColumn = selectedGroupId === "all";
   const selectedGroupName = selectedGroupId === "all" ? null : groups.find(g => g.id === selectedGroupId)?.name;
+  const formsForView = useMemo(() => forms, [forms]);
 
   // ── Loading state ───────────────────────────────────────────────────────────
 
@@ -966,7 +1324,7 @@ export default function MyParticipantsPage() {
     return <NoGroupsPlaceholder />;
   }
 
-  if (participants.length === 0) {
+  if (counts.total === 0 && view === "participants") {
     const selectedGroup = selectedGroupId !== "all" ? groups.find(g => g.id === selectedGroupId) : groups[0];
     return <NoParticipantsPlaceholder group={selectedGroup || groups[0]} onInvite={() => setShowInvite(true)} />;
   }
@@ -984,21 +1342,33 @@ export default function MyParticipantsPage() {
       {showInvite && groups.length > 0 && <InviteModal group={selectedGroupId !== "all" ? groups.find(g => g.id === selectedGroupId) || groups[0] : groups[0]} onDone={handleInviteSent} onCancel={() => setShowInvite(false)} />}
       {noteTarget && <NoteModal participant={noteTarget} onSave={text => { showToastMsg(`Feedback saved for ${noteTarget.firstName} ${noteTarget.lastName}.`); setNoteTarget(null); }} onCancel={() => setNoteTarget(null)} />}
       {detailParticipant && <ParticipantDetailPanel participant={detailParticipant} groups={groups} onClose={() => setDetailParticipant(null)} onViewFull={() => { setDetailParticipant(null); navigate(`/caretaker/participants/${detailParticipant.id}`); }} />}
+      {formModalOpen && (
+        <FormDetailModal
+          form={selectedFormDetail}
+          loading={formDetailLoading}
+          error={formDetailError}
+          onClose={() => {
+            setFormModalOpen(false);
+            setSelectedFormDetail(null);
+            setFormDetailError("");
+          }}
+        />
+      )}
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">My Participants</h1>
-          <p className="text-xs text-slate-400 mt-1">{groups.length} group{groups.length !== 1 ? "s" : ""} · {participants.length} total participants</p>
+          <p className="text-xs text-slate-400 mt-1">{groups.length} group{groups.length !== 1 ? "s" : ""} · {counts.total} total participants</p>
         </div>
       </div>
 
       {/* Group Selector */}
       <GroupSelector
         groups={groups}
-        allParticipants={participants}
+        allParticipants={processed}
         selectedGroupId={selectedGroupId}
-        onChange={(id) => { setSelectedGroupId(id); setFilters(DEFAULT_FILTERS); setSearch(""); }}
+        onChange={(id) => { setSelectedGroupId(id); }}
       />
 
       {/* View toggle */}
@@ -1014,11 +1384,38 @@ export default function MyParticipantsPage() {
           Invites
           {invites.filter(i => i.status === "pending").length > 0 && <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${view === "invites" ? "bg-blue-500 text-white" : "bg-amber-100 text-amber-700"}`}>{invites.filter(i => i.status === "pending").length}</span>}
         </button>
+        <button onClick={() => setView("forms")}
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${view === "forms" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"}`}>
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Forms
+          {formsSummary.total > 0 && <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${view === "forms" ? "bg-blue-500 text-white" : "bg-slate-200 text-slate-600"}`}>{formsSummary.total}</span>}
+        </button>
       </div>
 
       {/* Invites view */}
       {view === "invites" && (
-        <InvitesPanel invites={invites} onRevoke={handleRevokeInvite} onResend={handleResendInvite} onOpenInviteModal={() => setShowInvite(true)} />
+        <InvitesPanel
+          invites={invites}
+          onRevoke={handleRevokeInvite}
+          onResend={handleResendInvite}
+          onOpenInviteModal={() => setShowInvite(true)}
+          hasMore={invitesHasMore}
+          loadingMore={invitesLoadingMore}
+          onLoadMore={handleLoadMoreInvites}
+        />
+      )}
+
+      {/* Forms view */}
+      {view === "forms" && (
+        <FormsPanel
+          forms={formsForView}
+          groups={groups}
+          onViewForm={handleViewForm}
+          hasMore={formsHasMore}
+          loadingMore={formsLoadingMore}
+          onLoadMore={handleLoadMoreForms}
+          loading={formsLoading}
+        />
       )}
 
       {/* Participants view */}
@@ -1066,7 +1463,18 @@ export default function MyParticipantsPage() {
           <div className="px-6 py-12 text-center">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-slate-200 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             <p className="text-sm text-slate-400">No participants match your filters.</p>
-            <button onClick={() => { setFilters(DEFAULT_FILTERS); setSearch(""); }} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear all filters</button>
+            <div className="mt-2 flex items-center justify-center gap-3">
+              <button onClick={() => { setFilters(DEFAULT_FILTERS); setSearch(""); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Clear all filters</button>
+              {participantsHasMore && (
+                <button
+                  onClick={handleLoadMoreParticipants}
+                  disabled={participantsLoadingMore}
+                  className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 disabled:opacity-50"
+                >
+                  {participantsLoadingMore ? "Loading more..." : "Load more rows"}
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
@@ -1119,6 +1527,17 @@ export default function MyParticipantsPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+        {participantsHasMore && (
+          <div className="px-4 py-3 border-t border-slate-100 flex justify-end">
+            <button
+              onClick={handleLoadMoreParticipants}
+              disabled={participantsLoadingMore}
+              className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50"
+            >
+              {participantsLoadingMore ? "Loading..." : "Load More Participants"}
+            </button>
           </div>
         )}
       </div>
