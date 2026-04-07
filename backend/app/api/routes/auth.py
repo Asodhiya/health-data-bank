@@ -3,7 +3,7 @@ Authentication Routes
 """
 from fastapi import APIRouter, HTTPException, status, Response, Depends, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import User, GroupMember, ParticipantProfile, ResearcherProfile, Role, UserRole, AuditLog
+from app.db.models import User, GroupMember, ParticipantProfile, ResearcherProfile, CaretakerProfile, Group, Role, UserRole, AuditLog
 from sqlalchemy import select, func
 from datetime import datetime, timezone, timedelta
 import secrets
@@ -307,35 +307,55 @@ async def self_deactivate_account(
     user: User = Depends(check_current_user),
 ):
     """
-    Participant/Researcher self-delete flow:
-    - Account is anonymized + deactivated (not hard-deleted)
-    - Related research/forms/group memberships remain intact
+    Self-deactivate flow for any signed-in user:
+    - Account is deactivated (not hard-deleted)
+    - Participant memberships are closed
+    - Caretaker group assignments are cleared
     - Admins are notified
     """
     ip = _get_client_ip(request)
     user_queries = UserQuery(db)
     roles = await user_queries.get_user_roles(user.user_id)
-    allowed_roles = {"participant", "researcher"}
+    allowed_roles = {"participant", "researcher", "caretaker", "admin"}
     if not any(r in allowed_roles for r in roles):
-        raise HTTPException(status_code=403, detail="Only participants and researchers can self-deactivate.")
+        raise HTTPException(status_code=403, detail="This account type cannot self-deactivate.")
 
-    original_email = user.email
-    original_first_name = user.first_name
-    original_last_name = user.last_name
     role_label = next((r for r in roles if r in allowed_roles), roles[0] if roles else "unknown")
 
-    user.first_name = "Deleted"
-    user.last_name = f"User #{str(user.user_id)[:8]}"
-    user.email = f"deleted_{user.user_id}@deleted.local"
-    user.username = f"deleted_{str(user.user_id).replace('-', '')[:20]}"
-    user.phone = None
-    user.Address = None
     user.status = False
     user.failed_login_attempts = 0
     user.locked_until = None
     user.reset_token_hash = None
     user.reset_token_expires_at = None
     user.password_hash = PasswordHash.from_password(secrets.token_urlsafe(32)).to_str()
+
+    if role_label == "participant":
+        participant_id = await db.scalar(
+            select(ParticipantProfile.participant_id).where(ParticipantProfile.user_id == user.user_id)
+        )
+        if participant_id:
+            active_memberships = (
+                await db.execute(
+                    select(GroupMember)
+                    .where(GroupMember.participant_id == participant_id)
+                    .where(GroupMember.left_at.is_(None))
+                )
+            ).scalars().all()
+            now = datetime.now(timezone.utc)
+            for membership in active_memberships:
+                membership.left_at = now
+    elif role_label == "caretaker":
+        caretaker_id = await db.scalar(
+            select(CaretakerProfile.caretaker_id).where(CaretakerProfile.user_id == user.user_id)
+        )
+        if caretaker_id:
+            groups = (
+                await db.execute(
+                    select(Group).where(Group.caretaker_id == caretaker_id)
+                )
+            ).scalars().all()
+            for group in groups:
+                group.caretaker_id = None
 
     admin_rows = await db.execute(
         select(User.user_id)
@@ -352,7 +372,7 @@ async def self_deactivate_account(
             user_ids=admin_ids,
             notification_type="flag",
             title="User self-deactivated",
-            message=f"A {role_label} account was anonymized and deactivated.",
+            message=f"A {role_label} account was deactivated.",
             link="/users",
             role_target="admin",
                 source_type="user_self_deactivated",
@@ -367,16 +387,16 @@ async def self_deactivate_account(
         entity_type="user",
         entity_id=user.user_id,
         details={
-            "original_email": original_email,
-            "original_first_name": original_first_name,
-            "original_last_name": original_last_name,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
             "role": role_label,
         },
         commit=False,
     )
     await db.commit()
 
-    return {"detail": "Account anonymized and deactivated successfully."}
+    return {"detail": "Account deactivated successfully."}
 
 
 @router.get("/me")

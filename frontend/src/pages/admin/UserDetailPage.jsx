@@ -75,9 +75,11 @@ function ChangeRoleModal({ open, onClose, user, onConfirm }) {
     if (!sel || sel === user.role) return;
     setLoading(true);
     try {
-      await api.request(`/admin_only/linkrole`, { method: "POST", body: JSON.stringify({ user_id: user.id, role_name: sel }) });
-      onConfirm(sel);
-    } catch (err) { console.error("Role change failed:", err); }
+      await api.adminUpdateUser(user.id, { role: sel });
+      await onConfirm(sel);
+    } catch (err) {
+      console.error("Role change failed:", err);
+    }
     finally { setLoading(false); setSel(""); }
   };
   return <Modal open={open} onClose={() => { setSel(""); onClose(); }}>
@@ -225,7 +227,7 @@ export default function UserDetailPage() {
     maritalStatus: u.marital_status || null,
     highestEducation: u.highest_education_level || null,
     occupationStatus: u.occupation_status || null,
-    dependents: u.dependents || null,
+    dependents: u.dependents ?? null,
     livingArrangement: u.living_arrangement || null,
     onboardingStatus: u.onboarding_status || null,
     programEnrolledAt: u.program_enrolled_at || null,
@@ -336,6 +338,7 @@ export default function UserDetailPage() {
     setUser(p => ({ ...p, status: p.status === "active" ? "inactive" : "active" }));
     setShowStatusModal(false);
     msg(user.status === "active" ? "User deactivated." : "User reactivated.");
+    fetchData();
   };
 
   const handleUnlocked = async () => {
@@ -478,7 +481,7 @@ export default function UserDetailPage() {
                     <InfoRow label="Marital Status" value={user.maritalStatus} />
                     <InfoRow label="Education" value={user.highestEducation} />
                     <InfoRow label="Employment" value={user.occupationStatus} />
-                    <InfoRow label="Dependents" value={user.dependents != null ? (user.dependents ? "Yes" : "No") : null} />
+                    <InfoRow label="Dependents" value={user.dependents != null ? String(user.dependents) : null} />
                     <InfoRow label="Living Arrangement" value={user.livingArrangement} />
                     <InfoRow label="Onboarding" value={user.onboardingStatus ? <span className={user.onboardingStatus === "COMPLETED" ? "text-emerald-600 font-semibold" : "text-amber-600 font-semibold"}>{user.onboardingStatus}</span> : null} />
                     <InfoRow label="Enrolled" value={fmtTime(user.programEnrolledAt)} />
@@ -696,7 +699,6 @@ export default function UserDetailPage() {
                   <InfoRow label="Failed Login Attempts" value={<span className={user.failedLoginAttempts > 3 ? "text-rose-600 font-semibold" : ""}>{user.failedLoginAttempts}</span>} />
                   <InfoRow label="Account Locked" value={locked ? <span className="text-rose-600 font-semibold">Until {fmtTime(user.lockedUntil)}</span> : <span className="text-emerald-600">No</span>} />
                   <InfoRow label="Last Login" value={fmtTime(user.lastLoginAt)} />
-                  <InfoRow label="MFA" value={<span className="text-amber-600 font-medium">Not implemented</span>} />
                 </div>
               </div>
               <div>

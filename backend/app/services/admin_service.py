@@ -100,6 +100,165 @@ def _single_role_link_subquery():
     )
 
 
+def _normalize_user_sort(
+    sort_field: str | None,
+    sort_dir: str | None,
+) -> tuple[str, str]:
+    allowed_fields = {"name", "email", "status", "role", "joined", "group"}
+    field = (sort_field or "joined").strip().lower()
+    direction = (sort_dir or "desc").strip().lower()
+    if field not in allowed_fields:
+        field = "joined"
+    if direction not in {"asc", "desc"}:
+        direction = "desc"
+    return field, direction
+
+
+def _apply_user_ordering(stmt, *, sort_field: str, sort_dir: str):
+    role_link_sq = _single_role_link_subquery()
+    ordered = (
+        stmt
+        .outerjoin(role_link_sq, role_link_sq.c.user_id == User.user_id)
+        .outerjoin(Role, Role.role_id == role_link_sq.c.role_id)
+        .outerjoin(ParticipantProfile, ParticipantProfile.user_id == User.user_id)
+        .outerjoin(
+            GroupMember,
+            (GroupMember.participant_id == ParticipantProfile.participant_id)
+            & (GroupMember.left_at.is_(None)),
+        )
+        .outerjoin(Group, Group.group_id == GroupMember.group_id)
+    )
+
+    base_sort = {
+        "name": (
+            func.lower(func.coalesce(User.first_name, "")),
+            func.lower(func.coalesce(User.last_name, "")),
+        ),
+        "email": (func.lower(func.coalesce(User.email, "")),),
+        "status": (User.status,),
+        "role": (func.lower(func.coalesce(Role.role_name, "")),),
+        "joined": (User.created_at,),
+        "group": (func.lower(func.coalesce(Group.name, "")),),
+    }[sort_field]
+
+    ordered_columns = [
+        col.asc() if sort_dir == "asc" else col.desc()
+        for col in base_sort
+    ]
+    tie_breakers = [User.created_at.desc(), User.user_id.asc()]
+    return ordered.order_by(*ordered_columns, *tie_breakers)
+
+
+async def _get_caretaker_profile_if_assignable(db: AsyncSession, user_id: UUID) -> CaretakerProfile | None:
+    role_link_sq = _single_role_link_subquery()
+    return await db.scalar(
+        select(CaretakerProfile)
+        .join(User, User.user_id == CaretakerProfile.user_id)
+        .join(role_link_sq, role_link_sq.c.user_id == User.user_id)
+        .join(Role, Role.role_id == role_link_sq.c.role_id)
+        .where(CaretakerProfile.user_id == user_id)
+        .where(User.status.is_(True))
+        .where(func.lower(Role.role_name) == "caretaker")
+    )
+
+
+async def _unassign_groups_for_caretaker_user(db: AsyncSession, user_id: UUID) -> int:
+    caretaker_id = await db.scalar(
+        select(CaretakerProfile.caretaker_id).where(CaretakerProfile.user_id == user_id)
+    )
+    if not caretaker_id:
+        return 0
+
+    groups = (
+        await db.execute(select(Group).where(Group.caretaker_id == caretaker_id))
+    ).scalars().all()
+    for group in groups:
+        group.caretaker_id = None
+    return len(groups)
+
+
+async def _deactivate_participant_group_memberships(db: AsyncSession, user_id: UUID) -> int:
+    participant_id = await db.scalar(
+        select(ParticipantProfile.participant_id).where(ParticipantProfile.user_id == user_id)
+    )
+    if not participant_id:
+        return 0
+
+    memberships = (
+        await db.execute(
+            select(GroupMember)
+            .where(GroupMember.participant_id == participant_id)
+            .where(GroupMember.left_at.is_(None))
+        )
+    ).scalars().all()
+    if not memberships:
+        return 0
+
+    now = datetime.now(timezone.utc)
+    for membership in memberships:
+        membership.left_at = now
+    return len(memberships)
+
+
+def _role_scoped_profile_fields(row) -> dict:
+    role_name = ((getattr(row, "role_name", None) or "")).strip().lower()
+    if role_name == "caretaker":
+        return {
+            "title": getattr(row, "title", None),
+            "credentials": getattr(row, "credentials", None),
+            "organization": getattr(row, "organization", None),
+            "department": getattr(row, "department", None),
+            "specialty": getattr(row, "specialty", None),
+            "bio": getattr(row, "bio", None),
+            "working_hours_start": getattr(row, "working_hours_start", None),
+            "working_hours_end": getattr(row, "working_hours_end", None),
+            "contact_preference": getattr(row, "contact_preference", None),
+            "available_days": getattr(row, "available_days", None),
+            "role_title": None,
+        }
+    if role_name == "researcher":
+        return {
+            "title": getattr(row, "researcher_title", None),
+            "credentials": getattr(row, "researcher_credentials", None),
+            "organization": getattr(row, "researcher_organization", None),
+            "department": getattr(row, "researcher_department", None),
+            "specialty": getattr(row, "researcher_specialty", None),
+            "bio": getattr(row, "researcher_bio", None),
+            "working_hours_start": None,
+            "working_hours_end": None,
+            "contact_preference": None,
+            "available_days": None,
+            "role_title": None,
+        }
+    if role_name == "admin":
+        return {
+            "title": getattr(row, "admin_title", None),
+            "credentials": None,
+            "organization": getattr(row, "admin_organization", None),
+            "department": getattr(row, "admin_department", None),
+            "specialty": None,
+            "bio": getattr(row, "admin_bio", None),
+            "working_hours_start": None,
+            "working_hours_end": None,
+            "contact_preference": getattr(row, "admin_contact_preference", None),
+            "available_days": None,
+            "role_title": getattr(row, "role_title", None),
+        }
+    return {
+        "title": None,
+        "credentials": None,
+        "organization": None,
+        "department": None,
+        "specialty": None,
+        "bio": None,
+        "working_hours_start": None,
+        "working_hours_end": None,
+        "contact_preference": None,
+        "available_days": None,
+        "role_title": None,
+    }
+
+
 def _normalize_user_search(search: str | None) -> str | None:
     normalized = (search or "").strip()
     return normalized or None
@@ -435,15 +594,20 @@ async def list_group_members_for_admin(
 
 
 async def list_caretakers(db: AsyncSession) -> List[CaretakerItem]:
-    """Return all users who have a caretaker profile."""
+    """Return active users whose current role is caretaker."""
     cached_payload = _caretakers_cache.get("payload")
     captured_at = float(_caretakers_cache.get("captured_at") or 0.0)
     if cached_payload is not None and _cache_valid(captured_at):
         return cached_payload  # type: ignore[return-value]
 
+    role_link_sq = _single_role_link_subquery()
     result = await db.execute(
         select(CaretakerProfile, User.first_name, User.last_name, User.email)
         .join(User, User.user_id == CaretakerProfile.user_id)
+        .join(role_link_sq, role_link_sq.c.user_id == User.user_id)
+        .join(Role, Role.role_id == role_link_sq.c.role_id)
+        .where(User.status.is_(True))
+        .where(func.lower(Role.role_name) == "caretaker")
     )
     rows = result.all()
     payload = [
@@ -468,11 +632,12 @@ async def assign_caretaker_to_group(
 ) -> AssignCaretakerResponse:
     """Assign a caretaker to a group. Raises error if Group already has a caretaker."""
 
-    caretaker = await db.scalar(
-        select(CaretakerProfile).where(CaretakerProfile.user_id == payload.user_id)
-    )
+    caretaker = await _get_caretaker_profile_if_assignable(db, payload.user_id)
     if not caretaker:
-        raise HTTPException(status_code=404, detail="No caretaker profile found for this user")
+        raise HTTPException(
+            status_code=404,
+            detail="This user is not an active caretaker and cannot be assigned to a group",
+        )
 
     group = await db.scalar(
         select(Group).where(Group.group_id == payload.group_id)
@@ -1027,6 +1192,7 @@ async def list_users(
 ) -> list[UserListItem]:
     """Return users with role/group/caretaker info. Supports pagination."""
     CaretakerUser = aliased(User)
+    UserCaretakerProfile = aliased(CaretakerProfile)
     user_ids_stmt = select(User.user_id).order_by(User.created_at.desc())
     if limit is not None:
         user_ids_stmt = user_ids_stmt.limit(limit).offset(offset)
@@ -1055,23 +1221,34 @@ async def list_users(
             }
 
     result = await db.execute(
-        select(
-            User.user_id,
-            User.first_name,
-            User.last_name,
-            User.email,
-            User.phone,
-            User.status,
-            User.locked_until,
-            User.created_at,
-            Role.role_name,
-            Group.group_id,
-            Group.name.label("group_name"),
-            CaretakerProfile.caretaker_id,
-            func.concat(CaretakerUser.first_name, " ", CaretakerUser.last_name).label("caretaker_name"),
-            ParticipantProfile.dob,
-            ParticipantProfile.gender,
-        )
+            select(
+                User.user_id,
+                User.first_name,
+                User.last_name,
+                User.email,
+                User.phone,
+                User.Address.label("address"),
+                User.status,
+                User.locked_until,
+                User.created_at,
+                Role.role_name,
+                Group.group_id,
+                Group.name.label("group_name"),
+                CaretakerProfile.caretaker_id,
+                func.concat(CaretakerUser.first_name, " ", CaretakerUser.last_name).label("caretaker_name"),
+                ParticipantProfile.dob,
+                ParticipantProfile.gender,
+                ParticipantProfile.pronouns,
+                ParticipantProfile.primary_language,
+                ParticipantProfile.country_of_origin,
+                ParticipantProfile.occupation_status,
+                ParticipantProfile.living_arrangement,
+                ParticipantProfile.highest_education_level,
+                ParticipantProfile.dependents,
+                ParticipantProfile.marital_status,
+                ParticipantProfile.onboarding_status,
+                ParticipantProfile.program_enrolled_at,
+            )
         .outerjoin(role_link_sq, role_link_sq.c.user_id == User.user_id)
         .outerjoin(Role, Role.role_id == role_link_sq.c.role_id)
         .outerjoin(ParticipantProfile, ParticipantProfile.user_id == User.user_id)
@@ -1091,6 +1268,7 @@ async def list_users(
             last_name=row.last_name,
             email=row.email,
             phone=row.phone,
+            address=row.address,
             role=row.role_name,
             status=row.status,
             locked_until=row.locked_until,
@@ -1101,6 +1279,16 @@ async def list_users(
             caretaker=row.caretaker_name.strip() if row.caretaker_name else None,
             dob=row.dob,
             gender=row.gender,
+            pronouns=row.pronouns,
+            primary_language=row.primary_language,
+            country_of_origin=row.country_of_origin,
+            occupation_status=row.occupation_status,
+            living_arrangement=row.living_arrangement,
+            highest_education_level=row.highest_education_level,
+            dependents=row.dependents,
+            marital_status=row.marital_status,
+            onboarding_status=row.onboarding_status,
+            program_enrolled_at=row.program_enrolled_at,
             anonymized_from=(deactivation_map.get(row.user_id, {}).get("details", {}) or {}).get("original_email"),
             self_deactivated_at=deactivation_map.get(row.user_id, {}).get("created_at"),
         )
@@ -1114,19 +1302,22 @@ async def _list_users_table_page(
     limit: int,
     offset: int,
     search: str | None = None,
+    sort_field: str = "joined",
+    sort_dir: str = "desc",
 ) -> list[UserListItem]:
-    """
-    Lean list query for admin table pages.
-    Keeps only fields needed in the list view and defers profile-heavy metadata
-    to single-user detail endpoints.
-    """
+    """Admin users page query, including lightweight profile details for side panel drawers."""
     CaretakerUser = aliased(User)
-    user_ids_stmt = _apply_user_search(
+    AssignedCaretakerProfile = aliased(CaretakerProfile)
+    UserCaretakerProfile = aliased(CaretakerProfile)
+    user_ids_stmt = _apply_user_ordering(
+        _apply_user_search(
         select(User.user_id)
-        .order_by(User.created_at.desc())
         .limit(limit)
         .offset(offset),
         search,
+        ),
+        sort_field=sort_field,
+        sort_dir=sort_dir,
     )
     user_ids = [row[0] for row in (await db.execute(user_ids_stmt)).all()]
     if not user_ids:
@@ -1141,22 +1332,60 @@ async def _list_users_table_page(
             User.last_name,
             User.email,
             User.phone,
+            User.Address.label("address"),
             User.status,
             User.locked_until,
             User.created_at,
             Role.role_name,
             Group.group_id,
             Group.name.label("group_name"),
-            CaretakerProfile.caretaker_id,
+            AssignedCaretakerProfile.caretaker_id,
             func.concat(CaretakerUser.first_name, " ", CaretakerUser.last_name).label("caretaker_name"),
+            ParticipantProfile.dob,
+            ParticipantProfile.gender,
+            ParticipantProfile.pronouns,
+            ParticipantProfile.primary_language,
+            ParticipantProfile.country_of_origin,
+            ParticipantProfile.occupation_status,
+            ParticipantProfile.living_arrangement,
+            ParticipantProfile.highest_education_level,
+            ParticipantProfile.dependents,
+            ParticipantProfile.marital_status,
+            ParticipantProfile.onboarding_status,
+            ParticipantProfile.program_enrolled_at,
+            UserCaretakerProfile.title,
+            UserCaretakerProfile.credentials,
+            UserCaretakerProfile.organization,
+            UserCaretakerProfile.department,
+            UserCaretakerProfile.specialty,
+            UserCaretakerProfile.bio,
+            UserCaretakerProfile.working_hours_start,
+            UserCaretakerProfile.working_hours_end,
+            UserCaretakerProfile.contact_preference,
+            UserCaretakerProfile.available_days,
+            ResearcherProfile.title.label("researcher_title"),
+            ResearcherProfile.credentials.label("researcher_credentials"),
+            ResearcherProfile.organization.label("researcher_organization"),
+            ResearcherProfile.department.label("researcher_department"),
+            ResearcherProfile.specialty.label("researcher_specialty"),
+            ResearcherProfile.bio.label("researcher_bio"),
+            AdminProfile.title.label("admin_title"),
+            AdminProfile.role_title,
+            AdminProfile.organization.label("admin_organization"),
+            AdminProfile.department.label("admin_department"),
+            AdminProfile.bio.label("admin_bio"),
+            AdminProfile.contact_preference.label("admin_contact_preference"),
         )
         .outerjoin(role_link_sq, role_link_sq.c.user_id == User.user_id)
         .outerjoin(Role, Role.role_id == role_link_sq.c.role_id)
         .outerjoin(ParticipantProfile, ParticipantProfile.user_id == User.user_id)
+        .outerjoin(UserCaretakerProfile, UserCaretakerProfile.user_id == User.user_id)
+        .outerjoin(ResearcherProfile, ResearcherProfile.user_id == User.user_id)
+        .outerjoin(AdminProfile, AdminProfile.user_id == User.user_id)
         .outerjoin(GroupMember, (GroupMember.participant_id == ParticipantProfile.participant_id) & (GroupMember.left_at == None))
         .outerjoin(Group, Group.group_id == GroupMember.group_id)
-        .outerjoin(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
-        .outerjoin(CaretakerUser, CaretakerUser.user_id == CaretakerProfile.user_id)
+        .outerjoin(AssignedCaretakerProfile, AssignedCaretakerProfile.caretaker_id == Group.caretaker_id)
+        .outerjoin(CaretakerUser, CaretakerUser.user_id == AssignedCaretakerProfile.user_id)
         .where(User.user_id.in_(user_ids))
         .order_by(User.created_at.desc())
     )
@@ -1169,6 +1398,7 @@ async def _list_users_table_page(
             last_name=row.last_name,
             email=row.email,
             phone=row.phone,
+            address=row.address,
             role=row.role_name,
             status=row.status,
             locked_until=row.locked_until,
@@ -1177,8 +1407,19 @@ async def _list_users_table_page(
             group=row.group_name,
             caretaker_id=row.caretaker_id,
             caretaker=row.caretaker_name.strip() if row.caretaker_name else None,
-            dob=None,
-            gender=None,
+            dob=row.dob,
+            gender=row.gender,
+            pronouns=row.pronouns,
+            primary_language=row.primary_language,
+            country_of_origin=row.country_of_origin,
+            occupation_status=row.occupation_status,
+            living_arrangement=row.living_arrangement,
+            highest_education_level=row.highest_education_level,
+            dependents=row.dependents,
+            marital_status=row.marital_status,
+            onboarding_status=row.onboarding_status,
+            program_enrolled_at=row.program_enrolled_at,
+            **_role_scoped_profile_fields(row),
             anonymized_from=None,
             self_deactivated_at=None,
         )
@@ -1199,6 +1440,7 @@ async def get_user_item(
 ) -> UserListItem | None:
     """Return a single user row with role/group/caretaker info."""
     CaretakerUser = aliased(User)
+    UserCaretakerProfile = aliased(CaretakerProfile)
 
     deactivation_row = (
         await db.execute(
@@ -1223,6 +1465,7 @@ async def get_user_item(
                 User.last_name,
                 User.email,
                 User.phone,
+                User.Address.label("address"),
                 User.status,
                 User.locked_until,
                 User.created_at,
@@ -1233,14 +1476,49 @@ async def get_user_item(
                 func.concat(CaretakerUser.first_name, " ", CaretakerUser.last_name).label("caretaker_name"),
                 ParticipantProfile.dob,
                 ParticipantProfile.gender,
+                ParticipantProfile.pronouns,
+                ParticipantProfile.primary_language,
+                ParticipantProfile.country_of_origin,
+                ParticipantProfile.occupation_status,
+                ParticipantProfile.living_arrangement,
+                ParticipantProfile.highest_education_level,
+                ParticipantProfile.dependents,
+                ParticipantProfile.marital_status,
+                ParticipantProfile.onboarding_status,
+                ParticipantProfile.program_enrolled_at,
+                UserCaretakerProfile.title,
+                UserCaretakerProfile.credentials,
+                UserCaretakerProfile.organization,
+                UserCaretakerProfile.department,
+                UserCaretakerProfile.specialty,
+                UserCaretakerProfile.bio,
+                UserCaretakerProfile.working_hours_start,
+                UserCaretakerProfile.working_hours_end,
+                UserCaretakerProfile.contact_preference,
+                UserCaretakerProfile.available_days,
+                ResearcherProfile.title.label("researcher_title"),
+                ResearcherProfile.credentials.label("researcher_credentials"),
+                ResearcherProfile.organization.label("researcher_organization"),
+                ResearcherProfile.department.label("researcher_department"),
+                ResearcherProfile.specialty.label("researcher_specialty"),
+                ResearcherProfile.bio.label("researcher_bio"),
+                AdminProfile.title.label("admin_title"),
+                AdminProfile.role_title,
+                AdminProfile.organization.label("admin_organization"),
+                AdminProfile.department.label("admin_department"),
+                AdminProfile.bio.label("admin_bio"),
+                AdminProfile.contact_preference.label("admin_contact_preference"),
             )
             .outerjoin(role_link_sq, role_link_sq.c.user_id == User.user_id)
             .outerjoin(Role, Role.role_id == role_link_sq.c.role_id)
             .outerjoin(ParticipantProfile, ParticipantProfile.user_id == User.user_id)
+            .outerjoin(UserCaretakerProfile, UserCaretakerProfile.user_id == User.user_id)
             .outerjoin(GroupMember, (GroupMember.participant_id == ParticipantProfile.participant_id) & (GroupMember.left_at == None))
             .outerjoin(Group, Group.group_id == GroupMember.group_id)
             .outerjoin(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
             .outerjoin(CaretakerUser, CaretakerUser.user_id == CaretakerProfile.user_id)
+            .outerjoin(ResearcherProfile, ResearcherProfile.user_id == User.user_id)
+            .outerjoin(AdminProfile, AdminProfile.user_id == User.user_id)
             .where(User.user_id == user_id)
             .limit(1)
         )
@@ -1255,6 +1533,7 @@ async def get_user_item(
         last_name=row.last_name,
         email=row.email,
         phone=row.phone,
+        address=row.address,
         role=row.role_name,
         status=row.status,
         locked_until=row.locked_until,
@@ -1265,6 +1544,17 @@ async def get_user_item(
         caretaker=row.caretaker_name.strip() if row.caretaker_name else None,
         dob=row.dob,
         gender=row.gender,
+        pronouns=row.pronouns,
+        primary_language=row.primary_language,
+        country_of_origin=row.country_of_origin,
+        occupation_status=row.occupation_status,
+        living_arrangement=row.living_arrangement,
+        highest_education_level=row.highest_education_level,
+        dependents=row.dependents,
+        marital_status=row.marital_status,
+        onboarding_status=row.onboarding_status,
+        program_enrolled_at=row.program_enrolled_at,
+        **_role_scoped_profile_fields(row),
         anonymized_from=deactivation_details.get("original_email"),
         self_deactivated_at=self_deactivated_at,
     )
@@ -1275,16 +1565,21 @@ async def list_users_paginated(
     limit: int = 50,
     offset: int = 0,
     search: str | None = None,
+    sort_field: str = "joined",
+    sort_dir: str = "desc",
 ) -> UserListPage:
     safe_limit = max(1, min(limit, 200))
     safe_offset = max(0, offset)
     normalized_search = _normalize_user_search(search)
+    normalized_sort_field, normalized_sort_dir = _normalize_user_sort(sort_field, sort_dir)
     total = await _get_users_total_cached(db, search=normalized_search)
     items = await _list_users_table_page(
         db,
         limit=safe_limit,
         offset=safe_offset,
         search=normalized_search,
+        sort_field=normalized_sort_field,
+        sort_dir=normalized_sort_dir,
     )
     return UserListPage(total=int(total), limit=safe_limit, offset=safe_offset, items=items)
 
@@ -1474,6 +1769,8 @@ async def update_user(user_id: UUID, payload: AdminUserUpdate, actor_id: UUID, d
         raise HTTPException(status_code=404, detail="User not found")
 
     requested_role = (payload.role or "").strip().lower() if payload.role else None
+    current_role_names: set[str] = set()
+    current_roles = []
 
     if payload.email and payload.email != user.email:
         existing = await db.scalar(select(User).where(User.email == payload.email))
@@ -1506,6 +1803,14 @@ async def update_user(user_id: UUID, payload: AdminUserUpdate, actor_id: UUID, d
             for _, role_name in current_roles
             if role_name
         }
+
+        if "caretaker" in current_role_names and requested_role != "caretaker":
+            groups_unassigned = await _unassign_groups_for_caretaker_user(db, user_id)
+            if groups_unassigned:
+                _invalidate_groups_cache()
+            _invalidate_caretakers_cache()
+        elif requested_role == "caretaker":
+            _invalidate_caretakers_cache()
 
         if requested_role not in current_role_names or len(current_roles) != 1:
             if current_roles:
@@ -1554,6 +1859,15 @@ async def update_user_status(user_id: UUID, status: str, actor_id: UUID, db: Asy
 
     new_status = status.lower() == "active"
     user.status = new_status
+
+    if not new_status:
+        memberships_closed = await _deactivate_participant_group_memberships(db, user_id)
+        if memberships_closed:
+            _invalidate_groups_cache()
+        groups_unassigned = await _unassign_groups_for_caretaker_user(db, user_id)
+        if groups_unassigned:
+            _invalidate_groups_cache()
+    _invalidate_caretakers_cache()
 
     from app.services.audit_service import write_audit_log
     await write_audit_log(
@@ -1682,6 +1996,14 @@ async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession
         return {"detail": "User anonymized successfully"}
 
     elif mode in ("delete", "permanent"):
+        owned_form_count = await db.scalar(
+            select(func.count(SurveyForm.form_id)).where(SurveyForm.created_by == user_id)
+        )
+        if owned_form_count:
+            raise HTTPException(
+                status_code=400,
+                detail="This user still owns forms. Use anonymize instead of permanent delete.",
+            )
         await db.delete(user)
         await write_audit_log(
             db,

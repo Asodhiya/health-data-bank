@@ -98,6 +98,10 @@ function App() {
               path="/admin/profile"
               element={<ProfilePage role="admin" />}
             />
+            <Route path="/admin/insights" element={<AdminInsightsPage />} />
+            <Route path="/admin/system-insights" element={<AdminInsightsPage />} />
+            <Route path="/admin/messages" element={<AdminMessagesPage />} />
+            <Route path="/admin/feedback" element={<AdminMessagesPage />} />
             <Route path="/surveys" element={<SurveyBuilderPage />} />
             <Route path="/users" element={<UserManagementPage />} />
             <Route path="/admin/users/:id" element={<UserDetailPage />} />

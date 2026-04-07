@@ -362,10 +362,12 @@ export const api = {
   // ── Admin: User Management ──
   adminListUsers: () => request("/admin_only/users"),
   adminGetUserById: (userId) => request(`/admin_only/users/by-id/${userId}`),
-  adminListUsersPaged: async (limit = 50, offset = 0, search = "") => {
+  adminListUsersPaged: async (limit = 50, offset = 0, search = "", sortField = "joined", sortDir = "desc") => {
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
+      sort_field: String(sortField || "joined"),
+      sort_dir: String(sortDir || "desc"),
     });
     if (String(search || "").trim()) {
       params.set("search", String(search).trim());
@@ -384,6 +386,25 @@ export const api = {
             return haystack.includes(normalizedSearch);
           })
         : list;
+      const safeField = String(sortField || "joined").toLowerCase();
+      const safeDir = String(sortDir || "desc").toLowerCase() === "asc" ? 1 : -1;
+      filtered.sort((a, b) => {
+        switch (safeField) {
+          case "name":
+            return safeDir * `${a?.first_name || ""} ${a?.last_name || ""}`.localeCompare(`${b?.first_name || ""} ${b?.last_name || ""}`);
+          case "email":
+            return safeDir * String(a?.email || "").localeCompare(String(b?.email || ""));
+          case "status":
+            return safeDir * String(Boolean(a?.status)).localeCompare(String(Boolean(b?.status)));
+          case "role":
+            return safeDir * String(a?.role || "").localeCompare(String(b?.role || ""));
+          case "group":
+            return safeDir * String(a?.group || "").localeCompare(String(b?.group || ""));
+          case "joined":
+          default:
+            return safeDir * (new Date(a?.joined_at || 0) - new Date(b?.joined_at || 0));
+        }
+      });
       const safeOffset = Math.max(0, Number(offset) || 0);
       const safeLimit = Math.max(1, Number(limit) || 50);
       return {
@@ -810,6 +831,11 @@ export const api = {
 
   // ── Participant: Profile ──
   participantGetProfile: () => request("/participant/profile"),
+  participantUpdateProfile: (payload) =>
+    request("/participant/profile", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
 
   // ── Participant: Surveys ──
   getAssignedSurveys: () => request("/participant/surveys/assigned"),

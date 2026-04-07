@@ -50,6 +50,7 @@ function transformUser(u) {
     lastName: u.last_name || "",
     email: u.email || "",
     phone: u.phone || "",
+    address: u.address || "",
     role: u.role || "",
     status: u.status === true ? "active" : "inactive",
     joinedAt: u.joined_at || null,
@@ -59,6 +60,27 @@ function transformUser(u) {
     caretaker: u.caretaker || null,
     dob: u.dob || null,
     gender: u.gender || null,
+    pronouns: u.pronouns || null,
+    primaryLanguage: u.primary_language || null,
+    countryOfOrigin: u.country_of_origin || null,
+    maritalStatus: u.marital_status || null,
+    highestEducation: u.highest_education_level || null,
+    occupationStatus: u.occupation_status || null,
+    dependents: u.dependents ?? null,
+    livingArrangement: u.living_arrangement || null,
+    onboardingStatus: u.onboarding_status || null,
+    programEnrolledAt: u.program_enrolled_at || null,
+    title: u.title || null,
+    credentials: u.credentials || null,
+    organization: u.organization || null,
+    department: u.department || null,
+    specialty: u.specialty || null,
+    bio: u.bio || null,
+    workingHoursStart: u.working_hours_start || null,
+    workingHoursEnd: u.working_hours_end || null,
+    contactPreference: u.contact_preference || null,
+    availableDays: Array.isArray(u.available_days) ? u.available_days : [],
+    roleTitle: u.role_title || null,
     anonymizedFrom: u.anonymized_from || null,
     selfDeactivatedAt: u.self_deactivated_at || null,
     lockedUntil: u.locked_until || null,
@@ -361,10 +383,11 @@ function UserDrawer({ user, users, groups, caretakers, onClose, onEdit, onDeacti
     <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0"><h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider">User Details</h2><button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100"><IconX /></button></div>
     <div className="flex-1 overflow-y-auto">
       <div className="px-5 py-5 border-b border-slate-100 flex items-center gap-4"><Avatar name={`${user.firstName} ${user.lastName}`} size="lg" /><div className="min-w-0"><p className="text-lg font-bold text-slate-800">{user.firstName} {user.lastName}</p><p className="text-xs text-slate-400 truncate">{user.email}</p><div className="flex items-center gap-2 mt-1.5 flex-wrap"><RoleBadge role={user.role} /><StatusDot status={user.status} /><span className="text-xs text-slate-400 capitalize">{user.status}</span>{locked && <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full uppercase">Locked</span>}{isAnonymized && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full uppercase">Anonymized</span>}</div></div></div>
-      <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Account</p><InfoRow label="Phone" value={user.phone} /><InfoRow label="Joined" value={fmt(user.joinedAt)} /><InfoRow label="Lock status" value={locked ? `Locked until ${fmtTime(user.lockedUntil)}` : "Not locked"} /></div>
+      <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Account</p><InfoRow label="Phone" value={user.phone} /><InfoRow label="Address" value={user.address} /><InfoRow label="Joined" value={fmt(user.joinedAt)} /><InfoRow label="Lock status" value={locked ? `Locked until ${fmtTime(user.lockedUntil)}` : "Not locked"} /></div>
 
       {user.role === "participant" && <>
-        <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Profile</p><InfoRow label="DOB" value={fmt(user.dob)} /><InfoRow label="Gender" value={user.gender} /></div>
+        <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Profile</p><InfoRow label="DOB" value={fmt(user.dob)} /><InfoRow label="Gender" value={user.gender} /><InfoRow label="Pronouns" value={user.pronouns} /><InfoRow label="Language" value={user.primaryLanguage} /><InfoRow label="Country of Origin" value={user.countryOfOrigin} /></div>
+        <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Demographics</p><InfoRow label="Marital Status" value={user.maritalStatus} /><InfoRow label="Education" value={user.highestEducation} /><InfoRow label="Employment" value={user.occupationStatus} /><InfoRow label="Dependents" value={user.dependents != null ? String(user.dependents) : null} /><InfoRow label="Living Arrangement" value={user.livingArrangement} /><InfoRow label="Onboarding" value={user.onboardingStatus} /><InfoRow label="Enrolled" value={fmtTime(user.programEnrolledAt)} /></div>
         <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Group</p>{grp ? <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex items-center justify-between"><div><p className="text-sm font-bold text-emerald-800">{grp.name}</p><p className="text-xs text-emerald-600 mt-0.5">{grp.description}</p></div><button onClick={() => onChangeGroup([user])} className="text-xs font-semibold text-blue-600 shrink-0">Change</button></div> : <div className="flex items-center justify-between"><p className="text-xs text-slate-400 italic">Not assigned</p><button onClick={() => onChangeGroup([user])} className="text-xs font-semibold text-blue-600">Assign</button></div>}</div>
         <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Caretaker</p>{ct ? <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3"><Avatar name={`${ct.firstName} ${ct.lastName}`} size="sm" /><div><p className="text-sm font-semibold text-slate-800">{ct.firstName} {ct.lastName}</p><p className="text-xs text-slate-400">{ct.title} · {ct.organization}</p></div></div> : <p className="text-xs text-slate-400 italic">No caretaker</p>}</div>
 
@@ -384,11 +407,25 @@ function UserDrawer({ user, users, groups, caretakers, onClose, onEdit, onDeacti
       </>}
 
       {user.role === "caretaker" && <>
-        <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Professional</p><InfoRow label="Title" value={user.title} /><InfoRow label="Organization" value={user.organization} /></div>
+        <div className="px-5 py-4 border-b border-slate-100">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Professional</p>
+          <InfoRow label="Title" value={user.title} />
+          <InfoRow label="Credentials" value={user.credentials} />
+          <InfoRow label="Organization" value={user.organization} />
+          <InfoRow label="Department" value={user.department} />
+          <InfoRow label="Specialty" value={user.specialty} />
+          <InfoRow label="Bio" value={user.bio} />
+        </div>
+        <div className="px-5 py-4 border-b border-slate-100">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Availability</p>
+          <InfoRow label="Hours" value={user.workingHoursStart && user.workingHoursEnd ? `${user.workingHoursStart} - ${user.workingHoursEnd}` : null} />
+          <InfoRow label="Days" value={user.availableDays.length ? user.availableDays.join(", ") : null} />
+          <InfoRow label="Contact Preference" value={user.contactPreference} />
+        </div>
         <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Participants ({managed.length})</p>{managed.length === 0 ? <p className="text-xs text-slate-400 italic">No participants linked yet</p> : <div className="space-y-2">{managed.map(p => <div key={p.id} className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-xl p-3"><Avatar name={`${p.firstName} ${p.lastName}`} size="sm" /><div className="flex-1 min-w-0"><p className="text-sm font-semibold text-slate-700 truncate">{p.firstName} {p.lastName}</p><p className="text-xs text-slate-400">{p.group || "No group"}</p></div><StatusDot status={p.status} /></div>)}</div>}</div>
       </>}
-      {user.role === "researcher" && <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Research</p><InfoRow label="Institution" value={user.institution} /><InfoRow label="Department" value={user.department} /><InfoRow label="Surveys" value={user.surveysCreated} /></div>}
-      {user.role === "admin" && <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Admin</p><div className="bg-rose-50 border border-rose-100 rounded-xl p-3"><p className="text-xs font-semibold text-rose-700">Full platform access</p></div></div>}
+      {user.role === "researcher" && <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Research</p><InfoRow label="Title" value={user.title} /><InfoRow label="Credentials" value={user.credentials} /><InfoRow label="Organization" value={user.organization} /><InfoRow label="Department" value={user.department} /><InfoRow label="Specialty" value={user.specialty} /><InfoRow label="Bio" value={user.bio} /></div>}
+      {user.role === "admin" && <div className="px-5 py-4 border-b border-slate-100"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Admin</p><InfoRow label="Title" value={user.title} /><InfoRow label="Role Title" value={user.roleTitle} /><InfoRow label="Organization" value={user.organization} /><InfoRow label="Department" value={user.department} /><InfoRow label="Bio" value={user.bio} /><InfoRow label="Contact Preference" value={user.contactPreference} /></div>}
     </div>
     <div className="px-5 py-4 border-t border-slate-100 bg-slate-50 space-y-2 shrink-0">
       <button onClick={() => { onClose(); navigate(`/admin/users/${user.id}`); }} className="w-full py-2.5 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 flex items-center justify-center gap-2"><Ic d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" c="h-4 w-4" /> View Full Details</button>
@@ -530,7 +567,7 @@ export default function UserManagementPage() {
     const [groupsRes, caretakersRes, usersPageRes, invitesRes, roleStatsRes] = await Promise.allSettled([
       api.adminGetGroups(),
       api.adminGetCaretakers(),
-      api.adminListUsersPaged(USERS_PAGE_SIZE, 0, ""),
+      api.adminListUsersPaged(USERS_PAGE_SIZE, 0, "", sort.field, sort.dir),
       api.adminListInvites(INVITES_PAGE_SIZE, 0),
       api.adminGetRoleGroupStats(),
     ]);
@@ -597,9 +634,17 @@ export default function UserManagementPage() {
       setRoleTotals({});
     }
     setLoading(false);
-  }, []);
+  }, [sort.dir, sort.field]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (!detailUser?.id) return;
+    const refreshedUser = users.find((u) => u.id === detailUser.id);
+    if (refreshedUser) {
+      setDetailUser(refreshedUser);
+    }
+  }, [users, detailUser?.id]);
 
   useEffect(() => {
     if (!didRunSearchSync.current) {
@@ -611,7 +656,7 @@ export default function UserManagementPage() {
     const syncUsersForSearch = async () => {
       setLoading(true);
       try {
-        const page = await api.adminListUsersPaged(USERS_PAGE_SIZE, 0, debouncedSearch);
+        const page = await api.adminListUsersPaged(USERS_PAGE_SIZE, 0, debouncedSearch, sort.field, sort.dir);
         if (cancelled) return;
         const mapped = Array.isArray(page?.items) ? page.items.map(transformUser) : [];
         const seen = new Set();
@@ -636,13 +681,13 @@ export default function UserManagementPage() {
 
     syncUsersForSearch();
     return () => { cancelled = true; };
-  }, [debouncedSearch]);
+  }, [debouncedSearch, sort.dir, sort.field]);
 
   const loadMoreUsers = useCallback(async () => {
     if (usersLoadingMore || usersOffset >= usersTotal) return;
     setUsersLoadingMore(true);
     try {
-      const page = await api.adminListUsersPaged(USERS_PAGE_SIZE, usersOffset, debouncedSearch);
+      const page = await api.adminListUsersPaged(USERS_PAGE_SIZE, usersOffset, debouncedSearch, sort.field, sort.dir);
       const mapped = Array.isArray(page?.items) ? page.items.map(transformUser) : [];
       const uniquePage = [];
       {
@@ -670,7 +715,7 @@ export default function UserManagementPage() {
     } finally {
       setUsersLoadingMore(false);
     }
-  }, [debouncedSearch, usersLoadingMore, usersOffset, usersTotal]);
+  }, [debouncedSearch, sort.dir, sort.field, usersLoadingMore, usersOffset, usersTotal]);
 
   const loadMoreInvites = useCallback(async () => {
     if (invitesLoadingMore || !invitesHasMore) return;
@@ -760,20 +805,8 @@ export default function UserManagementPage() {
       return list;
     }
 
-    const dir = sort.dir === "asc" ? 1 : -1;
-    list.sort((a, b) => {
-      switch (sort.field) {
-        case "name": return dir * `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
-        case "email": return dir * (a.email || "").localeCompare(b.email || "");
-        case "status": return dir * (a.status || "").localeCompare(b.status || "");
-        case "role": return dir * (a.role || "").localeCompare(b.role || "");
-        case "joined": return dir * (new Date(a.joinedAt || 0) - new Date(b.joinedAt || 0));
-        case "group": return dir * (a.group || "").localeCompare(b.group || "");
-        default: return 0;
-      }
-    });
     return list;
-  }, [users, search, activeRole, filterStatus, filterGroup, filterCaretaker, sort]);
+  }, [users, search, activeRole, filterStatus, filterGroup, filterCaretaker]);
 
   const filteredInvites = useMemo(() => {
     const now = Date.now();
@@ -823,10 +856,30 @@ export default function UserManagementPage() {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleDeleteGroup = async (g) => { try { await api.adminDeleteGroup(g.group_id); setGroups(p => p.filter(x => x.group_id !== g.group_id)); setGroupMembersByGroup(prev => { const next = { ...prev }; delete next[g.group_id]; return next; }); msg(`"${g.name}" deleted.`); } catch (err) { msg(err.message || "Failed.", "error"); } };
-  const handleDeactivate = async (u) => { setDeactivateLoading(true); try { await api.adminUpdateUserStatus(u.id, "inactive"); } catch {} setUsers(p => p.map(x => x.id === u.id ? { ...x, status: "inactive" } : x)); if (detailUser?.id === u.id) setDetailUser(p => ({ ...p, status: "inactive" })); setDeactivateLoading(false); setDeactivateTarget(null); msg(`${u.firstName} deactivated.`); };
+  const handleDeactivate = async (u) => {
+    setDeactivateLoading(true);
+    try {
+      await api.adminUpdateUserStatus(u.id, "inactive");
+      await fetchData();
+      msg(`${u.firstName} deactivated.`);
+    } catch (err) {
+      msg(err.message || "Failed to deactivate user.", "error");
+    } finally {
+      setDeactivateLoading(false);
+      setDeactivateTarget(null);
+    }
+  };
   const handleReactivate = (u) => {
     if (u.email?.startsWith("deleted_")) { setReactivateAnonymizedTarget(u); return; }
-    (async () => { try { await api.adminUpdateUserStatus(u.id, "active"); } catch {} setUsers(p => p.map(x => x.id === u.id ? { ...x, status: "active" } : x)); if (detailUser?.id === u.id) setDetailUser(p => ({ ...p, status: "active" })); msg(`${u.firstName} reactivated.`); })();
+    (async () => {
+      try {
+        await api.adminUpdateUserStatus(u.id, "active");
+        await fetchData();
+        msg(`${u.firstName} reactivated.`);
+      } catch (err) {
+        msg(err.message || "Failed to reactivate user.", "error");
+      }
+    })();
   };
   const handleUnlock = async (u) => {
     try {
@@ -916,12 +969,11 @@ export default function UserManagementPage() {
   const handleChangeRole = async (user, newRole) => {
     try {
       await api.adminUpdateUser(user.id, { role: newRole });
+      await fetchData();
     } catch (err) {
       msg(err.message || "Failed to change role.", "error");
       return;
     }
-    setUsers(p => p.map(u => u.id === user.id ? { ...u, role: newRole } : u));
-    if (detailUser?.id === user.id) setDetailUser(p => ({ ...p, role: newRole }));
     setChangeRoleTarget(null);
     msg(`${user.firstName} is now a ${newRole}.`);
   };

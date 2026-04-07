@@ -401,9 +401,18 @@ async def get_users_paged(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     search: str | None = Query(default=None),
+    sort_field: str = Query(default="joined"),
+    sort_dir: str = Query(default="desc"),
     db: AsyncSession = Depends(get_db),
 ):
-    return await list_users_paginated(db, limit=limit, offset=offset, search=search)
+    return await list_users_paginated(
+        db,
+        limit=limit,
+        offset=offset,
+        search=search,
+        sort_field=sort_field,
+        sort_dir=sort_dir,
+    )
 
 
 @router.patch("/users/{user_id}", dependencies=[Depends(require_permissions(USER_WRITE))])

@@ -148,6 +148,7 @@ export default function IntakePage() {
   const [countryOfOrigin, setCountryOfOrigin] = useState('');
 
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   /* ── DOB constraints: must be ≥ 18 years old, no future dates ── */
   const today = new Date();
@@ -191,11 +192,12 @@ export default function IntakePage() {
   };
 
   const handleSubmit = async () => {
-    if (!isValid()) {
+    if (!isValid() || isSubmitting) {
       setError('Please complete all required fields before submitting.');
       return;
     }
     setError('');
+    setIsSubmitting(true);
 
     const profile = {
       dob,
@@ -218,7 +220,13 @@ export default function IntakePage() {
       await refetch(); // refresh auth context so intake_completed becomes true
       navigate('/participant');
     } catch (err) {
-      setError(err.message || 'Failed to submit. Please try again.');
+      if (err?.status === 409) {
+        setError('This intake form was already submitted for your account. Please sign out and back in if the page did not update.');
+      } else {
+        setError(err.message || 'Failed to submit. Please try again.');
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -413,14 +421,14 @@ export default function IntakePage() {
         <button
           type="button"
           className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-colors ${
-            isValid()
+            isValid() && !isSubmitting
               ? 'bg-blue-600 hover:bg-blue-700 text-white'
               : 'bg-slate-100 text-slate-400 cursor-not-allowed'
           }`}
-          disabled={!isValid()}
+          disabled={!isValid() || isSubmitting}
           onClick={handleSubmit}
         >
-          Submit &amp; Complete Onboarding
+          {isSubmitting ? 'Submitting...' : 'Submit &amp; Complete Onboarding'}
         </button>
       </div>
     </>

@@ -29,11 +29,9 @@ const CalendarIcon    = () => <Ico size={16} d={<><rect x="3" y="4" width="18" h
 const MapPinIcon      = () => <Ico size={16} d={<><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></>} />;
 const EditIcon        = () => <Ico size={14} d={<><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></>} />;
 const CheckIcon       = () => <Ico size={14} d={<polyline points="20 6 9 17 4 12" />} sw={2} />;
-const ShieldIcon      = () => <Ico size={16} d={<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />} />;
 const LockIcon        = () => <Ico size={16} d={<><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>} />;
 const EyeIcon         = () => <Ico size={16} d={<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></>} />;
 const EyeOffIcon      = () => <Ico size={16} d={<><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>} />;
-const BellIcon        = () => <Ico size={16} d={<><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>} />;
 const CheckCircleIcon = () => <Ico size={16} d={<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></>} stroke="#16a34a" />;
 const BriefcaseIcon   = () => <Ico size={16} d={<><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /></>} />;
 const BookIcon        = () => <Ico size={16} d={<><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15z" /></>} />;
@@ -79,7 +77,7 @@ const DEV_PROFILES = {
     program_group: 'Group 7 — Connections for Healthy Living',
     caretaker: 'Dr. William Montelpare',
     created_at: 'Nov 20, 2025', last_login: 'Feb 5, 2026 at 2:34 PM',
-    mfa_enabled: true, enrolled_at: 'Dec 1, 2025',
+    enrolled_at: 'Dec 1, 2025',
   },
   caretaker: {
     first_name: 'William', last_name: 'Montelpare',
@@ -102,7 +100,7 @@ const DEV_PROFILES = {
     availableDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
     contactPreference: 'email',
     created_at: 'Oct 5, 2025', last_login: 'Feb 5, 2026 at 10:12 AM',
-    mfa_enabled: true, enrolled_at: 'Oct 5, 2025',
+    enrolled_at: 'Oct 5, 2025',
   },
   researcher: {
     first_name: 'Sarah', last_name: 'Chen',
@@ -111,12 +109,13 @@ const DEV_PROFILES = {
     language: '',
     living_arrangement: '', dependents: 0, occupation_status: '',
     marital_status: '', highest_education_level: '',
-    title: '', organization: '',
-    department: 'Applied Health Sciences', research_pattern: 'Community wellness longitudinal studies',
+    title: 'Dr.', organization: 'UPEI Faculty of Science',
+    department: 'Applied Health Sciences', specialty: 'Community wellness longitudinal studies',
+    credentials: 'PhD', bio: '',
     username: 'sarah_research',
     program_group: '', caretaker: '',
     created_at: 'Oct 10, 2025', last_login: 'Feb 4, 2026 at 3:45 PM',
-    mfa_enabled: true, enrolled_at: 'Oct 10, 2025',
+    enrolled_at: 'Oct 10, 2025',
   },
   admin: {
     first_name: 'Admin', last_name: 'User',
@@ -125,11 +124,12 @@ const DEV_PROFILES = {
     language: '',
     living_arrangement: '', dependents: 0, occupation_status: '',
     marital_status: '', highest_education_level: '',
-    title: '', organization: '', department: '', research_pattern: '',
+    title: 'Ms.', organization: 'Health Data Bank', department: 'Operations',
+    role_title: 'System Administrator', bio: '', contactPreference: 'email',
     username: 'sys_admin',
     program_group: '', caretaker: '',
     created_at: 'Sep 1, 2025', last_login: 'Feb 5, 2026 at 8:00 AM',
-    mfa_enabled: true, enrolled_at: 'Sep 1, 2025',
+    enrolled_at: 'Sep 1, 2025',
   },
 };
 
@@ -141,7 +141,7 @@ const EMPTY_PROFILE = {
   language: '', country_of_origin: '',
   living_arrangement: '', dependents: 0, occupation_status: '',
   marital_status: '', highest_education_level: '',
-  title: '', organization: '', department: '', research_pattern: '',
+  title: '', organization: '', department: '', role_title: '',
   specialty: '', credentials: '', bio: '',
   username: '', program_group: '', caretaker: '',
   groupName: '', participantCount: 0, activeParticipants: 0,
@@ -149,7 +149,7 @@ const EMPTY_PROFILE = {
   workingHours: { start: '09:00', end: '17:00' },
   availableDays: [],
   contactPreference: 'email',
-  created_at: '', last_login: '', mfa_enabled: false, enrolled_at: '',
+  created_at: '', last_login: '', enrolled_at: '',
 };
 
 
@@ -227,18 +227,6 @@ function PasswordField({ label, placeholder, value, show, onToggle, onChange }) 
     </div>
   );
 }
-
-function ToggleSwitch({ checked, onChange }) {
-  return (
-    <button type="button" role="switch" aria-checked={checked}
-      className={`relative w-11 h-6 rounded-full transition-colors ${checked ? 'bg-blue-600' : 'bg-slate-200'}`}
-      onClick={onChange}
-    >
-      <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform ${checked ? 'translate-x-5' : 'translate-x-0'}`} />
-    </button>
-  );
-}
-
 
 /* ══════════════════════════════════════════════
    ROLE-SPECIFIC FIELD BLOCKS
@@ -425,19 +413,81 @@ function ResearcherFields({ form, set, editing, profile }) {
       <hr className="border-slate-100 my-5" />
       <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Research Information</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+        <div className="mb-3.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">TITLE</span>
+          {editing
+            ? <ChipSelect options={['Dr.', 'Prof.', 'Mr.', 'Ms.', 'Mx.']} value={form.title} onChange={set('title')} />
+            : <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{profile.title || '—'}</span>}
+        </div>
+        <ProfileField icon={null} label="CREDENTIALS"
+          value={editing ? form.credentials : profile.credentials}
+          editing={editing} onChange={set('credentials')} placeholder="e.g. PhD, MSc" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+        <ProfileField icon={<BriefcaseIcon />} label="ORGANIZATION"
+          value={editing ? form.organization : profile.organization}
+          editing={editing} onChange={set('organization')} />
         <ProfileField icon={<BookIcon />} label="DEPARTMENT"
           value={editing ? form.department : profile.department}
           editing={editing} onChange={set('department')} />
-        <ProfileField icon={null} label="RESEARCH FOCUS"
-          value={editing ? form.research_pattern : profile.research_pattern}
-          editing={editing} onChange={set('research_pattern')} />
+      </div>
+      <ProfileField icon={null} label="RESEARCH FOCUS"
+        value={editing ? form.specialty : profile.specialty}
+        editing={editing} onChange={set('specialty')} placeholder="e.g. Community Health, Aging, Exercise Science" />
+      <div className="mb-3.5">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">BIO</span>
+        {editing ? (
+          <textarea className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+            rows={3} value={form.bio || ''} onChange={(e) => set('bio')(e.target.value)} placeholder="Tell participants and colleagues about your research background…" />
+        ) : (
+          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 whitespace-pre-wrap">{profile.bio || '—'}</span>
+        )}
       </div>
     </>
   );
 }
 
-function AdminFields() {
-  return null;
+function AdminFields({ form, set, editing, profile }) {
+  return (
+    <>
+      <hr className="border-slate-100 my-5" />
+      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Administrative Information</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+        <div className="mb-3.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">TITLE</span>
+          {editing
+            ? <ChipSelect options={['Mr.', 'Ms.', 'Mrs.', 'Mx.', 'Dr.', 'Prof.']} value={form.title} onChange={set('title')} />
+            : <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{profile.title || '—'}</span>}
+        </div>
+        <ProfileField icon={null} label="ROLE TITLE"
+          value={editing ? form.role_title : profile.role_title}
+          editing={editing} onChange={set('role_title')} placeholder="e.g. System Administrator" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+        <ProfileField icon={<BriefcaseIcon />} label="ORGANIZATION"
+          value={editing ? form.organization : profile.organization}
+          editing={editing} onChange={set('organization')} />
+        <ProfileField icon={<BookIcon />} label="DEPARTMENT"
+          value={editing ? form.department : profile.department}
+          editing={editing} onChange={set('department')} />
+      </div>
+      <div className="mb-3.5">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">BIO</span>
+        {editing ? (
+          <textarea className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+            rows={3} value={form.bio || ''} onChange={(e) => set('bio')(e.target.value)} placeholder="A brief description of your role and responsibilities…" />
+        ) : (
+          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 whitespace-pre-wrap">{profile.bio || '—'}</span>
+        )}
+      </div>
+      <div className="mb-3.5">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">CONTACT PREFERENCE</span>
+        {editing
+          ? <ChipSelect options={['Email', 'Phone', 'In-App']} value={form.contactPreference === 'in_app' ? 'In-App' : (form.contactPreference || 'email').charAt(0).toUpperCase() + (form.contactPreference || 'email').slice(1)} onChange={(v) => set('contactPreference')(v === 'In-App' ? 'in_app' : v.toLowerCase())} />
+          : <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{profile.contactPreference === 'in_app' ? 'In-App' : (profile.contactPreference || '—')}</span>}
+      </div>
+    </>
+  );
 }
 
 
@@ -465,6 +515,55 @@ function PersonalInfoSection({ profile, onSave, role }) {
         phone_number: cleaned.phone || undefined,
         address: cleaned.address || undefined,
       });
+      if (role === 'participant') {
+        await api.participantUpdateProfile({
+          dob: cleaned.dob || undefined,
+          gender: cleaned.sex || undefined,
+          pronouns: cleaned.pronouns === 'Other' ? (cleaned.pronounsCustom || 'Other') : (cleaned.pronouns || undefined),
+          primary_language: cleaned.language || undefined,
+          country_of_origin: cleaned.country_of_origin || undefined,
+          living_arrangement: cleaned.living_arrangement || undefined,
+          dependents: cleaned.dependents,
+          occupation_status: cleaned.occupation_status || undefined,
+          marital_status: cleaned.marital_status || undefined,
+          highest_education_level: cleaned.highest_education_level || undefined,
+          address: cleaned.address || undefined,
+        });
+      }
+      if (role === 'caretaker') {
+        await api.caretakerUpdateProfile({
+          title: cleaned.title || null,
+          credentials: cleaned.credentials || null,
+          organization: cleaned.organization || null,
+          department: cleaned.department || null,
+          specialty: cleaned.specialty || null,
+          bio: cleaned.bio || null,
+          working_hours_start: cleaned.workingHours?.start || null,
+          working_hours_end: cleaned.workingHours?.end || null,
+          contact_preference: cleaned.contactPreference || null,
+          available_days: cleaned.availableDays || [],
+        });
+      }
+      if (role === 'researcher') {
+        await api.researcherUpdateProfile({
+          title: cleaned.title || null,
+          credentials: cleaned.credentials || null,
+          organization: cleaned.organization || null,
+          department: cleaned.department || null,
+          specialty: cleaned.specialty || null,
+          bio: cleaned.bio || null,
+        });
+      }
+      if (role === 'admin') {
+        await api.adminUpdateProfile({
+          title: cleaned.title || null,
+          role_title: cleaned.role_title || null,
+          department: cleaned.department || null,
+          organization: cleaned.organization || null,
+          bio: cleaned.bio || null,
+          contact_preference: cleaned.contactPreference || null,
+        });
+      }
       onSave(cleaned);
       setEditing(false);
     } catch (err) {
@@ -562,7 +661,7 @@ function AccountDetailsSection({ profile, role }) {
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-5">
       <div className="flex items-center gap-2 mb-5">
-        <span className="text-blue-600"><ShieldIcon /></span>
+        <span className="text-blue-600"><UserIcon /></span>
         <h2 className="text-base font-bold text-slate-800">Account Details</h2>
       </div>
       {role === 'caretaker' && (
@@ -588,13 +687,6 @@ function AccountDetailsSection({ profile, role }) {
             <span className="text-sm text-slate-700 font-medium">{d.value}</span>
           </div>
         ))}
-        <div className="flex items-center justify-between py-3">
-          <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">MFA Status</span>
-          <span className={`flex items-center gap-1.5 text-xs font-bold ${profile.mfa_enabled ? 'text-emerald-600' : 'text-slate-400'}`}>
-            <span className={`w-2 h-2 rounded-full ${profile.mfa_enabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-            {profile.mfa_enabled ? 'Enabled' : 'Disabled'}
-          </span>
-        </div>
       </div>
     </div>
   );
@@ -657,145 +749,12 @@ function ChangePasswordSection() {
   );
 }
 
-function SecuritySection() {
-  const [mfaEnabled, setMfaEnabled] = useState(true);
-  return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-5">
-      <div className="flex items-center gap-2 mb-5">
-        <span className="text-blue-600"><ShieldIcon /></span>
-        <h2 className="text-base font-bold text-slate-800">Security</h2>
-      </div>
-      <div className="flex items-center justify-between py-3 border-b border-slate-50">
-        <span className="text-sm text-slate-600">Multi-Factor Authentication (MFA)</span>
-        <ToggleSwitch checked={mfaEnabled} onChange={() => setMfaEnabled(!mfaEnabled)} />
-      </div>
-      {mfaEnabled && (
-        <div className="flex items-center gap-2 text-emerald-600 text-xs font-medium mt-3 bg-emerald-50 border border-emerald-100 rounded-lg px-4 py-2.5">
-          <CheckCircleIcon /> <span>MFA is active via email verification</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NotificationsSection({ role }) {
-  const [prefs, setPrefs] = useState({
-    email: true, survey: true, weekly: false, receiveResults: true,
-    newSubmission: true, flagAlerts: true, goalDeadlines: true,
-    weeklyGroupSummary: true, participantInactivity: true,
-    inviteAccepted: true, monthlyReport: false,
-  });
-  const toggle = (key) => () => setPrefs({ ...prefs, [key]: !prefs[key] });
-  return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-5">
-      <div className="flex items-center gap-2 mb-5">
-        <span className="text-blue-600"><BellIcon /></span>
-        <h2 className="text-base font-bold text-slate-800">Notifications</h2>
-      </div>
-      <div className="flex items-center justify-between py-3 border-b border-slate-50">
-        <span className="text-sm text-slate-600">Email notifications</span>
-        <ToggleSwitch checked={prefs.email} onChange={toggle('email')} />
-      </div>
-      {role !== 'caretaker' && (
-        <>
-          <div className="flex items-center justify-between py-3 border-b border-slate-50">
-            <span className="text-sm text-slate-600">Survey reminders</span>
-            <ToggleSwitch checked={prefs.survey} onChange={toggle('survey')} />
-          </div>
-          <div className="flex items-center justify-between py-3">
-            <span className="text-sm text-slate-600">Weekly progress report</span>
-            <ToggleSwitch checked={prefs.weekly} onChange={toggle('weekly')} />
-          </div>
-        </>
-      )}
-      {role === 'participant' && (
-        <>
-          <div className="border-t border-slate-100 mt-3 pt-3 mb-1">
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Study</span>
-          </div>
-          <div className="flex items-center justify-between py-3">
-            <div>
-              <span className="text-sm text-slate-600">Receive study results</span>
-              <p className="text-xs text-slate-400 mt-0.5">Get notified when study results are available</p>
-            </div>
-            <ToggleSwitch checked={prefs.receiveResults} onChange={toggle('receiveResults')} />
-          </div>
-        </>
-      )}
-      {role === 'caretaker' && (
-        <>
-          <div className="border-t border-slate-100 mt-4 pt-4 mb-2">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Participant Activity</span>
-          </div>
-          <div className="flex items-center justify-between py-3 border-b border-slate-50">
-            <div>
-              <span className="text-sm text-slate-600">New form submission</span>
-              <p className="text-xs text-slate-400 mt-0.5">Get notified when a participant submits a survey</p>
-            </div>
-            <ToggleSwitch checked={prefs.newSubmission} onChange={toggle('newSubmission')} />
-          </div>
-          <div className="flex items-center justify-between py-3 border-b border-slate-50">
-            <div>
-              <span className="text-sm text-slate-600">Flag & alert notifications</span>
-              <p className="text-xs text-slate-400 mt-0.5">High BP, elevated pain, or other health alerts</p>
-            </div>
-            <ToggleSwitch checked={prefs.flagAlerts} onChange={toggle('flagAlerts')} />
-          </div>
-          <div className="flex items-center justify-between py-3 border-b border-slate-50">
-            <div>
-              <span className="text-sm text-slate-600">Participant inactivity</span>
-              <p className="text-xs text-slate-400 mt-0.5">Alert when a participant hasn't been active for 2+ weeks</p>
-            </div>
-            <ToggleSwitch checked={prefs.participantInactivity} onChange={toggle('participantInactivity')} />
-          </div>
-          <div className="border-t border-slate-100 mt-4 pt-4 mb-2">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Goals & Reports</span>
-          </div>
-          <div className="flex items-center justify-between py-3 border-b border-slate-50">
-            <div>
-              <span className="text-sm text-slate-600">Goal deadline reminders</span>
-              <p className="text-xs text-slate-400 mt-0.5">Remind when participant health goals are approaching their target date</p>
-            </div>
-            <ToggleSwitch checked={prefs.goalDeadlines} onChange={toggle('goalDeadlines')} />
-          </div>
-          <div className="flex items-center justify-between py-3 border-b border-slate-50">
-            <div>
-              <span className="text-sm text-slate-600">Weekly group summary</span>
-              <p className="text-xs text-slate-400 mt-0.5">Receive a weekly digest of group activity every Monday</p>
-            </div>
-            <ToggleSwitch checked={prefs.weeklyGroupSummary} onChange={toggle('weeklyGroupSummary')} />
-          </div>
-          <div className="flex items-center justify-between py-3 border-b border-slate-50">
-            <div>
-              <span className="text-sm text-slate-600">Monthly auto-report</span>
-              <p className="text-xs text-slate-400 mt-0.5">Automatically generate and email a group report on the 1st of each month</p>
-            </div>
-            <ToggleSwitch checked={prefs.monthlyReport} onChange={toggle('monthlyReport')} />
-          </div>
-          <div className="border-t border-slate-100 mt-4 pt-4 mb-2">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Admin & Invites</span>
-          </div>
-          <div className="flex items-center justify-between py-3">
-            <div>
-              <span className="text-sm text-slate-600">Invite accepted</span>
-              <p className="text-xs text-slate-400 mt-0.5">Get notified when an invited participant registers</p>
-            </div>
-            <ToggleSwitch checked={prefs.inviteAccepted} onChange={toggle('inviteAccepted')} />
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 function DangerZoneSection({ role, onDeactivate }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  const selfDeleteAllowed = role === 'participant' || role === 'researcher';
-
   async function handleDeactivate() {
-    if (!selfDeleteAllowed || loading) return;
+    if (loading) return;
     setLoading(true);
     setMessage('');
     try {
@@ -814,19 +773,16 @@ function DangerZoneSection({ role, onDeactivate }) {
         <h2 className="text-base font-bold text-rose-600">Danger Zone</h2>
       </div>
       <p className="text-sm text-slate-500 mb-4">
-        Deactivating your account will anonymize your identity and disable login access.
-        Your research/survey records remain in the system for data continuity.
+        Deactivating your account will disable login access while keeping your records in the system.
+        An admin can still review and reactivate the account later if needed.
       </p>
       <button
         onClick={handleDeactivate}
-        disabled={!selfDeleteAllowed || loading}
+        disabled={loading}
         className="px-4 py-2.5 text-sm font-medium text-rose-600 border border-rose-200 rounded-xl hover:bg-rose-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        {loading ? 'Deactivating…' : 'Deactivate & Anonymize Account'}
+        {loading ? 'Deactivating…' : 'Deactivate'}
       </button>
-      {!selfDeleteAllowed && (
-        <p className="text-xs text-slate-400 mt-2">Self-deactivation is available for participant and researcher accounts only.</p>
-      )}
       {!!message && <p className="text-xs text-slate-500 mt-2">{message}</p>}
     </div>
   );
@@ -885,6 +841,8 @@ export default function ProfilePage({ role = 'participant' }) {
                 occupation_status: p.occupation_status || '',
                 marital_status: p.marital_status || '',
                 highest_education_level: p.highest_education_level || '',
+                address: p.address || prev.address || '',
+                enrolled_at: p.program_enrolled_at || prev.enrolled_at || '',
               }));
             }
           } catch {
@@ -926,6 +884,46 @@ export default function ProfilePage({ role = 'participant' }) {
             }));
           } catch {
             // Non-critical — header will show defaults
+          }
+        }
+
+        if (role === 'researcher') {
+          try {
+            const researcherProfile = await api.researcherGetProfile().catch(() => null);
+            if (cancelled) return;
+            if (researcherProfile) {
+              setProfile((prev) => ({
+                ...prev,
+                title: researcherProfile.title || '',
+                credentials: researcherProfile.credentials || '',
+                organization: researcherProfile.organization || '',
+                department: researcherProfile.department || '',
+                specialty: researcherProfile.specialty || '',
+                bio: researcherProfile.bio || '',
+              }));
+            }
+          } catch {
+            // Non-critical
+          }
+        }
+
+        if (role === 'admin') {
+          try {
+            const adminProfile = await api.adminGetProfile().catch(() => null);
+            if (cancelled) return;
+            if (adminProfile) {
+              setProfile((prev) => ({
+                ...prev,
+                title: adminProfile.title || '',
+                role_title: adminProfile.role_title || '',
+                department: adminProfile.department || '',
+                organization: adminProfile.organization || '',
+                bio: adminProfile.bio || '',
+                contactPreference: adminProfile.contact_preference || 'email',
+              }));
+            }
+          } catch {
+            // Non-critical
           }
         }
       } catch {
@@ -1005,8 +1003,6 @@ export default function ProfilePage({ role = 'participant' }) {
       ) : (
         <>
           <ChangePasswordSection />
-          <SecuritySection />
-          <NotificationsSection role={role} />
           <DangerZoneSection role={role} onDeactivate={handleSelfDeactivate} />
         </>
       )}

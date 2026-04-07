@@ -6,6 +6,8 @@ The participant_id is resolved directly from the authenticated user's
 pre-loaded profile — no extra DB lookup required.
 """
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import User, GroupMember, Group, CaretakerProfile, ParticipantProfile
@@ -17,6 +19,7 @@ from app.db.queries.Queries import ParticipantQuery, GoalTemplateQuery, Caretake
 from app.schemas.schemas import HealthGoalUpdate, GoalProgressLog
 from app.schemas.notification_schema import NotificationItem
 from app.schemas.caretaker_response_schema import FeedbackItem
+from app.schemas.filter_data_schema import ParticipantProfileUpdate
 from app.services.notification_service import (
     list_notifications_for_user,
     mark_notification_read_for_user,
@@ -50,6 +53,53 @@ async def get_participant_profile(
         "highest_education_level": profile.highest_education_level,
         "dependents": profile.dependents,
         "marital_status": profile.marital_status,
+        "address": current_user.Address,
+        "program_enrolled_at": str(profile.program_enrolled_at) if profile.program_enrolled_at else None,
+    }
+
+
+@router.patch("/profile")
+async def update_participant_profile(
+    payload: ParticipantProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Update the authenticated participant's profile fields."""
+    profile = await db.scalar(
+        select(ParticipantProfile).where(ParticipantProfile.user_id == current_user.user_id)
+    )
+    if not profile:
+        raise HTTPException(status_code=404, detail="Participant profile not found")
+
+    update_data = payload.model_dump(exclude_none=True)
+
+    if "dob" in update_data and isinstance(update_data["dob"], str) and update_data["dob"]:
+        update_data["dob"] = date.fromisoformat(update_data["dob"])
+
+    address = update_data.pop("address", None)
+    if address is not None:
+        current_user.Address = address
+
+    for field, value in update_data.items():
+        setattr(profile, field, value)
+
+    await db.commit()
+    await db.refresh(profile)
+    await db.refresh(current_user)
+
+    return {
+        "dob": str(profile.dob) if profile.dob else None,
+        "gender": profile.gender,
+        "pronouns": profile.pronouns,
+        "primary_language": profile.primary_language,
+        "country_of_origin": profile.country_of_origin,
+        "occupation_status": profile.occupation_status,
+        "living_arrangement": profile.living_arrangement,
+        "highest_education_level": profile.highest_education_level,
+        "dependents": profile.dependents,
+        "marital_status": profile.marital_status,
+        "address": current_user.Address,
+        "program_enrolled_at": str(profile.program_enrolled_at) if profile.program_enrolled_at else None,
     }
 
 
