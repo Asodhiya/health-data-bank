@@ -1,98 +1,89 @@
 import { useState, useEffect } from "react";
 import { api } from "../../services/api";
 
-/* ── SVG Helpers (Clean & Beautiful) ── */
-const Svg = ({
-  d,
-  size = 20,
-  sw = 1.8,
-  stroke = "currentColor",
-  fill = "none",
-  ...rest
-}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill={fill}
-    stroke={stroke}
-    strokeWidth={sw}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    {...rest}
-  >
+// ── Icons ──────────────────────────────────────────────────────────────────
+
+const Svg = ({ d, size = 20, sw = 1.8, stroke = "currentColor", fill = "none", ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke}
+    strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" {...rest}>
     {typeof d === "string" ? <path d={d} /> : d}
   </svg>
 );
 
-const PlusIco = () => <Svg d="M12 5v14M5 12h14" size={18} />;
-const TrashIco = () => (
-  <Svg
-    d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"
-    size={16}
-  />
-);
-const TargetIco = () => (
-  <Svg
-    d={
-      <>
-        <circle cx="12" cy="12" r="10" />
-        <circle cx="12" cy="12" r="6" />
-        <circle cx="12" cy="12" r="2" />
-      </>
-    }
-  />
-);
-const CloseIco = () => <Svg d="M18 6L6 18M6 6l12 12" size={20} />;
-
-const FireIco = () => (
-  <Svg d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
-);
-const AlertIco = () => (
-  <Svg
-    size={16}
-    d={
-      <>
-        <circle cx="12" cy="12" r="10" />
-        <line x1="12" y1="8" x2="12" y2="12" />
-        <line x1="12" y1="16" x2="12.01" y2="16" />
-      </>
-    }
-  />
+const PlusIco    = () => <Svg d="M12 5v14M5 12h14" size={18} />;
+const TrashIco   = () => <Svg d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" size={15} />;
+const CloseIco   = () => <Svg d="M18 6L6 18M6 6l12 12" size={20} />;
+const AlertIco   = () => <Svg size={13} d={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />;
+const TargetIco  = ({ size = 22 }) => <Svg size={size} d={<><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></>} />;
+const PencilIco  = () => <Svg d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" size={14} />;
+const GripIco    = () => (
+  <Svg size={12} stroke="none" fill="currentColor" d={
+    <>
+      <circle cx="9"  cy="6"  r="1.2" /><circle cx="15" cy="6"  r="1.2" />
+      <circle cx="9"  cy="12" r="1.2" /><circle cx="15" cy="12" r="1.2" />
+      <circle cx="9"  cy="18" r="1.2" /><circle cx="15" cy="18" r="1.2" />
+    </>
+  } />
 );
 
-const normalizeDatatype = (rawType) => {
-  const normalized = String(rawType || "number").trim().toLowerCase();
-  if (normalized === "string") return "text";
-  if (normalized === "bool") return "boolean";
-  if (
-    normalized === "int" ||
-    normalized === "integer" ||
-    normalized === "float" ||
-    normalized === "double" ||
-    normalized === "decimal" ||
-    normalized === "numeric"
-  ) {
-    return "number";
-  }
-  if (normalized !== "text" && normalized !== "number" && normalized !== "boolean") {
-    return "number";
-  }
-  return normalized;
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+const normalizeDatatype = (raw) => {
+  const n = String(raw || "number").trim().toLowerCase();
+  if (n === "string") return "text";
+  if (n === "bool") return "boolean";
+  if (["int","integer","float","double","decimal","numeric"].includes(n)) return "number";
+  if (!["text","number","boolean"].includes(n)) return "number";
+  return n;
 };
 
+function getLastNDays(n) {
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (n - 1 - i));
+    return d;
+  });
+}
+function fmtShortDay(date) {
+  return date.toLocaleDateString("en-US", { weekday: "short" });
+}
+function fmtEntryStamp(isoStr) {
+  if (!isoStr) return "";
+  const d = new Date(isoStr);
+  if (isSameDay(d, new Date())) {
+    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+    " " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+function isSameDay(d1, d2) {
+  return d1.getFullYear() === d2.getFullYear() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getDate() === d2.getDate();
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────
+
 export default function HealthGoals() {
-  const [activeGoals, setActiveGoals] = useState([]);
-  const [templates, setTemplates] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [activeGoals, setActiveGoals]     = useState([]);
+  const [templates, setTemplates]         = useState([]);
+  const [timeseries, setTimeseries]       = useState([]);
+  const [loading, setLoading]             = useState(true);
+  const [activeGoalId, setActiveGoalId]   = useState(null);
 
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isDrawerOpen, setIsDrawerOpen]   = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
-
-  const [logInputs, setLogInputs] = useState({});
-  const [logErrors, setLogErrors] = useState({});
-  const [addErrors, setAddErrors] = useState({});
+  const [logInputs, setLogInputs]         = useState({});
+  const [logErrors, setLogErrors]         = useState({});
+  const [addErrors, setAddErrors]         = useState({});
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [logModalGoal, setLogModalGoal]   = useState(null); // goal being logged via modal
+  const [goalOrder, setGoalOrder]         = useState(() => {
+    try { return JSON.parse(localStorage.getItem("hdb-goal-order") || "[]"); }
+    catch { return []; }
+  });
+  const [draggedId, setDraggedId]         = useState(null);
+  const [dragOverId, setDragOverId]       = useState(null);
 
   const MAX_GOALS = 10;
   const isAtLimit = activeGoals.length >= MAX_GOALS;
@@ -100,38 +91,101 @@ export default function HealthGoals() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [goalsData, templatesData] = await Promise.all([
+      const [goalsData, templatesData, tsData] = await Promise.all([
         api.listParticipantGoals().catch(() => []),
         api.browseGoalTemplates().catch(() => []),
+        api.getMyHealthTimeseries().catch(() => []),
       ]);
-      setActiveGoals(Array.isArray(goalsData) ? goalsData : []);
+      const goals = Array.isArray(goalsData) ? goalsData : [];
+      setActiveGoals(goals);
       setTemplates(Array.isArray(templatesData) ? templatesData : []);
+      setTimeseries(Array.isArray(tsData) ? tsData : []);
+      // Sync order: keep custom positions, append new goals, drop deleted ones
+      setGoalOrder((prev) => {
+        const ids = goals.map((g) => g.goal_id);
+        const kept = prev.filter((id) => ids.includes(id));
+        const added = ids.filter((id) => !kept.includes(id));
+        const next = [...kept, ...added];
+        localStorage.setItem("hdb-goal-order", JSON.stringify(next));
+        return next;
+      });
     } catch (err) {
-      console.error("🚨 Error fetching goals:", err);
+      console.error("Error fetching goals:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useEffect(() => { fetchData(); }, []);
+
+  // Sorted goals — respects user-defined drag order
+  const sortedGoals = [...activeGoals].sort((a, b) => {
+    const ai = goalOrder.indexOf(a.goal_id);
+    const bi = goalOrder.indexOf(b.goal_id);
+    if (ai === -1 && bi === -1) return 0;
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+
+  // Auto-select first goal (in sorted order)
+  const resolvedGoalId = activeGoalId || sortedGoals[0]?.goal_id || null;
+  const activeGoal = sortedGoals.find((g) => g.goal_id === resolvedGoalId) || sortedGoals[0];
+
+  const tsMap = {};
+  timeseries.forEach((ts) => { tsMap[ts.element_id] = ts.points || []; });
+
+  // ── Drag handlers ─────────────────────────────────────────────────────────
+
+  const handleDragStart = (e, goalId) => {
+    setDraggedId(goalId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e, goalId) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (goalId !== draggedId) setDragOverId(goalId);
+  };
+
+  const handleDrop = (e, targetId) => {
+    e.preventDefault();
+    if (!draggedId || draggedId === targetId) return;
+    setGoalOrder((prev) => {
+      const order = [...prev];
+      const from = order.indexOf(draggedId);
+      const to   = order.indexOf(targetId);
+      if (from === -1 || to === -1) return prev;
+      order.splice(from, 1);
+      order.splice(to, 0, draggedId);
+      localStorage.setItem("hdb-goal-order", JSON.stringify(order));
+      return order;
+    });
+    setDraggedId(null);
+    setDragOverId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedId(null);
+    setDragOverId(null);
+  };
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handleAddGoal = async (templateId) => {
     if (isAtLimit) return;
-    setAddErrors((prev) => ({ ...prev, [templateId]: null }));
+    setAddErrors((p) => ({ ...p, [templateId]: null }));
     try {
       setActionLoading(templateId);
       await api.addGoalFromTemplate(templateId);
       await fetchData();
     } catch (err) {
-      const msg =
-        err?.response?.status === 409
-          ? "You already track this metric with another goal."
-          : err?.response?.status === 400
-            ? "You've reached the 10-goal limit."
-            : err?.message || "Failed to add goal. Please try again.";
-      setAddErrors((prev) => ({ ...prev, [templateId]: msg }));
+      const msg = err?.response?.status === 409
+        ? "You already track this metric with another goal."
+        : err?.response?.status === 400
+          ? "You've reached the 10-goal limit."
+          : err?.message || "Failed to add goal. Please try again.";
+      setAddErrors((p) => ({ ...p, [templateId]: msg }));
     } finally {
       setActionLoading(null);
     }
@@ -139,46 +193,30 @@ export default function HealthGoals() {
 
   const handleLogProgress = async (goalId, customValue = 1) => {
     if (customValue === "" || customValue === null) return;
-
-    // Clear any previous error for this goal
-    setLogErrors((prev) => ({ ...prev, [goalId]: null }));
-
-    // Client-side validation: backend requires value_number > 0
+    setLogErrors((p) => ({ ...p, [goalId]: null }));
     if (typeof customValue === "string" && !isNaN(customValue) && customValue.trim() !== "") {
-      const num = Number(customValue);
-      if (num <= 0) {
-        setLogErrors((prev) => ({ ...prev, [goalId]: "Value must be greater than 0." }));
+      if (Number(customValue) <= 0) {
+        setLogErrors((p) => ({ ...p, [goalId]: "Value must be greater than 0." }));
         return;
       }
     } else if (typeof customValue === "number" && customValue <= 0) {
-      setLogErrors((prev) => ({ ...prev, [goalId]: "Value must be greater than 0." }));
+      setLogErrors((p) => ({ ...p, [goalId]: "Value must be greater than 0." }));
       return;
     }
-
     try {
       setActionLoading(`log_${goalId}`);
-
-      let finalValue = customValue;
-      if (
-        typeof customValue === "string" &&
-        customValue.trim() !== "" &&
-        !isNaN(customValue)
-      ) {
-        finalValue = Number(customValue);
-      }
-
+      let val = customValue;
+      if (typeof val === "string" && val.trim() !== "" && !isNaN(val)) val = Number(val);
       const payload = { observed_at: new Date().toISOString() };
-      if (typeof finalValue === "string") payload.value_text = finalValue;
-      else if (typeof finalValue === "boolean") payload.value_bool = finalValue;
-      else payload.value_number = Number(finalValue);
-
+      if (typeof val === "string") payload.value_text = val;
+      else if (typeof val === "boolean") payload.value_bool = val;
+      else payload.value_number = Number(val);
       await api.logGoalProgress(goalId, payload);
-
-      setLogInputs((prev) => ({ ...prev, [goalId]: "" }));
+      setLogInputs((p) => ({ ...p, [goalId]: "" }));
+      setLogModalGoal(null);
       await fetchData();
     } catch (err) {
-      const msg = err?.message || "Failed to save. Please try again.";
-      setLogErrors((prev) => ({ ...prev, [goalId]: msg }));
+      setLogErrors((p) => ({ ...p, [goalId]: err?.message || "Failed to save. Please try again." }));
     } finally {
       setActionLoading(null);
     }
@@ -189,6 +227,7 @@ export default function HealthGoals() {
       setActionLoading(`del_${goalId}`);
       await api.deleteParticipantGoal(goalId);
       setConfirmDeleteId(null);
+      if (resolvedGoalId === goalId) setActiveGoalId(null);
       await fetchData();
     } catch (err) {
       console.error("Failed to delete goal:", err);
@@ -198,35 +237,32 @@ export default function HealthGoals() {
     }
   };
 
+  // ── Loading ────────────────────────────────────────────────────────────────
+
   if (loading && activeGoals.length === 0) {
     return (
       <div className="flex flex-col justify-center items-center py-40">
-        <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
-        <p className="text-sm text-slate-500 font-medium">
-          Loading your health goals...
-        </p>
+        <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin mb-4" />
+        <p className="text-sm text-slate-500 font-medium">Loading your health goals...</p>
       </div>
     );
   }
 
+  // ── Page ───────────────────────────────────────────────────────────────────
+
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8 relative">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+    <div className="max-w-5xl mx-auto px-4 py-8 relative">
+
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">My Goals</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Track your daily wellness habits.
-          </p>
+          <p className="text-sm text-slate-500 mt-1">Track and log your daily wellness habits.</p>
         </div>
-
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <div className="px-4 py-2 bg-white rounded-xl border border-slate-200 flex items-center gap-2 shadow-sm">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-              Active Goals
-            </span>
-            <span
-              className={`text-sm font-bold ${isAtLimit ? "text-rose-500" : "text-slate-800"}`}
-            >
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Active</span>
+            <span className={`text-sm font-bold ${isAtLimit ? "text-rose-500" : "text-slate-800"}`}>
               {activeGoals.length} / {MAX_GOALS}
             </span>
           </div>
@@ -239,17 +275,15 @@ export default function HealthGoals() {
         </div>
       </div>
 
+      {/* Empty state */}
       {activeGoals.length === 0 ? (
-        <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm flex flex-col items-center">
+        <div className="bg-white rounded-2xl p-14 text-center border border-slate-200 shadow-sm flex flex-col items-center">
           <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-4">
             <TargetIco size={32} />
           </div>
-          <h3 className="text-lg font-bold text-slate-800">
-            Ready to build healthy habits?
-          </h3>
+          <h3 className="text-lg font-bold text-slate-800">Ready to build healthy habits?</h3>
           <p className="text-sm text-slate-500 mt-2 mb-6 max-w-sm mx-auto leading-relaxed">
-            Your dashboard is empty. Browse the goal library to find habits
-            recommended for you.
+            Browse the goal library to find habits recommended for you.
           </p>
           <button
             onClick={() => setIsDrawerOpen(true)}
@@ -259,275 +293,117 @@ export default function HealthGoals() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {activeGoals.map((goal) => {
-            const activeGoalId = goal.goal_id || goal.id;
-            const name =
-              goal.name ||
-              goal.title ||
-              (goal.element && goal.element.label) ||
-              "Wellness Goal";
-            const desc =
-              goal.description ||
-              (goal.element && goal.element.description) ||
-              "Description not provided.";
+        /* ── Sidebar + Detail layout ── */
+        <div className="flex gap-4 min-h-[520px]">
 
-            // 🟢 Determine Datatype from the Element (defaults to number if missing)
-            const datatype = normalizeDatatype(goal.element?.datatype);
-            const progressMode = goal.progress_mode || "incremental";
-            const goalMode = goal.goal_mode || "daily";
-            const direction = goal.direction || "at_least";
-            const windowMode =
-              goal.completion_context?.window || goal.window || "daily";
-
-            const target = goal.target_value ?? goal.default_target ?? 1;
-            const current = goal.current_value ?? 0;
-            const unit = goal.unit || (goal.element && goal.element.unit) || "";
-            const unitText = unit ? ` ${unit}` : "";
-
-            // Text goals don't use percentages, they just save entries
-            const isTextGoal = datatype === "text";
-            const numericCurrent =
-              typeof current === "number" ? current : Number(current);
-            const safeCurrent = Number.isFinite(numericCurrent)
-              ? numericCurrent
-              : 0;
-            const progressPct = isTextGoal
-              ? 100
-              : direction === "at_most"
-                ? safeCurrent > 0 && target > 0
-                  ? Math.min(Math.round((target / safeCurrent) * 100), 100)
-                  : 0
-                : target > 0
-                  ? Math.min(Math.round((safeCurrent / target) * 100), 100)
-                  : 0;
-            const isCompleted = Boolean(goal.is_completed);
-
-            const isConfirming = confirmDeleteId === activeGoalId;
-
-            return (
-              <div
-                key={activeGoalId}
-                className={`bg-white rounded-2xl p-6 shadow-sm border flex flex-col relative group transition-all hover:shadow-md ${
-                  isConfirming ? "border-rose-200 shadow-rose-50" : "border-slate-200 hover:border-blue-200"
-                }`}
-              >
-                {/* Delete button / inline confirm */}
-                {isConfirming ? (
-                  <div className="absolute top-3 right-3 flex items-center gap-2 bg-white border border-rose-200 rounded-xl px-3 py-2 shadow-md z-10">
-                    <span className="text-xs font-semibold text-slate-600 mr-1">Remove goal?</span>
-                    <button
-                      onClick={() => setConfirmDeleteId(null)}
-                      className="text-xs font-bold text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-slate-50 transition-all"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => handleDeleteGoal(activeGoalId)}
-                      disabled={actionLoading === `del_${activeGoalId}`}
-                      className="text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 px-3 py-1 rounded-lg transition-all disabled:opacity-50"
-                    >
-                      {actionLoading === `del_${activeGoalId}` ? "Removing…" : "Remove"}
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmDeleteId(activeGoalId)}
-                    className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100"
-                    title="Remove Goal"
-                  >
-                    <TrashIco />
-                  </button>
-                )}
-
-                <div className="flex items-start gap-4 mb-3">
+          {/* Sidebar */}
+          <div className="w-48 shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-slate-100">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">My Goals</p>
+            </div>
+            <div className="flex-1 overflow-y-auto py-2">
+              {sortedGoals.map((g) => {
+                const isActive = g.goal_id === resolvedGoalId;
+                const done = g.is_completed;
+                const isConfirming = confirmDeleteId === g.goal_id;
+                const isDragging = draggedId === g.goal_id;
+                const isOver = dragOverId === g.goal_id;
+                return (
                   <div
-                    className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
-                      isCompleted
-                        ? "bg-emerald-50 text-emerald-600"
-                        : "bg-blue-50 text-blue-600"
-                    }`}
+                    key={g.goal_id}
+                    className="relative group"
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, g.goal_id)}
+                    onDragOver={(e) => handleDragOver(e, g.goal_id)}
+                    onDrop={(e) => handleDrop(e, g.goal_id)}
+                    onDragEnd={handleDragEnd}
+                    style={{ opacity: isDragging ? 0.4 : 1 }}
                   >
-                    {isCompleted ? (
-                      <FireIco size={24} />
-                    ) : (
-                      <TargetIco size={24} />
+                    {/* Drop indicator */}
+                    {isOver && !isDragging && (
+                      <div className="absolute top-0 left-3 right-3 h-0.5 bg-blue-500 rounded-full z-10" />
+                    )}
+                    <button
+                      onClick={() => { setActiveGoalId(g.goal_id); setConfirmDeleteId(null); }}
+                      className={`w-full text-left px-4 py-3 flex items-center gap-2.5 transition-all border-l-2 pr-8 ${
+                        isActive ? "bg-blue-50 border-blue-500" : "border-transparent hover:bg-slate-50"
+                      }`}
+                    >
+                      {/* Grip handle */}
+                      <span className="text-slate-300 group-hover:text-slate-400 shrink-0 cursor-grab active:cursor-grabbing">
+                        <GripIco />
+                      </span>
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${done ? "bg-emerald-400" : "bg-blue-400"}`} />
+                      <span className={`text-xs leading-tight line-clamp-2 ${isActive ? "font-bold text-blue-700" : "font-medium text-slate-600"}`}>
+                        {g.name ?? g.element?.label ?? "Goal"}
+                      </span>
+                    </button>
+                    {/* Trash — only visible on hover, not when confirming */}
+                    {!isConfirming && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(g.goal_id); setActiveGoalId(g.goal_id); }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
+                      >
+                        <TrashIco />
+                      </button>
                     )}
                   </div>
-                  <div>
-                    <h3 className="text-base font-bold text-slate-800 leading-tight mb-1 pr-6 capitalize">
-                      {name}
-                    </h3>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      {goalMode === "long_term" ? "Long-Term" : "Daily"} Goal •{" "}
-                      {windowMode}
-                    </span>
-                  </div>
-                </div>
-
-                <p className="text-sm text-slate-500 line-clamp-2 mb-6 min-h-[2.5rem]">
-                  {desc}
-                </p>
-
-                {/* Status Section based on Datatype */}
-                <div className="mt-auto mb-5">
-                  {!isTextGoal && (
-                    <>
-                      <div className="flex justify-between items-end mb-2">
-                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                          Progress
-                        </span>
-                        <span
-                          className={`text-sm font-bold ${isCompleted ? "text-emerald-500" : "text-slate-800"}`}
-                        >
-                          {safeCurrent}{" "}
-                          <span className="text-slate-400 font-medium">
-                            {direction === "at_most" ? "≤" : "/"} {target}
-                            {unitText}
-                          </span>
-                        </span>
-                      </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-700 ease-out ${isCompleted ? "bg-emerald-500" : "bg-blue-500"}`}
-                          style={{ width: `${progressPct}%` }}
-                        />
-                      </div>
-                    </>
-                  )}
-                  {isTextGoal && (
-                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                      Journal Entry
-                    </div>
-                  )}
-                </div>
-
-                {/* ── Logging / Completion UI ── */}
-                {isCompleted && !isTextGoal ? (
-                  <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 px-4 py-4 text-center space-y-1">
-                    <div className="flex justify-center text-2xl mb-1">🎉</div>
-                    <p className="text-sm font-bold text-emerald-700">Goal Reached Today!</p>
-                    <p className="text-xs text-emerald-600">Amazing work — keep the streak going.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
-                      {/* Text entry */}
-                      {datatype === "text" && (
-                        <div className="flex flex-col gap-2 w-full">
-                          <input
-                            type="text"
-                            placeholder="Write your entry..."
-                            value={logInputs[activeGoalId] || ""}
-                            onChange={(e) => {
-                              setLogInputs({ ...logInputs, [activeGoalId]: e.target.value });
-                              setLogErrors((prev) => ({ ...prev, [activeGoalId]: null }));
-                            }}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                          <button
-                            onClick={() => handleLogProgress(activeGoalId, logInputs[activeGoalId])}
-                            disabled={actionLoading === `log_${activeGoalId}` || !logInputs[activeGoalId]}
-                            className="w-full py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-all"
-                          >
-                            {actionLoading === `log_${activeGoalId}` ? "Saving..." : "Save Entry"}
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Absolute number (e.g. set current value to 2000 ml) */}
-                      {datatype === "number" && progressMode === "absolute" && (
-                        <>
-                          <input
-                            type="number"
-                            min="0.01"
-                            placeholder={`Current${unitText ? ` (${unit})` : ""}`}
-                            value={logInputs[activeGoalId] || ""}
-                            onChange={(e) => {
-                              setLogInputs({ ...logInputs, [activeGoalId]: e.target.value });
-                              setLogErrors((prev) => ({ ...prev, [activeGoalId]: null }));
-                            }}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                          <button
-                            onClick={() => handleLogProgress(activeGoalId, logInputs[activeGoalId])}
-                            disabled={actionLoading === `log_${activeGoalId}` || !logInputs[activeGoalId]}
-                            className="px-5 py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-all"
-                          >
-                            {actionLoading === `log_${activeGoalId}` ? "..." : "Set"}
-                          </button>
-                        </>
-                      )}
-
-                      {/* Incremental number with large target (e.g. +250 ml steps) */}
-                      {datatype === "number" && progressMode !== "absolute" && target > 10 && (
-                        <>
-                          <input
-                            type="number"
-                            min="0.01"
-                            placeholder={`Add amount${unitText ? ` (${unit})` : ""}`}
-                            value={logInputs[activeGoalId] || ""}
-                            onChange={(e) => {
-                              setLogInputs({ ...logInputs, [activeGoalId]: e.target.value });
-                              setLogErrors((prev) => ({ ...prev, [activeGoalId]: null }));
-                            }}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                          <button
-                            onClick={() => handleLogProgress(activeGoalId, logInputs[activeGoalId])}
-                            disabled={actionLoading === `log_${activeGoalId}` || !logInputs[activeGoalId]}
-                            className="px-5 py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-all"
-                          >
-                            {actionLoading === `log_${activeGoalId}` ? "..." : "Log"}
-                          </button>
-                        </>
-                      )}
-
-                      {/* Boolean or small-step number (e.g. +1 tap) */}
-                      {(datatype === "boolean" ||
-                        (datatype === "number" && progressMode !== "absolute" && target <= 10)) && (
-                        <button
-                          onClick={() => handleLogProgress(activeGoalId, 1)}
-                          disabled={actionLoading === `log_${activeGoalId}`}
-                          className="w-full py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-sm disabled:opacity-50"
-                        >
-                          {actionLoading === `log_${activeGoalId}` ? "Logging..." : "+1  Log Progress"}
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Inline error */}
-                    {logErrors[activeGoalId] && (
-                      <p className="text-xs text-rose-500 font-medium flex items-center gap-1">
-                        <AlertIco size={12} /> {logErrors[activeGoalId]}
-                      </p>
-                    )}
-                  </div>
-                )}
+                );
+              })}
+            </div>
+            {/* Progress footer */}
+            <div className="px-4 py-3 border-t border-slate-100">
+              <p className="text-[10px] text-slate-400 font-medium">
+                {sortedGoals.filter((g) => g.is_completed).length} of {sortedGoals.length} completed
+              </p>
+              <div className="mt-1.5 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-400 rounded-full transition-all duration-500"
+                  style={{ width: `${sortedGoals.length ? (sortedGoals.filter((g) => g.is_completed).length / sortedGoals.length) * 100 : 0}%` }}
+                />
               </div>
-            );
-          })}
+            </div>
+          </div>
+
+          {/* Detail panel */}
+          {activeGoal && (
+            <GoalDetail
+              key={activeGoal.goal_id}
+              goal={activeGoal}
+              tsPoints={tsMap[activeGoal.element_id] || []}
+              confirmDeleteId={confirmDeleteId}
+              setConfirmDeleteId={setConfirmDeleteId}
+              actionLoading={actionLoading}
+              handleDeleteGoal={handleDeleteGoal}
+              onLogEntry={() => setLogModalGoal(activeGoal)}
+            />
+          )}
         </div>
       )}
 
-      {/* ── DRAWER (Library) ────────────────────────────── */}
-
-      {isDrawerOpen && (
-        <div
-          className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 transition-opacity"
-          onClick={() => setIsDrawerOpen(false)}
+      {/* ── Log Entry Modal ─────────────────────────────────────────────── */}
+      {logModalGoal && (
+        <LogEntryModal
+          goal={logModalGoal}
+          logInputs={logInputs}
+          setLogInputs={setLogInputs}
+          logErrors={logErrors}
+          setLogErrors={setLogErrors}
+          actionLoading={actionLoading}
+          onLog={handleLogProgress}
+          onClose={() => { setLogModalGoal(null); setLogErrors({}); }}
         />
       )}
 
-      <div
-        className={`fixed inset-y-0 right-0 w-full max-w-md bg-slate-50 shadow-2xl z-50 transform transition-transform duration-300 ease-out flex flex-col rounded-l-2xl border-l border-slate-200 ${isDrawerOpen ? "translate-x-0" : "translate-x-full"}`}
-      >
+      {/* ── Browse Goals Drawer ─────────────────────────────────────────── */}
+      {isDrawerOpen && (
+        <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40" onClick={() => setIsDrawerOpen(false)} />
+      )}
+      <div className={`fixed inset-y-0 right-0 w-full max-w-md bg-slate-50 shadow-2xl z-50 transform transition-transform duration-300 ease-out flex flex-col rounded-l-2xl border-l border-slate-200 ${isDrawerOpen ? "translate-x-0" : "translate-x-full"}`}>
         <div className="px-6 py-5 flex items-center justify-between bg-white rounded-tl-2xl border-b border-slate-100">
           <div>
             <h2 className="text-xl font-bold text-slate-800">Goal Library</h2>
-            <p className="text-sm text-slate-500 mt-0.5">
-              Select habits to track
-            </p>
+            <p className="text-sm text-slate-500 mt-0.5">Select habits to track</p>
           </div>
           <button
             onClick={() => setIsDrawerOpen(false)}
@@ -537,16 +413,11 @@ export default function HealthGoals() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {isAtLimit && (
-            <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl text-xs font-medium flex items-start gap-2 mb-4">
-              <span className="mt-0.5">
-                <AlertIco size={14} />
-              </span>
-              <p>
-                Dashboard full (10/10). Remove a goal to make room for a new
-                one.
-              </p>
+            <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl text-xs font-medium flex items-start gap-2">
+              <AlertIco size={14} className="mt-0.5 shrink-0" />
+              <p>Dashboard full (10/10). Remove a goal to make room for a new one.</p>
             </div>
           )}
 
@@ -557,22 +428,11 @@ export default function HealthGoals() {
           ) : (
             templates.map((template) => {
               const tId = template.template_id;
-              const name =
-                template.name ||
-                (template.element && template.element.label) ||
-                "Wellness Goal";
-              const desc =
-                template.description ||
-                (template.element && template.element.description) ||
-                "Description not provided.";
-              const datatype = normalizeDatatype(template.element?.datatype);
+              const name = template.name || template.element?.label || "Wellness Goal";
+              const desc = template.description || template.element?.description || "";
               const target = template.default_target ?? 1;
-              const unit = (template.element && template.element.unit) || "";
-              const unitText = unit ? ` ${unit}` : "";
-
-              const isAlreadyAdded = activeGoals.some(
-                (g) => g.template_id === tId,
-              );
+              const unit = template.element?.unit || "";
+              const isAlreadyAdded = activeGoals.some((g) => g.template_id === tId);
               const isLoading = actionLoading === tId;
               const addError = addErrors[tId];
 
@@ -580,65 +440,427 @@ export default function HealthGoals() {
                 <div
                   key={tId}
                   className={`bg-white border rounded-xl p-5 transition-all ${
-                    isAlreadyAdded
-                      ? "border-slate-100 opacity-60"
-                      : "border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md"
+                    isAlreadyAdded ? "border-slate-100 opacity-60" : "border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md"
                   }`}
                 >
                   <div className="flex items-start justify-between mb-2">
-                    <h4 className="text-base font-bold text-slate-800 leading-tight pr-2 capitalize">
-                      {name}
-                    </h4>
-                    <span className="bg-slate-50 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider whitespace-nowrap border border-slate-100">
-                      Daily
-                    </span>
+                    <h4 className="text-base font-bold text-slate-800 leading-tight pr-2 capitalize">{name}</h4>
+                    <span className="bg-slate-50 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border border-slate-100 whitespace-nowrap">Daily</span>
                   </div>
-
-                  <p className="text-sm text-slate-500 mb-5 line-clamp-2">
-                    {desc}
-                  </p>
-
-                  <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                    <div className="text-xs font-medium text-slate-500">
-                      {datatype === "text" ? (
-                        "Text Entry"
-                      ) : (
-                        <>
-                          Target:{" "}
-                          <span className="text-slate-800 font-bold">
-                            {target}
-                            {unitText}
-                          </span>
-                        </>
-                      )}
-                    </div>
-
-                    <button
-                      onClick={() => handleAddGoal(tId)}
-                      disabled={isAtLimit || isAlreadyAdded || isLoading}
-                      className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-                        isAlreadyAdded
-                          ? "bg-slate-50 text-slate-400 cursor-not-allowed border border-slate-100"
-                          : isAtLimit
-                            ? "bg-slate-50 text-slate-300 cursor-not-allowed"
-                            : "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
-                      }`}
-                    >
-                      {isLoading
-                        ? "Adding..."
-                        : isAlreadyAdded
-                          ? "Tracking"
-                          : "+ Add Goal"}
-                    </button>
-                  </div>
+                  {desc && <p className="text-sm text-slate-500 mb-4 line-clamp-2">{desc}</p>}
+                  {target && unit && (
+                    <p className="text-xs text-blue-600 font-semibold mb-4">Target: {target} {unit}</p>
+                  )}
                   {addError && (
-                    <p className="mt-2 text-xs text-rose-500 font-medium flex items-center gap-1">
+                    <p className="text-xs text-rose-500 font-medium flex items-center gap-1 mb-3">
                       <AlertIco size={12} /> {addError}
                     </p>
                   )}
+                  <button
+                    onClick={() => handleAddGoal(tId)}
+                    disabled={isAlreadyAdded || isAtLimit || isLoading}
+                    className={`w-full py-2.5 rounded-xl text-sm font-bold transition-all ${
+                      isAlreadyAdded
+                        ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                        : isAtLimit
+                          ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                          : "bg-blue-600 hover:bg-blue-700 text-white shadow-sm hover:shadow-md"
+                    }`}
+                  >
+                    {isLoading ? "Adding..." : isAlreadyAdded ? "✓ Added" : "+ Add Goal"}
+                  </button>
                 </div>
               );
             })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── GoalDetail ─────────────────────────────────────────────────────────────
+
+function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actionLoading, handleDeleteGoal, onLogEntry }) {
+  const [hoveredBar, setHoveredBar] = useState(null);
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setMounted(true), 50);
+    return () => clearTimeout(t);
+  }, []);
+
+  const name        = goal.name ?? goal.element?.label ?? "Goal";
+  const unit        = goal.element?.unit || "";
+  const desc        = goal.description || goal.element?.description || "";
+  const current     = goal.current_value ?? 0;
+  const target      = goal.target_value ?? 1;
+  const done        = goal.is_completed;
+  const ctx         = goal.completion_context || {};
+  const windowStart = ctx.window_start ? new Date(ctx.window_start) : null;
+  const windowEnd   = ctx.window_end   ? new Date(ctx.window_end)   : null;
+  const progressMode = ctx.progress_mode || goal.progress_mode || "incremental";
+  const direction    = ctx.direction    || goal.direction    || "at_least";
+  const windowType   = ctx.window       || goal.window       || "daily";
+  const isConfirming = confirmDeleteId === goal.goal_id;
+
+  const pct = Math.min(100, Math.max(0, target > 0
+    ? direction === "at_most"
+      ? current > 0 ? Math.round((target / current) * 100) : 0
+      : Math.round((current / target) * 100)
+    : 0));
+
+  // Last 7 days bar chart
+  const days = getLastNDays(7);
+  const barData = days.map((day) => {
+    const dayPts = tsPoints.filter((p) => p.observed_at && isSameDay(new Date(p.observed_at), day));
+    const vals = dayPts.map((p) => p.value_number).filter((v) => v != null && Number.isFinite(v));
+    const total = progressMode === "absolute"
+      ? vals.length ? vals[vals.length - 1] : 0
+      : vals.reduce((a, b) => a + b, 0);
+    return { day, total, isToday: isSameDay(day, new Date()), pts: dayPts };
+  });
+  const barMax = Math.max(...barData.map((b) => b.total), target, 1);
+
+  // Entries
+  const windowEntries = tsPoints.filter((p) => {
+    if (!p.observed_at) return false;
+    const d = new Date(p.observed_at);
+    if (windowStart && d < windowStart) return false;
+    if (windowEnd   && d > windowEnd)   return false;
+    return true;
+  }).sort((a, b) => new Date(b.observed_at) - new Date(a.observed_at));
+
+  const selectedBarData = selectedDay != null ? barData[selectedDay] : null;
+  const displayedEntries = selectedBarData
+    ? selectedBarData.pts.sort((a, b) => new Date(b.observed_at) - new Date(a.observed_at))
+    : windowEntries;
+  const entriesLabel = selectedBarData
+    ? `${fmtShortDay(selectedBarData.day)} ${selectedBarData.day.toLocaleDateString("en-US", { month: "short", day: "numeric" })} (${displayedEntries.length})`
+    : `This ${windowType} window (${windowEntries.length})`;
+
+  // Tags
+  const windowTag   = { daily: "Daily goal", weekly: "Weekly goal", monthly: "Monthly goal" }[windowType] ?? `${windowType} goal`;
+  const directionTag = direction === "at_most"
+    ? `Stay under ${Number(target).toLocaleString()}${unit ? " " + unit : ""}`
+    : `Reach ${Number(target).toLocaleString()}${unit ? " " + unit : ""}`;
+  const statusTag   = done ? "Done ✓" : "In progress";
+  const tags        = [windowTag, directionTag, statusTag];
+  const tagColors   = {
+    "Done ✓":      "bg-emerald-50 text-emerald-600 border-emerald-100",
+    "In progress": "bg-blue-50 text-blue-600 border-blue-100",
+  };
+
+  const contextNote = progressMode === "incremental"
+    ? windowType === "daily"
+      ? "Each log counts toward your daily total and resets at midnight."
+      : `Each log counts toward your ${windowType} total.`
+    : "Your most recent log is used as your current progress value.";
+
+  return (
+    <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-w-0">
+      {/* Header */}
+      <div className="px-6 py-5 border-b border-slate-100">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-lg font-bold text-slate-800 leading-tight truncate">{name}</h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Today, {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              {windowType === "daily" ? " · resets midnight" : ""}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Delete confirm or trash button */}
+            {isConfirming ? (
+              <div className="flex items-center gap-2 bg-white border border-rose-200 rounded-xl px-3 py-1.5 shadow-sm">
+                <span className="text-xs font-semibold text-slate-600">Remove?</span>
+                <button onClick={() => setConfirmDeleteId(null)} className="text-xs font-bold text-slate-400 hover:text-slate-600 px-2 py-0.5 rounded-lg hover:bg-slate-50 transition-all">Cancel</button>
+                <button
+                  onClick={() => handleDeleteGoal(goal.goal_id)}
+                  disabled={actionLoading === `del_${goal.goal_id}`}
+                  className="text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 px-3 py-1 rounded-lg disabled:opacity-50 transition-all"
+                >
+                  {actionLoading === `del_${goal.goal_id}` ? "Removing…" : "Remove"}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDeleteId(goal.goal_id)}
+                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all"
+                title="Remove goal"
+              >
+                <TrashIco />
+              </button>
+            )}
+            <button
+              onClick={onLogEntry}
+              className="flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-xl hover:bg-blue-100 transition-all"
+            >
+              <PencilIco /> Log entry
+            </button>
+          </div>
+        </div>
+
+        {/* Tags */}
+        <div className="flex flex-wrap gap-1.5 mt-3">
+          {tags.map((t) => (
+            <span key={t} className={`text-[10px] font-bold px-2 py-0.5 rounded border ${tagColors[t] || "bg-slate-50 text-slate-500 border-slate-100"}`}>
+              {t}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+
+        {/* Description */}
+        {desc && (
+          <div className="bg-slate-50 rounded-xl px-4 py-3 border border-slate-100">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">About this goal</p>
+            <p className="text-sm text-slate-600 leading-relaxed">{desc}</p>
+          </div>
+        )}
+
+        {/* Big value + circular progress */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Current progress</p>
+            <div className="flex items-end gap-1.5">
+              <p className={`text-4xl font-black leading-none tracking-tight ${done ? "text-emerald-600" : "text-blue-600"}`}>
+                {Number(current).toLocaleString()}
+              </p>
+              {unit && <p className="text-sm font-semibold text-slate-400 mb-1">{unit}</p>}
+            </div>
+            <p className="text-xs text-slate-400 mt-1">of {Number(target).toLocaleString()} {unit} target</p>
+          </div>
+          <div className="shrink-0 relative w-16 h-16">
+            <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f1f5f9" strokeWidth="3" />
+              <circle cx="18" cy="18" r="15.9" fill="none"
+                stroke={done ? "#22c55e" : "#3b82f6"} strokeWidth="3"
+                strokeDasharray={`${pct} ${100 - pct}`} strokeLinecap="round" />
+            </svg>
+            <span className="absolute inset-0 flex items-center justify-center text-xs font-black text-slate-700">{pct}%</span>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div>
+          <div className="flex justify-between text-xs text-slate-400 mb-1.5">
+            <span>{pct}% complete</span>
+            <span>target: {Number(target).toLocaleString()} {unit}</span>
+          </div>
+          <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${done ? "bg-emerald-400" : "bg-blue-500"}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Last 7 days bars */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Last 7 Days</p>
+            {selectedDay != null && (
+              <button onClick={() => setSelectedDay(null)} className="text-[10px] font-bold text-blue-500 hover:text-blue-700 transition-all">
+                Clear ✕
+              </button>
+            )}
+          </div>
+          <div className="flex items-end gap-1.5" style={{ height: "88px" }}>
+            {barData.map(({ day, total, isToday }, idx) => {
+              const barPct  = barMax > 0 ? (total / barMax) * 100 : 0;
+              const metTarget = total >= target;
+              const isHovered  = hoveredBar === idx;
+              const isSelected = selectedDay === idx;
+              const animPct    = mounted ? Math.max(barPct, total > 0 ? 6 : 0) : 0;
+              return (
+                <div
+                  key={day.toISOString()}
+                  className="flex-1 flex flex-col items-center gap-1 cursor-pointer group relative"
+                  onMouseEnter={() => setHoveredBar(idx)}
+                  onMouseLeave={() => setHoveredBar(null)}
+                  onClick={() => setSelectedDay(selectedDay === idx ? null : idx)}
+                >
+                  {isHovered && (
+                    <div className="absolute -top-9 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] font-bold px-2 py-1 rounded-lg whitespace-nowrap z-10 shadow-lg">
+                      {total > 0 ? `${Number(total).toLocaleString()} ${unit}` : "No data"}
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+                    </div>
+                  )}
+                  <div className="w-full flex items-end justify-center" style={{ height: "60px" }}>
+                    <div
+                      className={`w-full rounded-t-lg ${isSelected ? "ring-2 ring-offset-1 ring-blue-400" : ""} ${
+                        isToday
+                          ? metTarget ? "bg-emerald-400" : "bg-blue-500"
+                          : metTarget
+                            ? isHovered ? "bg-emerald-300" : "bg-emerald-200"
+                            : isHovered ? "bg-slate-300" : "bg-slate-200"
+                      }`}
+                      style={{
+                        height: `${animPct}%`,
+                        transition: "height 0.5s cubic-bezier(0.34,1.56,0.64,1), background-color 0.15s",
+                      }}
+                    />
+                  </div>
+                  <span className={`text-[9px] font-bold ${isSelected ? "text-blue-600" : isToday ? "text-blue-500" : "text-slate-400"}`}>
+                    {isToday ? "Today" : fmtShortDay(day)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Context note */}
+        <div className="flex items-start gap-2 bg-slate-50 rounded-xl px-4 py-3 text-xs text-slate-500 border border-slate-100">
+          <span className="mt-0.5 shrink-0">⏱</span>
+          <p>{contextNote}</p>
+        </div>
+
+        {/* Entries list */}
+        {displayedEntries.length > 0 && (
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">
+              Entries · {entriesLabel}
+            </p>
+            <div className="space-y-1.5">
+              {displayedEntries.slice(0, 10).map((p) => (
+                <div key={p.data_id} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-slate-50 transition-all">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />
+                  <span className="text-slate-400 text-xs w-16 shrink-0">{fmtEntryStamp(p.observed_at)}</span>
+                  <span className="font-bold text-slate-700 font-mono text-sm">
+                    {p.value_number != null ? `${Number(p.value_number).toLocaleString()} ${unit}` : p.value_text ?? "—"}
+                  </span>
+                  {p.notes && <span className="text-xs text-slate-400 italic truncate">{p.notes}</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Log Entry Modal ────────────────────────────────────────────────────────
+
+function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors, actionLoading, onLog, onClose }) {
+  const goalId   = goal.goal_id;
+  const name     = goal.name ?? goal.element?.label ?? "Goal";
+  const unit     = goal.element?.unit || "";
+  const desc     = goal.description || goal.element?.description || "";
+  const datatype = normalizeDatatype(goal.element?.datatype);
+  const progressMode = goal.progress_mode || "incremental";
+  const target   = goal.target_value ?? 1;
+  const current  = goal.current_value ?? 0;
+  const done     = goal.is_completed;
+  const isLogging = actionLoading === `log_${goalId}`;
+
+  const inputVal = logInputs[goalId] || "";
+  const setVal = (v) => {
+    setLogInputs((p) => ({ ...p, [goalId]: v }));
+    setLogErrors((p) => ({ ...p, [goalId]: null }));
+  };
+
+  const submit = (value = inputVal) => onLog(goalId, value);
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Modal header */}
+        <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Log Entry</p>
+            <h3 className="text-base font-bold text-slate-800 leading-tight">{name}</h3>
+            {unit && <p className="text-xs text-slate-400 mt-0.5">Unit: {unit}</p>}
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all shrink-0">
+            <CloseIco size={18} />
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          {/* Description */}
+          {desc && (
+            <p className="text-sm text-slate-500 leading-relaxed bg-slate-50 rounded-xl px-4 py-3 border border-slate-100">
+              {desc}
+            </p>
+          )}
+
+          {/* Current progress summary */}
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-400 font-medium">Current progress</span>
+            <span className={`font-bold ${done ? "text-emerald-600" : "text-blue-600"}`}>
+              {Number(current).toLocaleString()} / {Number(target).toLocaleString()} {unit}
+            </span>
+          </div>
+
+          {/* Input area */}
+          <div className="space-y-2">
+            {datatype === "text" && (
+              <input
+                type="text"
+                autoFocus
+                placeholder="Write your entry..."
+                value={inputVal}
+                onChange={(e) => setVal(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
+              />
+            )}
+            {datatype === "number" && (progressMode === "absolute" || target > 10) && (
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  autoFocus
+                  min="0.01"
+                  placeholder={progressMode === "absolute" ? `Current value${unit ? ` (${unit})` : ""}` : `Add amount${unit ? ` (${unit})` : ""}`}
+                  value={inputVal}
+                  onChange={(e) => setVal(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && submit()}
+                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
+                />
+              </div>
+            )}
+            {(datatype === "boolean" || (datatype === "number" && progressMode !== "absolute" && target <= 10)) && (
+              <p className="text-sm text-slate-500 text-center py-2">Click <span className="font-bold text-blue-600">Log +1</span> to record a step.</p>
+            )}
+
+            {/* Error */}
+            {logErrors[goalId] && (
+              <p className="text-xs text-rose-500 font-medium flex items-center gap-1">
+                <AlertIco size={12} /> {logErrors[goalId]}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="px-6 pb-5 flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all">
+            Cancel
+          </button>
+          {(datatype === "boolean" || (datatype === "number" && progressMode !== "absolute" && target <= 10)) ? (
+            <button
+              onClick={() => submit(1)}
+              disabled={isLogging}
+              className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm"
+            >
+              {isLogging ? "Logging…" : "Log +1"}
+            </button>
+          ) : (
+            <button
+              onClick={() => submit(inputVal)}
+              disabled={isLogging || !inputVal}
+              className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm"
+            >
+              {isLogging ? "Saving…" : progressMode === "absolute" ? "Set value" : "Log entry"}
+            </button>
           )}
         </div>
       </div>

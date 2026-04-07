@@ -145,9 +145,4 @@ export const PARTICIPANT_NAV = [
     to: "/participant/feedback",
     roles: ["participant"],
   },
-  {
-    label: "Messages",
-    to: "/participant/messages",
-    roles: ["participant"],
-  },
 ];
