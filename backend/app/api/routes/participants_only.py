@@ -8,10 +8,10 @@ pre-loaded profile — no extra DB lookup required.
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import User, GroupMember, Group, CaretakerProfile
+from app.db.models import User, GroupMember, Group, CaretakerProfile, ParticipantProfile
 from sqlalchemy import select
 from app.db.session import get_db
-from app.core.dependency import require_permissions
+from app.core.dependency import require_permissions, check_current_user
 from app.core.permissions import GOAL_VIEW_ALL, GOAL_ADD, GOAL_EDIT, GOAL_DELETE
 from app.db.queries.Queries import ParticipantQuery, GoalTemplateQuery, CaretakersQuery, get_participant_id
 from app.schemas.schemas import HealthGoalUpdate, GoalProgressLog
@@ -26,6 +26,31 @@ import uuid
 
 router = APIRouter()
 
+
+@router.get("/profile")
+async def get_participant_profile(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Return the authenticated participant's profile fields."""
+    profile = await db.scalar(
+        select(ParticipantProfile).where(ParticipantProfile.user_id == current_user.user_id)
+    )
+    if not profile:
+        raise HTTPException(status_code=404, detail="Participant profile not found")
+
+    return {
+        "dob": str(profile.dob) if profile.dob else None,
+        "gender": profile.gender,
+        "pronouns": profile.pronouns,
+        "primary_language": profile.primary_language,
+        "country_of_origin": profile.country_of_origin,
+        "occupation_status": profile.occupation_status,
+        "living_arrangement": profile.living_arrangement,
+        "highest_education_level": profile.highest_education_level,
+        "dependents": profile.dependents,
+        "marital_status": profile.marital_status,
+    }
 
 
 @router.get("/goal-templates")

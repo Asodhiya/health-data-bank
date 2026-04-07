@@ -221,6 +221,7 @@ export default function UserDetailPage() {
     gender: u.gender || null,
     pronouns: u.pronouns || null,
     primaryLanguage: u.primary_language || null,
+    countryOfOrigin: u.country_of_origin || null,
     maritalStatus: u.marital_status || null,
     highestEducation: u.highest_education_level || null,
     occupationStatus: u.occupation_status || null,
@@ -468,6 +469,7 @@ export default function UserDetailPage() {
                     <InfoRow label="Gender" value={user.gender} />
                     <InfoRow label="Pronouns" value={user.pronouns} />
                     <InfoRow label="Language" value={user.primaryLanguage} />
+                    <InfoRow label="Country of Origin" value={user.countryOfOrigin} />
                   </div>
                 </div>
                 <div>

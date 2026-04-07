@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { sanitizeText } from '../../utils/sanitize';
 import { api } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { LANGUAGES, COUNTRIES } from '../../utils/formOptions';
 
 /* ── Reusable chip selector (single or multi select) ── */
 function ChipSelect({ options, value, onChange, multi = false }) {
@@ -38,6 +39,78 @@ function ChipSelect({ options, value, onChange, multi = false }) {
   );
 }
 
+/* ── Typeahead dropdown — supports single or multi select ──
+   multi mode: value is an array, shows chips, allows adding custom entries
+   single mode: value is a string, shows one chip when selected              */
+function Autocomplete({ options, value, onChange, placeholder = 'Search...', allowCustom = false, multi = false, inputClass = '' }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const selected = multi ? (value || []) : (value ? [value] : []);
+  const filtered = options.filter(
+    (o) => o.toLowerCase().includes(query.toLowerCase()) && !selected.includes(o),
+  );
+  const trimmed = query.trim();
+  const showAddCustom = allowCustom && trimmed && !options.some((o) => o.toLowerCase() === trimmed.toLowerCase()) && !selected.some((s) => s.toLowerCase() === trimmed.toLowerCase());
+
+  const add = (val) => {
+    if (multi) { onChange([...selected, val]); }
+    else { onChange(val); }
+    setQuery('');
+    setOpen(false);
+  };
+
+  const remove = (val) => {
+    if (multi) { onChange(selected.filter((s) => s !== val)); }
+    else { onChange(''); }
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      {/* Selected chips + inline input */}
+      <div className={`${inputClass} flex flex-wrap gap-1.5 min-h-[44px] items-center !py-2`}>
+        {selected.map((s) => (
+          <span key={s} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-xs font-medium whitespace-nowrap">
+            {s}
+            <button type="button" className="ml-0.5 hover:text-blue-900 text-base leading-none" onClick={() => remove(s)}>&times;</button>
+          </span>
+        ))}
+        {(multi || !value) && (
+          <input
+            type="text"
+            className="flex-1 min-w-[120px] bg-transparent outline-none text-sm"
+            placeholder={selected.length ? '' : placeholder}
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+          />
+        )}
+      </div>
+
+      {/* Dropdown */}
+      {open && (filtered.length > 0 || showAddCustom) && (
+        <ul className="absolute z-20 w-full mt-1 max-h-48 overflow-auto bg-white border border-slate-200 rounded-xl shadow-lg text-sm">
+          {filtered.map((opt) => (
+            <li key={opt} className="px-4 py-2 hover:bg-blue-50 cursor-pointer" onClick={() => add(opt)}>{opt}</li>
+          ))}
+          {showAddCustom && (
+            <li className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-blue-600 font-medium border-t border-slate-100" onClick={() => add(trimmed)}>
+              Add &ldquo;<strong>{trimmed}</strong>&rdquo;
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /* ── Question card wrapper ── */
 function Q({ num, label, required = true, children }) {
   return (
@@ -55,27 +128,12 @@ function Q({ num, label, required = true, children }) {
 export default function IntakePage() {
   const navigate = useNavigate();
   const { refetch } = useAuth();
-  const fieldMapRef = useRef({});  // display_order → field_id
-
-  // Fetch intake form field IDs on mount
-  useEffect(() => {
-    api.getIntakeForm().then((form) => {
-      const map = {};
-      form.fields.forEach((f) => { map[f.display_order] = f.field_id; });
-      fieldMapRef.current = map;
-    }).catch(() => {});
-  }, []);
-
   // ── Demographics ──
   const [dob, setDob] = useState('');
   const [sex, setSex] = useState('');
   const [pronouns, setPronouns] = useState('');
   const [pronounsOther, setPronounsOther] = useState('');
-  const [program, setProgram] = useState('');
-  const [yearOfStudy, setYearOfStudy] = useState('');
-  const [language, setLanguage] = useState('');
-  const [international, setInternational] = useState('');
-  const [country, setCountry] = useState('');
+  const [languages, setLanguages] = useState([]);
 
   // ── Lifestyle questions ──
   const [maritalStatus, setMaritalStatus] = useState('');
@@ -84,10 +142,21 @@ export default function IntakePage() {
   const [q1, setQ1] = useState('');
   const [q1Other, setQ1Other] = useState('');
   const [q2, setQ2] = useState('');
-  const [q2Specify, setQ2Specify] = useState('');
+  const [q2Count, setQ2Count] = useState('');
   const [q4, setQ4] = useState('');
 
+  const [countryOfOrigin, setCountryOfOrigin] = useState('');
+
   const [error, setError] = useState('');
+
+  /* ── DOB constraints: must be ≥ 18 years old, no future dates ── */
+  const today = new Date();
+  const maxDob = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate())
+    .toISOString().split('T')[0];
+
+  const dobError = dob && dob > maxDob
+    ? 'You must be at least 18 years old.'
+    : '';
 
   /*
     Helper: wrap every text onChange with sanitizeText.
@@ -108,15 +177,15 @@ export default function IntakePage() {
     Validation — every required field must be filled.
     "Other" / conditional text fields must also be filled
     when their parent option is selected.
-    Country is intentionally NOT required.
   */
   const isValid = () => {
-    if (!dob || !sex || !pronounsValid || !program || !yearOfStudy || !language || !international) return false;
+    if (!dob || dobError || !sex || !pronounsValid || languages.length === 0) return false;
+    if (!countryOfOrigin) return false;
     if (!maritalStatus || !highestEducation) return false;
     if (!q1) return false;
     if (q1 === 'Other' && !q1Other.trim()) return false;
     if (!q2) return false;
-    if (q2 === 'Yes' && !q2Specify.trim()) return false;
+    if (q2 === 'Yes' && (!q2Count || parseInt(q2Count, 10) < 1)) return false;
     if (!q4) return false;
     return true;
   };
@@ -128,26 +197,20 @@ export default function IntakePage() {
     }
     setError('');
 
-    const fm = fieldMapRef.current;
-
     const profile = {
       dob,
       gender: sex,
       pronouns: pronouns === 'Other' ? pronounsOther : pronouns,
-      primary_language: language,
+      primary_language: languages.join(', '),
+      country_of_origin: countryOfOrigin,
       living_arrangement: q1 === 'Other' ? q1Other : q1,
-      dependents: q2 === 'Yes',
+      dependents: q2 === 'Yes' ? parseInt(q2Count, 10) : 0,
       occupation_status: q4,
       marital_status: maritalStatus,
       highest_education_level: highestEducation,
     };
 
-    const answers = [
-      { field_id: fm[1], value: program },
-      { field_id: fm[2], value: yearOfStudy },
-      { field_id: fm[3], value: international },
-      { field_id: fm[4], value: international === 'Yes' ? country || null : null },
-    ].filter(a => a.field_id && a.value !== null && a.value !== undefined && a.value !== '');
+    const answers = [];
 
     try {
       await api.submitIntake({ profile, answers });
@@ -212,8 +275,12 @@ export default function IntakePage() {
             type="date"
             className={inputClass}
             value={dob}
+            max={maxDob}
             onChange={(e) => setDob(e.target.value)}
           />
+          {dobError && (
+            <p className="text-xs text-rose-500 mt-1">{dobError}</p>
+          )}
         </div>
         <div>
           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
@@ -250,13 +317,28 @@ export default function IntakePage() {
         <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
           Language Spoken at Home <span className="text-rose-500">*</span>
         </label>
-        <input
-          type="text"
-          className={inputClass}
-          placeholder="e.g. English"
-          maxLength={100}
-          value={language}
-          onChange={onText(setLanguage, 100)}
+        <Autocomplete
+          options={LANGUAGES}
+          value={languages}
+          onChange={setLanguages}
+          placeholder="Start typing to search languages..."
+          allowCustom
+          multi
+          inputClass={inputClass}
+        />
+      </div>
+
+      {/* Country of Origin */}
+      <div className="mb-3.5">
+        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+          Country of Origin <span className="text-rose-500">*</span>
+        </label>
+        <Autocomplete
+          options={COUNTRIES}
+          value={countryOfOrigin}
+          onChange={setCountryOfOrigin}
+          placeholder="Start typing to search countries..."
+          inputClass={inputClass}
         />
       </div>
 
@@ -293,53 +375,9 @@ export default function IntakePage() {
         Lifestyle &amp; Wellness Questions
       </p>
 
-      {/* Row: Program + Year of Study */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-        <div>
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-            Undergraduate Program <span className="text-rose-500">*</span>
-          </label>
-          <input
-            type="text"
-            className={inputClass}
-            placeholder="e.g. Computer Science"
-            maxLength={200}
-            value={program}
-            onChange={onText(setProgram, 200)}
-          />
-        </div>
-        <div>
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-            Year of Study <span className="text-rose-500">*</span>
-          </label>
-          <ChipSelect options={['1', '2', '3', '4', '5+']} value={yearOfStudy} onChange={setYearOfStudy} />
-        </div>
-      </div>
-
-      {/* International Student */}
-      <div className="mb-4">
-        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-          International Student <span className="text-rose-500">*</span>
-        </label>
-        <ChipSelect options={['Yes', 'No']} value={international} onChange={setInternational} />
-        {international === 'Yes' && (
-          <div className="mt-2.5">
-            <input
-              type="text"
-              className={inputClass}
-              placeholder="Which country are you from? (optional)"
-              maxLength={100}
-              value={country}
-              onChange={onText(setCountry, 100)}
-            />
-            <p className="text-xs text-slate-400 mt-1">This is optional — you don't have to share this</p>
-          </div>
-        )}
-      </div>
-
       {/* Q1 */}
-      <Q num={1} label="Where do you live?">
-        <ChipSelect options={['On campus', 'With Friends', 'With Family', 'Other']} value={q1} onChange={setQ1} />
+      <Q num={1} label="Who do you live with?">
+        <ChipSelect options={['Alone', 'With Family', 'With Friends', 'With Partner', 'With Roommates', 'Other']} value={q1} onChange={setQ1} />
         {q1 === 'Other' && (
           <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify..." maxLength={200} value={q1Other} onChange={onText(setQ1Other, 200)} />
         )}
@@ -347,15 +385,18 @@ export default function IntakePage() {
 
       {/* Q2 */}
       <Q num={2} label="Do you have any dependents?">
-        <ChipSelect options={['No', 'Yes']} value={q2} onChange={setQ2} />
+        <ChipSelect options={['No', 'Yes']} value={q2} onChange={(v) => { setQ2(v); if (v === 'No') setQ2Count(''); }} />
         {q2 === 'Yes' && (
-          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify..." maxLength={200} value={q2Specify} onChange={onText(setQ2Specify, 200)} />
+          <input type="number" className={`${inputClass} mt-2.5`} placeholder="How many dependents?" min={1} max={10} value={q2Count} onChange={(e) => {
+            const val = e.target.value;
+            if (val === '' || (parseInt(val, 10) >= 1 && parseInt(val, 10) <= 10)) setQ2Count(val);
+          }} />
         )}
       </Q>
 
       {/* Q3 */}
-      <Q num={3} label="Do you work?">
-        <ChipSelect options={["Don't work", 'Less than 10 hrs/week', '10–20 hrs/week', 'Over 20 hrs/week']} value={q4} onChange={setQ4} />
+      <Q num={3} label="What is your employment status?">
+        <ChipSelect options={['Unemployed', 'Part-time', 'Full-time', 'Self-employed', 'Freelance', 'Student', 'Retired']} value={q4} onChange={setQ4} />
       </Q>
 
       <hr className="border-slate-100 my-5" />

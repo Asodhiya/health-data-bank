@@ -7,10 +7,11 @@ class IntakeProfileData(BaseModel):
     gender: Optional[str] = None            # frontend field is "sex"
     pronouns: Optional[str] = None
     primary_language: Optional[str] = None  # frontend field is "language"
+    country_of_origin: Optional[str] = None
     marital_status: Optional[str] = None
     highest_education_level: Optional[str] = None
-    address: Optional[str] = None           # Q1: where do you live
-    dependents: Optional[bool] = None       # Q2
+    living_arrangement: Optional[str] = None  # Q1: who do you live with
+    dependents: Optional[int] = None         # Q2: number of dependents (0 = none)
     occupation_status: Optional[str] = None # Q4
 
 

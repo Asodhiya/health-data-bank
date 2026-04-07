@@ -11,7 +11,7 @@ from app.db.session import get_db
 from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import ONBOARDING_READ, ONBOARDING_SUBMIT, ONBOARDING_EDIT
 from app.db.models import (
-    User, SurveyForm, FormField, FieldOption, FormSubmission,
+    User, Role, UserRole, SurveyForm, FormField, FieldOption, FormSubmission,
     ParticipantProfile, FieldElementMap, HealthDataPoint
 )
 from app.services.participant_survey_service import _get_participant, _build_answer_records, _apply_transform
@@ -114,7 +114,8 @@ async def submit_intake(
     # 2. Find the intake form
     form = await _get_intake_form(db)
 
-    # 3. Prevent duplicate intake submission
+    # 3. Check for existing intake submission — if already submitted, return success
+    #    so the frontend can proceed to call /complete (handles crash-recovery gracefully)
     existing = await db.execute(
         select(FormSubmission).where(
             FormSubmission.form_id == form.form_id,
@@ -122,8 +123,9 @@ async def submit_intake(
             FormSubmission.submitted_at.isnot(None),
         )
     )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Intake questionnaire already submitted.")
+    existing_sub = existing.scalar_one_or_none()
+    if existing_sub:
+        return {"message": "Intake already submitted.", "submission_id": str(existing_sub.submission_id)}
 
     # 4. Create the form submission (no deployment check — intake is open to all participants)
     submission = FormSubmission(

@@ -808,6 +808,9 @@ export const api = {
       method: "DELETE",
     }),
 
+  // ── Participant: Profile ──
+  participantGetProfile: () => request("/participant/profile"),
+
   // ── Participant: Surveys ──
   getAssignedSurveys: () => request("/participant/surveys/assigned"),
 

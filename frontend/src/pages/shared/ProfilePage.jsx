@@ -63,13 +63,6 @@ const calcAge = (dob) => {
 };
 
 
-/* ── Country list from browser Intl API ── */
-const COUNTRIES = (() => {
-  const displayNames = new Intl.DisplayNames(['en'], { type: 'region' });
-  const codes = 'AF AL DZ AD AO AG AR AM AU AT AZ BS BH BD BB BY BE BZ BJ BT BO BA BW BR BN BG BF BI CV KH CM CA CF TD CL CN CO KM CG CR HR CU CY CZ DK DJ DM DO EC EG SV GQ ER EE SZ ET FJ FI FR GA GM GE DE GH GR GD GT GN GW GY HT HN HU IS IN ID IR IQ IE IL IT JM JP JO KZ KE KI KW KG LA LV LB LS LR LY LI LT LU MG MW MY MV ML MT MH MR MU MX FM MD MC MN ME MA MZ MM NA NR NP NL NZ NI NE NG KP MK NO OM PK PW PS PA PG PY PE PH PL PT QA RO RU RW KN LC VC WS SM ST SA SN RS SC SL SG SK SI SB SO ZA KR SS ES LK SD SR SE CH SY TW TJ TZ TH TL TG TO TT TN TR TM TV UG UA AE GB US UY UZ VU VA VE VN YE ZM ZW'.split(' ');
-  return codes.map((code) => displayNames.of(code)).filter(Boolean).sort();
-})();
-
 
 /* ── Dev fallback data per role ── */
 const DEV_PROFILES = {
@@ -78,8 +71,9 @@ const DEV_PROFILES = {
     email: 'josh.thompson@upei.ca', phone: '902-555-0147',
     address: '42 University Ave, Charlottetown, PE',
     dob: '1998-03-15', sex: 'Male', pronouns: 'He/Him', pronounsCustom: '',
-    program: 'Computer Science', year: '3', language: 'English',
-    intl: 'No', country: '',
+    language: 'English', country_of_origin: 'Canada',
+    living_arrangement: 'Alone', dependents: 0, occupation_status: 'Student',
+    marital_status: 'Single', highest_education_level: 'Some college/university',
     title: '', organization: '', department: '', research_pattern: '',
     username: 'josh_wellness',
     program_group: 'Group 7 — Connections for Healthy Living',
@@ -92,7 +86,9 @@ const DEV_PROFILES = {
     email: 'w.montelpare@upei.ca', phone: '902-566-0001',
     address: '550 University Ave, Charlottetown, PE C1A 4P3',
     dob: '', sex: '', pronouns: '', pronounsCustom: '',
-    program: '', year: '', language: '', intl: '', country: '',
+    language: '',
+    living_arrangement: '', dependents: 0, occupation_status: '',
+    marital_status: '', highest_education_level: '',
     title: 'Dr.', organization: 'UPEI Faculty of Science',
     department: 'Applied Human Sciences', research_pattern: '',
     specialty: 'Community Health & Wellness',
@@ -112,7 +108,9 @@ const DEV_PROFILES = {
     first_name: 'Sarah', last_name: 'Chen',
     email: 's.chen@upei.ca', phone: '902-566-0042',
     address: '', dob: '', sex: '', pronouns: '', pronounsCustom: '',
-    program: '', year: '', language: '', intl: '', country: '',
+    language: '',
+    living_arrangement: '', dependents: 0, occupation_status: '',
+    marital_status: '', highest_education_level: '',
     title: '', organization: '',
     department: 'Applied Health Sciences', research_pattern: 'Community wellness longitudinal studies',
     username: 'sarah_research',
@@ -124,7 +122,9 @@ const DEV_PROFILES = {
     first_name: 'Admin', last_name: 'User',
     email: 'admin@upei.ca', phone: '902-566-0000',
     address: '', dob: '', sex: '', pronouns: '', pronounsCustom: '',
-    program: '', year: '', language: '', intl: '', country: '',
+    language: '',
+    living_arrangement: '', dependents: 0, occupation_status: '',
+    marital_status: '', highest_education_level: '',
     title: '', organization: '', department: '', research_pattern: '',
     username: 'sys_admin',
     program_group: '', caretaker: '',
@@ -138,7 +138,9 @@ const DEV_PROFILES = {
 const EMPTY_PROFILE = {
   first_name: '', last_name: '', email: '', phone: '', address: '',
   dob: '', sex: '', pronouns: '', pronounsCustom: '',
-  program: '', year: '', language: '', intl: 'No', country: '',
+  language: '', country_of_origin: '',
+  living_arrangement: '', dependents: 0, occupation_status: '',
+  marital_status: '', highest_education_level: '',
   title: '', organization: '', department: '', research_pattern: '',
   specialty: '', credentials: '', bio: '',
   username: '', program_group: '', caretaker: '',
@@ -237,115 +239,6 @@ function ToggleSwitch({ checked, onChange }) {
   );
 }
 
-function SearchableSelect({ value, onChange, options, placeholder = 'Search...' }) {
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
-  const inputRef = useRef(null);
-
-  const filtered = (() => {
-    if (!query) return options;
-    const normalized = query.toLowerCase();
-    const startsWith = options.filter((o) => o.toLowerCase().startsWith(normalized));
-    const contains = options.filter(
-      (o) => !o.toLowerCase().startsWith(normalized) && o.toLowerCase().includes(normalized),
-    );
-    return [...startsWith, ...contains];
-  })();
-
-  const handleSelect = (val) => {
-    onChange(val);
-    setQuery('');
-    setOpen(false);
-    setHighlightedIndex(0);
-  };
-
-  const handleFocus = () => {
-    if (inputRef.current) {
-      const rect = inputRef.current.getBoundingClientRect();
-      setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
-    }
-    setOpen(true);
-    setHighlightedIndex(0);
-  };
-
-  const handleKeyDown = (e) => {
-    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      handleFocus();
-      e.preventDefault();
-      return;
-    }
-
-    if (!open) return;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setHighlightedIndex((idx) => Math.min(idx + 1, Math.max(filtered.length - 1, 0)));
-      return;
-    }
-
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setHighlightedIndex((idx) => Math.max(idx - 1, 0));
-      return;
-    }
-
-    if (e.key === 'Enter' && filtered[highlightedIndex]) {
-      e.preventDefault();
-      handleSelect(filtered[highlightedIndex]);
-      return;
-    }
-
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      setOpen(false);
-      setQuery('');
-    }
-  };
-
-  return (
-    <div className="relative">
-      <input
-        ref={inputRef}
-        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-        placeholder={placeholder}
-        value={open ? query : value || ''}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); setHighlightedIndex(0); }}
-        onFocus={handleFocus}
-        onKeyDown={handleKeyDown}
-      />
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setQuery(''); }} />
-          <ul
-            className="fixed z-20 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"
-            style={{ top: `${dropdownPos.top}px`, left: `${dropdownPos.left}px`, width: `${dropdownPos.width}px` }}
-          >
-            {filtered.length === 0 ? (
-              <li className="px-3 py-2.5 text-sm text-slate-400">No results</li>
-            ) : (
-              filtered.map((opt, index) => (
-                <li key={opt}
-                  className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
-                    index === highlightedIndex
-                      ? 'bg-blue-50 text-blue-700 font-medium'
-                      : opt === value
-                        ? 'text-blue-700 font-medium'
-                        : 'text-slate-700 hover:bg-slate-50'
-                  }`}
-                  onMouseEnter={() => setHighlightedIndex(index)}
-                  onClick={() => handleSelect(opt)}
-                >{opt}</li>
-              ))
-            )}
-          </ul>
-        </>
-      )}
-    </div>
-  );
-}
-
 
 /* ══════════════════════════════════════════════
    ROLE-SPECIFIC FIELD BLOCKS
@@ -407,45 +300,51 @@ function ParticipantFields({ form, set, editing, profile }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4">
-        <ProfileField icon={null} label="PROGRAM"
-          value={editing ? form.program : profile.program} editing={editing} onChange={set('program')} />
-        <div className="mb-3.5">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">YEAR OF STUDY</span>
-          {editing
-            ? <ChipSelect options={['1', '2', '3', '4', '5+']} value={form.year} onChange={set('year')} />
-            : <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{profile.year || '—'}</span>}
-        </div>
+      <div className="mb-3.5">
         <ProfileField icon={null} label="LANGUAGE AT HOME"
           value={editing ? form.language : profile.language} editing={editing} onChange={set('language')} />
       </div>
 
       <div className="mb-3.5">
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">INTERNATIONAL STUDENT</span>
-        {editing ? (
-          <>
-            <ChipSelect options={['Yes', 'No']} value={form.intl} onChange={set('intl')} />
-            <div className={`transition-all ${form.intl === 'Yes' ? 'max-h-96 opacity-100 mt-2.5' : 'max-h-0 opacity-0 overflow-hidden'}`}>
-              <SearchableSelect
-                value={form.country || ''}
-                onChange={set('country')}
-                options={COUNTRIES}
-                placeholder="Search for your country..."
-              />
-              <p className="text-xs text-slate-400 mt-1">This helps us understand our international community</p>
-            </div>
-          </>
-        ) : (
-          <>
-            <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{profile.intl || '—'}</span>
-            {profile.intl === 'Yes' && profile.country && (
-              <div className="mt-3.5">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">COUNTRY OF ORIGIN</span>
-                <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{profile.country}</span>
-              </div>
-            )}
-          </>
-        )}
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">COUNTRY OF ORIGIN</span>
+        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
+          {profile.country_of_origin || '—'}
+        </span>
+      </div>
+
+      <div className="mb-3.5">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">LIVING ARRANGEMENT</span>
+        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
+          {profile.living_arrangement || '—'}
+        </span>
+      </div>
+
+      <div className="mb-3.5">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">NUMBER OF DEPENDENTS</span>
+        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
+          {profile.dependents != null ? profile.dependents : '—'}
+        </span>
+      </div>
+
+      <div className="mb-3.5">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">EMPLOYMENT STATUS</span>
+        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
+          {profile.occupation_status || '—'}
+        </span>
+      </div>
+
+      <div className="mb-3.5">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">MARITAL STATUS</span>
+        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
+          {profile.marital_status || '—'}
+        </span>
+      </div>
+
+      <div className="mb-3.5">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">HIGHEST EDUCATION LEVEL</span>
+        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
+          {profile.highest_education_level || '—'}
+        </span>
       </div>
     </>
   );
@@ -556,7 +455,6 @@ function PersonalInfoSection({ profile, onSave, role }) {
 
   const handleSave = async () => {
     const cleaned = { ...form };
-    if (cleaned.intl !== 'Yes') cleaned.country = '';
     if (cleaned.pronouns !== 'Other') cleaned.pronounsCustom = '';
     try {
       await api.updateUser({
@@ -968,6 +866,31 @@ export default function ProfilePage({ role = 'participant' }) {
           created_at: fmt(user.created_at),
           last_login: fmt(user.last_login_at),
         }));
+
+        // Load participant profile data
+        if (role === 'participant') {
+          try {
+            const p = await api.participantGetProfile().catch(() => null);
+            if (cancelled) return;
+            if (p) {
+              setProfile((prev) => ({
+                ...prev,
+                dob: p.dob || '',
+                sex: p.gender || '',
+                pronouns: p.pronouns || '',
+                language: p.primary_language || '',
+                country_of_origin: p.country_of_origin || '',
+                living_arrangement: p.living_arrangement || '',
+                dependents: p.dependents ?? 0,
+                occupation_status: p.occupation_status || '',
+                marital_status: p.marital_status || '',
+                highest_education_level: p.highest_education_level || '',
+              }));
+            }
+          } catch {
+            // Non-critical
+          }
+        }
 
         // Load caretaker-specific data from real endpoints
         if (role === 'caretaker') {
