@@ -2363,7 +2363,6 @@ async def get_user_goals(user_id: UUID, db: AsyncSession) -> list:
             "unit": unit,
             "is_completed": bool(g.get("is_completed", False)),
             "completion_context": g.get("completion_context", {}),
-            "goal_mode": g.get("goal_mode"),
             "progress_mode": g.get("progress_mode"),
             "direction": g.get("direction"),
             "window": g.get("window"),

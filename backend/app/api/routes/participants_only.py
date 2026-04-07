@@ -16,7 +16,7 @@ from app.db.session import get_db
 from app.core.dependency import require_permissions, check_current_user
 from app.core.permissions import GOAL_VIEW_ALL, GOAL_ADD, GOAL_EDIT, GOAL_DELETE
 from app.db.queries.Queries import ParticipantQuery, GoalTemplateQuery, CaretakersQuery, get_participant_id
-from app.schemas.schemas import HealthGoalUpdate, GoalProgressLog
+from app.schemas.schemas import HealthGoalUpdate, GoalProgressLog, GoalFromTemplateCreate
 from app.schemas.notification_schema import NotificationItem
 from app.schemas.caretaker_response_schema import FeedbackItem
 from app.schemas.filter_data_schema import ParticipantProfileUpdate
@@ -129,16 +129,23 @@ async def list_goals(
 @router.post("/goals/add/{template_id}")
 async def add_goal_from_template(
     template_id: uuid.UUID,
+    payload: GoalFromTemplateCreate | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(GOAL_ADD)),
-    target_value: float | None = None,
 ):
     """
     Add a researcher-defined goal template to the participant's dashboard.
     target_value overrides the template's default_target if provided.
+    window is selected by the participant and defaults to daily.
     """
     participant_id = get_participant_id(current_user)
-    return await ParticipantQuery(db).add_goal_from_template(participant_id, template_id, target_value)
+    payload = payload or GoalFromTemplateCreate()
+    return await ParticipantQuery(db).add_goal_from_template(
+        participant_id,
+        template_id,
+        payload.target_value,
+        payload.window,
+    )
 
 
 @router.get("/goals/{goal_id}")

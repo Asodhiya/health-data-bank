@@ -11,6 +11,8 @@ const normalizeType = (dt = "") => {
   return "number";
 };
 
+const supportsUnit = (dt = "") => normalizeType(dt) === "number";
+
 const typeLabel = (dt) => {
   const t = normalizeType(dt);
   return t.charAt(0).toUpperCase() + t.slice(1);
@@ -117,7 +119,7 @@ const DataElementManager = () => {
         code: newEl.code.trim().toLowerCase(),
         label: newEl.name.trim(),
         datatype: newEl.datatype,
-        unit: newEl.unit.trim() || null,
+        unit: supportsUnit(newEl.datatype) ? newEl.unit.trim() || null : null,
         description: newEl.description.trim() || null,
       });
       setElements((p) => [...p, res]);
@@ -429,7 +431,13 @@ const DataElementManager = () => {
                     <select
                       className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition bg-white"
                       value={newEl.datatype}
-                      onChange={(e) => setNewEl({ ...newEl, datatype: e.target.value })}
+                      onChange={(e) =>
+                        setNewEl((prev) => ({
+                          ...prev,
+                          datatype: e.target.value,
+                          unit: supportsUnit(e.target.value) ? prev.unit : "",
+                        }))
+                      }
                     >
                       <option value="number">Number</option>
                       <option value="string">Text</option>
@@ -449,12 +457,15 @@ const DataElementManager = () => {
                     </label>
                     <input
                       placeholder="e.g. mmHg, hrs, kg"
+                      disabled={!supportsUnit(newEl.datatype)}
                       className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition"
                       value={newEl.unit}
                       onChange={(e) => setNewEl({ ...newEl, unit: e.target.value })}
                     />
                     <p className="text-xs text-slate-400 mt-1.5">
-                      The unit of measurement displayed alongside values.
+                      {supportsUnit(newEl.datatype)
+                        ? "The unit of measurement displayed alongside numeric values."
+                        : "Units are only used for numeric data elements."}
                     </p>
                   </div>
                 </div>

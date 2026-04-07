@@ -13,6 +13,8 @@ export default function GoalTemplates() {
     description: "", // Ensure this is an empty string, not null
     element_id: "",
     default_target: 0,
+    progress_mode: "incremental",
+    direction: "at_least",
   });
 
   useEffect(() => {
@@ -72,6 +74,8 @@ export default function GoalTemplates() {
       description: "",
       element_id: "",
       default_target: 0,
+      progress_mode: "incremental",
+      direction: "at_least",
     });
     setShowModal(true);
   };
@@ -85,6 +89,8 @@ export default function GoalTemplates() {
       // 🟢 We use template.element_id directly from the JSON root
       element_id: template.element_id || "",
       default_target: template.default_target || 0,
+      progress_mode: template.progress_mode || "incremental",
+      direction: template.direction || "at_least",
     });
     setShowModal(true);
   };
@@ -211,6 +217,12 @@ export default function GoalTemplates() {
                       "Unknown"}
                   </span>
                 </p>
+                <p className="text-[10px] font-black uppercase text-slate-400 mt-2">
+                  Behavior:{" "}
+                  <span className="text-slate-600">
+                    {t.progress_mode || "incremental"} · {t.direction || "at_least"}
+                  </span>
+                </p>
               </div>
             </div>
 
@@ -288,10 +300,40 @@ export default function GoalTemplates() {
                   onChange={(e) =>
                     setFormData({
                       ...formData,
-                      default_target: parseInt(e.target.value),
+                      default_target: e.target.value === "" ? 0 : Number(e.target.value),
                     })
                   }
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                    Direction
+                  </label>
+                  <select
+                    className="w-full p-3 bg-white border-2 border-slate-100 rounded-xl font-bold text-sm outline-none focus:border-blue-400"
+                    value={formData.direction}
+                    onChange={(e) => setFormData({ ...formData, direction: e.target.value })}
+                  >
+                    <option value="at_least">At least</option>
+                    <option value="at_most">At most</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                  Progress Mode
+                </label>
+                <select
+                  className="w-full p-3 bg-white border-2 border-slate-100 rounded-xl font-bold text-sm outline-none focus:border-blue-400"
+                  value={formData.progress_mode}
+                  onChange={(e) => setFormData({ ...formData, progress_mode: e.target.value })}
+                >
+                  <option value="incremental">Incremental</option>
+                  <option value="absolute">Absolute</option>
+                </select>
               </div>
 
               <div>

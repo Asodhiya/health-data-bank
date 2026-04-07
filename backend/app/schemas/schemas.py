@@ -139,23 +139,27 @@ class HealthDataPointPayload(BaseModel):
     notes: Optional[str] = None
 
 
+ProgressMode = Literal["incremental", "absolute"]
+GoalDirection = Literal["at_least", "at_most"]
+GoalWindow = Literal["daily", "weekly", "monthly", "none"]
+
 class GoalTemplateCreate(BaseModel):
     element_id: UUID
     name: str
     description: Optional[str] = None
     default_target: Optional[float] = None
+    progress_mode: ProgressMode = "incremental"
+    direction: GoalDirection = "at_least"
+    window: GoalWindow = "daily"
 
 class GoalTemplateUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     default_target: Optional[float] = None
+    progress_mode: Optional[ProgressMode] = None
+    direction: Optional[GoalDirection] = None
+    window: Optional[GoalWindow] = None
     is_active: Optional[bool] = None
-
-
-GoalMode = Literal["daily", "long_term"]
-ProgressMode = Literal["incremental", "absolute"]
-GoalDirection = Literal["at_least", "at_most"]
-GoalWindow = Literal["daily", "weekly", "monthly", "none"]
 
 class HealthGoalPayload(BaseModel):
     template_id: UUID
@@ -163,12 +167,16 @@ class HealthGoalPayload(BaseModel):
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
 
+
+class GoalFromTemplateCreate(BaseModel):
+    target_value: Optional[float] = Field(None, gt=0, le=10000)
+    window: GoalWindow = "daily"
+
 class HealthGoalUpdate(BaseModel):
     target_value: Optional[float] = Field(None, gt=0, le=10000)
     status: Optional[str] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
-    goal_mode: Optional[GoalMode] = None
     progress_mode: Optional[ProgressMode] = None
     direction: Optional[GoalDirection] = None
     window: Optional[GoalWindow] = None

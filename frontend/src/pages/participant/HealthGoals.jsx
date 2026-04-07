@@ -62,6 +62,10 @@ function isSameDay(d1, d2) {
     d1.getDate() === d2.getDate();
 }
 
+function usesBooleanLogging(datatype) {
+  return normalizeDatatype(datatype) === "boolean";
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function HealthGoals() {
@@ -76,6 +80,8 @@ export default function HealthGoals() {
   const [logInputs, setLogInputs]         = useState({});
   const [logErrors, setLogErrors]         = useState({});
   const [addErrors, setAddErrors]         = useState({});
+  const [customTargets, setCustomTargets] = useState({});
+  const [customWindows, setCustomWindows] = useState({});
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [logModalGoal, setLogModalGoal]   = useState(null); // goal being logged via modal
   const [goalOrder, setGoalOrder]         = useState(() => {
@@ -177,7 +183,20 @@ export default function HealthGoals() {
     setAddErrors((p) => ({ ...p, [templateId]: null }));
     try {
       setActionLoading(templateId);
-      await api.addGoalFromTemplate(templateId);
+      const rawTarget = customTargets[templateId];
+      const parsedTarget =
+        rawTarget === "" || rawTarget == null ? undefined : Number(rawTarget);
+      const selectedWindow = customWindows[templateId] || "daily";
+      await api.addGoalFromTemplate(
+        templateId,
+        {
+          target_value:
+            Number.isFinite(parsedTarget) && parsedTarget > 0 ? parsedTarget : undefined,
+          window: selectedWindow,
+        },
+      );
+      setCustomTargets((p) => ({ ...p, [templateId]: "" }));
+      setCustomWindows((p) => ({ ...p, [templateId]: "daily" }));
       await fetchData();
     } catch (err) {
       const msg = err?.response?.status === 409
@@ -195,12 +214,12 @@ export default function HealthGoals() {
     if (customValue === "" || customValue === null) return;
     setLogErrors((p) => ({ ...p, [goalId]: null }));
     if (typeof customValue === "string" && !isNaN(customValue) && customValue.trim() !== "") {
-      if (Number(customValue) <= 0) {
-        setLogErrors((p) => ({ ...p, [goalId]: "Value must be greater than 0." }));
+      if (Number(customValue) < 0) {
+        setLogErrors((p) => ({ ...p, [goalId]: "Value cannot be negative." }));
         return;
       }
-    } else if (typeof customValue === "number" && customValue <= 0) {
-      setLogErrors((p) => ({ ...p, [goalId]: "Value must be greater than 0." }));
+    } else if (typeof customValue === "number" && customValue < 0) {
+      setLogErrors((p) => ({ ...p, [goalId]: "Value cannot be negative." }));
       return;
     }
     try {
@@ -210,7 +229,7 @@ export default function HealthGoals() {
       const payload = { observed_at: new Date().toISOString() };
       if (typeof val === "string") payload.value_text = val;
       else if (typeof val === "boolean") payload.value_bool = val;
-      else payload.value_number = Number(val);
+      else payload.value = Number(val);
       await api.logGoalProgress(goalId, payload);
       setLogInputs((p) => ({ ...p, [goalId]: "" }));
       setLogModalGoal(null);
@@ -430,8 +449,11 @@ export default function HealthGoals() {
               const tId = template.template_id;
               const name = template.name || template.element?.label || "Wellness Goal";
               const desc = template.description || template.element?.description || "";
+              const datatype = normalizeDatatype(template.element?.datatype);
               const target = template.default_target ?? 1;
               const unit = template.element?.unit || "";
+              const customTarget = customTargets[tId] ?? "";
+              const selectedWindow = customWindows[tId] ?? "daily";
               const isAlreadyAdded = activeGoals.some((g) => g.template_id === tId);
               const isLoading = actionLoading === tId;
               const addError = addErrors[tId];
@@ -445,12 +467,54 @@ export default function HealthGoals() {
                 >
                   <div className="flex items-start justify-between mb-2">
                     <h4 className="text-base font-bold text-slate-800 leading-tight pr-2 capitalize">{name}</h4>
-                    <span className="bg-slate-50 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border border-slate-100 whitespace-nowrap">Daily</span>
+                    <span className="bg-slate-50 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border border-slate-100 whitespace-nowrap">
+                      {selectedWindow === "none" ? "No reset" : selectedWindow}
+                    </span>
                   </div>
                   {desc && <p className="text-sm text-slate-500 mb-4 line-clamp-2">{desc}</p>}
-                  {target && unit && (
-                    <p className="text-xs text-blue-600 font-semibold mb-4">Target: {target} {unit}</p>
-                  )}
+                  <div className="mb-4 space-y-2">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
+                        Time Frame
+                      </label>
+                      <select
+                        value={selectedWindow}
+                        onChange={(e) =>
+                          setCustomWindows((p) => ({ ...p, [tId]: e.target.value }))
+                        }
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="none">No reset</option>
+                      </select>
+                    </div>
+                    <p className="text-xs text-blue-600 font-semibold">
+                      Default target: {target}{unit ? ` ${unit}` : ""}
+                    </p>
+                    {datatype === "number" && (
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
+                          Your Target
+                        </label>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="any"
+                          value={customTarget}
+                          onChange={(e) =>
+                            setCustomTargets((p) => ({ ...p, [tId]: e.target.value }))
+                          }
+                          placeholder={`${target}${unit ? ` ${unit}` : ""}`}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <p className="mt-1 text-[10px] text-slate-400">
+                          Leave blank to use the default target.
+                        </p>
+                      </div>
+                    )}
+                  </div>
                   {addError && (
                     <p className="text-xs text-rose-500 font-medium flex items-center gap-1 mb-3">
                       <AlertIco size={12} /> {addError}
@@ -507,7 +571,7 @@ function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actio
 
   const pct = Math.min(100, Math.max(0, target > 0
     ? direction === "at_most"
-      ? current > 0 ? Math.round((target / current) * 100) : 0
+      ? current <= target ? 100 : Math.round((target / current) * 100)
       : Math.round((current / target) * 100)
     : 0));
 
@@ -754,10 +818,13 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
   const desc     = goal.description || goal.element?.description || "";
   const datatype = normalizeDatatype(goal.element?.datatype);
   const progressMode = goal.progress_mode || "incremental";
+  const direction = goal.direction || "at_least";
   const target   = goal.target_value ?? 1;
   const current  = goal.current_value ?? 0;
   const done     = goal.is_completed;
   const isLogging = actionLoading === `log_${goalId}`;
+  const isBooleanGoal = usesBooleanLogging(datatype);
+  const isNumericGoal = datatype === "number";
 
   const inputVal = logInputs[goalId] || "";
   const setVal = (v) => {
@@ -797,7 +864,7 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
           <div className="flex items-center justify-between text-xs">
             <span className="text-slate-400 font-medium">Current progress</span>
             <span className={`font-bold ${done ? "text-emerald-600" : "text-blue-600"}`}>
-              {Number(current).toLocaleString()} / {Number(target).toLocaleString()} {unit}
+              {Number(current).toLocaleString()} {direction === "at_most" ? "of max" : "/"} {Number(target).toLocaleString()} {unit}
             </span>
           </div>
 
@@ -813,12 +880,12 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
               />
             )}
-            {datatype === "number" && (progressMode === "absolute" || target > 10) && (
+            {isNumericGoal && (
               <div className="flex gap-2">
                 <input
                   type="number"
                   autoFocus
-                  min="0.01"
+                  min="0"
                   placeholder={progressMode === "absolute" ? `Current value${unit ? ` (${unit})` : ""}` : `Add amount${unit ? ` (${unit})` : ""}`}
                   value={inputVal}
                   onChange={(e) => setVal(e.target.value)}
@@ -827,8 +894,10 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
                 />
               </div>
             )}
-            {(datatype === "boolean" || (datatype === "number" && progressMode !== "absolute" && target <= 10)) && (
-              <p className="text-sm text-slate-500 text-center py-2">Click <span className="font-bold text-blue-600">Log +1</span> to record a step.</p>
+            {isBooleanGoal && (
+              <p className="text-sm text-slate-500 text-center py-2">
+                Record whether you completed this goal for the current window.
+              </p>
             )}
 
             {/* Error */}
@@ -845,21 +914,30 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all">
             Cancel
           </button>
-          {(datatype === "boolean" || (datatype === "number" && progressMode !== "absolute" && target <= 10)) ? (
-            <button
-              onClick={() => submit(1)}
-              disabled={isLogging}
-              className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm"
-            >
-              {isLogging ? "Logging…" : "Log +1"}
-            </button>
+          {isBooleanGoal ? (
+            <>
+              <button
+                onClick={() => submit(false)}
+                disabled={isLogging}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-700 bg-slate-200 hover:bg-slate-300 disabled:opacity-50 transition-all shadow-sm"
+              >
+                {isLogging ? "Saving…" : "No"}
+              </button>
+              <button
+                onClick={() => submit(true)}
+                disabled={isLogging}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm"
+              >
+                {isLogging ? "Saving…" : "Yes"}
+              </button>
+            </>
           ) : (
             <button
               onClick={() => submit(inputVal)}
-              disabled={isLogging || !inputVal}
+              disabled={isLogging || inputVal === ""}
               className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm"
             >
-              {isLogging ? "Saving…" : progressMode === "absolute" ? "Set value" : "Log entry"}
+              {isLogging ? "Saving…" : progressMode === "absolute" ? "Set value" : "Log amount"}
             </button>
           )}
         </div>

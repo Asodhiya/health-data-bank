@@ -211,6 +211,8 @@ function CreateDataElementModal({ onClose, onCreated, onLinked }) {
 
   useEffect(() => () => clearTimeout(errorTimer.current), []);
 
+  const supportsUnit = newDatatype === 'numeric';
+
   const handleCreate = async () => {
     if (!newLabel.trim() || !newCode.trim()) { showError('Label and code are required.'); return; }
     setSaving(true);
@@ -221,7 +223,7 @@ function CreateDataElementModal({ onClose, onCreated, onLinked }) {
         code: newCode.trim().toLowerCase().replace(/\s+/g, '_'),
         datatype: newDatatype,
         description: newDescription.trim() || undefined,
-        unit: newUnit.trim() || undefined,
+        unit: supportsUnit ? newUnit.trim() || undefined : undefined,
       });
       onCreated?.(el);
       onLinked(el.element_id);
@@ -258,7 +260,11 @@ function CreateDataElementModal({ onClose, onCreated, onLinked }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">Data Type</label>
-              <select value={newDatatype} onChange={(e) => setNewDatatype(e.target.value)}
+              <select value={newDatatype} onChange={(e) => {
+                const nextType = e.target.value;
+                setNewDatatype(nextType);
+                if (nextType !== 'numeric') setNewUnit('');
+              }}
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition bg-white">
                 <option value="numeric">Numeric</option>
                 <option value="text">Text</option>
@@ -269,8 +275,12 @@ function CreateDataElementModal({ onClose, onCreated, onLinked }) {
             <div>
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">Unit</label>
               <input value={newUnit} onChange={(e) => setNewUnit(e.target.value)}
+                disabled={!supportsUnit}
                 placeholder="e.g. mmHg, kg"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
+              <p className="text-xs text-slate-400 mt-1">
+                {supportsUnit ? 'Only numeric elements use units.' : 'Units are disabled for non-numeric elements.'}
+              </p>
             </div>
           </div>
           <div>

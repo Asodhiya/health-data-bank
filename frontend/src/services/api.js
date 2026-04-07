@@ -848,10 +848,11 @@ export const api = {
 
   getParticipantGoal: (goalId) => request(`/participant/goals/${goalId}`),
 
-  addGoalFromTemplate: (templateId, targetValue = null) => {
-    const url = `/participant/goals/add/${templateId}${targetValue ? `?target_value=${targetValue}` : ""}`;
-    return request(url, { method: "POST" });
-  },
+  addGoalFromTemplate: (templateId, payload = {}) =>
+    request(`/participant/goals/add/${templateId}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   updateParticipantGoal: (goalId, payload) =>
     request(`/participant/goals/${goalId}`, {

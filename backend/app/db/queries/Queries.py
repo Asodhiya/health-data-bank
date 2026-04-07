@@ -310,7 +310,13 @@ class ParticipantQuery:
         goal, element = row
         return await self._serialize_goal(goal, element, participant_id)
 
-    async def add_goal_from_template(self, participant_id: uuid.UUID, template_id: uuid.UUID, target_value: float | None = None):
+    async def add_goal_from_template(
+        self,
+        participant_id: uuid.UUID,
+        template_id: uuid.UUID,
+        target_value: float | None = None,
+        window: str | None = None,
+    ):
         participants_goal = await self.get_goals(participant_id)
         if len(participants_goal) >= 10:
             raise HTTPException(status_code=400, detail="Maximum 10 goals allowed")
@@ -334,6 +340,9 @@ class ParticipantQuery:
             template_id=template.template_id,
             element_id=template.element_id,
             target_value=target_value if target_value is not None else template.default_target,
+            progress_mode=template.progress_mode or "incremental",
+            direction=template.direction or "at_least",
+            window=window or "daily",
         )
         self.db.add(goal)
         try:
