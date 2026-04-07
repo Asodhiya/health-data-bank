@@ -108,8 +108,6 @@ export default function ConsentPage() {
         signature,
       });
       await api.submitConsent(payload);
-      sessionStorage.removeItem('consent_answers');
-      sessionStorage.removeItem('consent_signature');
       navigate('/onboarding/intake');
     } catch (err) {
       setError(err.message || 'Failed to submit consent. Please try again.');

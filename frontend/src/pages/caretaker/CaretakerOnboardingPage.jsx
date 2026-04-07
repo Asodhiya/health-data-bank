@@ -91,9 +91,23 @@ function isFieldFilled(key, form) {
 
 export default function CaretakerOnboardingPage() {
   const navigate = useNavigate();
-  const { refetch } = useAuth();
+  const { logout, refetch } = useAuth();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      navigate('/login', { replace: true });
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   const [form, setForm] = useState({
+    title: "",
+    organization: "",
     credentials: "",
     specialty: "",
     bio: "",
@@ -120,7 +134,7 @@ export default function CaretakerOnboardingPage() {
   const completedCount = REQUIRED_FIELDS.length - missingFields.length;
   const progressPct = Math.round((completedCount / REQUIRED_FIELDS.length) * 100);
 
-  const showMissing = touched || attempted;
+  const showMissing = attempted;
   const isMissing = (key) => showMissing && !isFieldFilled(key, form);
   const isShaking = (key) => shakeFields.includes(key);
 
@@ -139,6 +153,8 @@ export default function CaretakerOnboardingPage() {
     setSaving(true);
     try {
       await api.caretakerUpdateProfile({
+        title: form.title || null,
+        organization: form.organization || null,
         credentials: form.credentials,
         specialty: form.specialty || null,
         bio: form.bio || null,
@@ -160,9 +176,14 @@ export default function CaretakerOnboardingPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-slate-100 flex justify-center p-4 sm:p-8">
         <div className="w-full max-w-2xl flex flex-col items-center">
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-800 tracking-tight mb-6 text-center">
-            Health Data Bank
-          </h1>
+          <div className="w-full mb-6 flex items-start justify-between gap-3">
+            <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-800 tracking-tight">
+              Health Data Bank
+            </h1>
+            <button type="button" className="shrink-0 rounded-xl border border-slate-200 bg-white/80 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60" disabled={isLoggingOut} onClick={handleLogout}>
+              {isLoggingOut ? 'Logging out...' : 'Logout'}
+            </button>
+          </div>
           <div className="w-full bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-slate-200/60 p-8 sm:p-10 text-center">
             <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-5">
               <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -268,6 +289,26 @@ export default function CaretakerOnboardingPage() {
               Professional Information
             </p>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+              <Field id="field-title" label="Title">
+                <ChipSelect
+                  options={["Dr.", "Prof.", "Mr.", "Ms.", "Mx."]}
+                  value={form.title}
+                  onChange={set("title")}
+                />
+              </Field>
+
+              <Field id="field-organization" label="Organization" hint="e.g. UPEI, Island Health Authority">
+                <input
+                  className={inputCls}
+                  placeholder="e.g. UPEI Faculty of Science"
+                  value={form.organization}
+                  onChange={setInput("organization")}
+                  maxLength={50}
+                />
+              </Field>
+            </div>
+
             <Field
               id="field-credentials"
               label="License / Credentials"
@@ -281,6 +322,7 @@ export default function CaretakerOnboardingPage() {
                 placeholder="e.g. RN, MD, CSEP-CEP"
                 value={form.credentials}
                 onChange={setInput("credentials")}
+                maxLength={50}
               />
             </Field>
 
@@ -290,6 +332,7 @@ export default function CaretakerOnboardingPage() {
                 placeholder="e.g. Mental Health, Sports Medicine, Chronic Disease"
                 value={form.specialty}
                 onChange={setInput("specialty")}
+                maxLength={80}
               />
             </Field>
 
@@ -300,9 +343,9 @@ export default function CaretakerOnboardingPage() {
                 placeholder="Tell participants about your background and approach..."
                 value={form.bio}
                 onChange={setInput("bio")}
-                maxLength={500}
+                maxLength={300}
               />
-              <p className="text-xs text-slate-400 mt-1 text-right">{form.bio.length}/500</p>
+              <p className="text-xs text-slate-400 mt-1 text-right">{form.bio.length}/300</p>
             </Field>
           </div>
 

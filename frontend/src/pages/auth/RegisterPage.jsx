@@ -195,6 +195,7 @@ export default function RegisterPage() {
               value={form.first_name}
               onChange={set('first_name')}
               required
+              maxLength={30}
             />
           </div>
           <div className="relative">
@@ -210,6 +211,7 @@ export default function RegisterPage() {
               value={form.last_name}
               onChange={set('last_name')}
               required
+              maxLength={30}
             />
           </div>
         </div>

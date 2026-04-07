@@ -183,7 +183,7 @@ function ChipSelect({ options, value, onChange, multi = false }) {
   );
 }
 
-function ProfileField({ icon, label, value, editing, onChange, type = 'text', placeholder = '' }) {
+function ProfileField({ icon, label, value, editing, onChange, type = 'text', placeholder = '', maxLength }) {
   return (
     <div className="mb-3.5">
       <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">{label}</span>
@@ -195,9 +195,10 @@ function ProfileField({ icon, label, value, editing, onChange, type = 'text', pl
             type={type} value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder || label.toLowerCase()}
+            maxLength={maxLength}
           />
         ) : (
-          <span className={`block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg ${icon ? 'pl-10 pr-3' : 'px-3'}`}>
+          <span className={`block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg overflow-hidden text-ellipsis whitespace-nowrap ${icon ? 'pl-10 pr-3' : 'px-3'}`}>
             {value || '—'}
           </span>
         )}
@@ -350,28 +351,31 @@ function CaretakerFields({ form, set, editing, profile }) {
             ? <ChipSelect options={['Dr.', 'Prof.', 'Mr.', 'Ms.', 'Mx.']} value={form.title} onChange={set('title')} />
             : <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{profile.title || '—'}</span>}
         </div>
-        <ProfileField icon={null} label="CREDENTIALS"
+        <ProfileField icon={null} label="LICENSE / CREDENTIALS"
           value={editing ? form.credentials : profile.credentials}
-          editing={editing} onChange={set('credentials')} placeholder="e.g. PhD, RN, CSEP-CEP" />
+          editing={editing} onChange={set('credentials')} placeholder="e.g. PhD, RN, CSEP-CEP" maxLength={50} />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
         <ProfileField icon={<BriefcaseIcon />} label="ORGANIZATION"
           value={editing ? form.organization : profile.organization}
-          editing={editing} onChange={set('organization')} />
+          editing={editing} onChange={set('organization')} maxLength={50} />
         <ProfileField icon={null} label="DEPARTMENT"
           value={editing ? form.department : profile.department}
-          editing={editing} onChange={set('department')} />
+          editing={editing} onChange={set('department')} maxLength={50} />
       </div>
       <ProfileField icon={null} label="SPECIALTY / FOCUS AREA"
         value={editing ? form.specialty : profile.specialty}
-        editing={editing} onChange={set('specialty')} placeholder="e.g. Community Health, Chronic Disease Management" />
+        editing={editing} onChange={set('specialty')} placeholder="e.g. Community Health, Chronic Disease Management" maxLength={80} />
       <div className="mb-3.5">
         <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">BIO</span>
         {editing ? (
-          <textarea className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-            rows={3} value={form.bio || ''} onChange={(e) => set('bio')(e.target.value)} placeholder="Tell participants and colleagues about your background…" />
+          <>
+            <textarea className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none max-h-40 overflow-y-auto"
+              rows={3} value={form.bio || ''} onChange={(e) => set('bio')(e.target.value)} placeholder="Tell participants and colleagues about your background…" maxLength={300} />
+            <p className="text-xs text-slate-400 mt-1 text-right">{(form.bio || '').length}/300</p>
+          </>
         ) : (
-          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 whitespace-pre-wrap">{profile.bio || '—'}</span>
+          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 whitespace-pre-wrap max-h-32 overflow-y-auto">{profile.bio || '—'}</span>
         )}
       </div>
 
@@ -419,28 +423,31 @@ function ResearcherFields({ form, set, editing, profile }) {
             ? <ChipSelect options={['Dr.', 'Prof.', 'Mr.', 'Ms.', 'Mx.']} value={form.title} onChange={set('title')} />
             : <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{profile.title || '—'}</span>}
         </div>
-        <ProfileField icon={null} label="CREDENTIALS"
+        <ProfileField icon={null} label="LICENSE / CREDENTIALS"
           value={editing ? form.credentials : profile.credentials}
-          editing={editing} onChange={set('credentials')} placeholder="e.g. PhD, MSc" />
+          editing={editing} onChange={set('credentials')} placeholder="e.g. PhD, MSc" maxLength={50} />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
         <ProfileField icon={<BriefcaseIcon />} label="ORGANIZATION"
           value={editing ? form.organization : profile.organization}
-          editing={editing} onChange={set('organization')} />
+          editing={editing} onChange={set('organization')} maxLength={50} />
         <ProfileField icon={<BookIcon />} label="DEPARTMENT"
           value={editing ? form.department : profile.department}
-          editing={editing} onChange={set('department')} />
+          editing={editing} onChange={set('department')} maxLength={50} />
       </div>
       <ProfileField icon={null} label="RESEARCH FOCUS"
         value={editing ? form.specialty : profile.specialty}
-        editing={editing} onChange={set('specialty')} placeholder="e.g. Community Health, Aging, Exercise Science" />
+        editing={editing} onChange={set('specialty')} placeholder="e.g. Community Health, Aging, Exercise Science" maxLength={80} />
       <div className="mb-3.5">
         <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">BIO</span>
         {editing ? (
-          <textarea className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-            rows={3} value={form.bio || ''} onChange={(e) => set('bio')(e.target.value)} placeholder="Tell participants and colleagues about your research background…" />
+          <>
+            <textarea className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none max-h-40 overflow-y-auto"
+              rows={3} value={form.bio || ''} onChange={(e) => set('bio')(e.target.value)} placeholder="Tell participants and colleagues about your research background…" maxLength={300} />
+            <p className="text-xs text-slate-400 mt-1 text-right">{(form.bio || '').length}/300</p>
+          </>
         ) : (
-          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 whitespace-pre-wrap">{profile.bio || '—'}</span>
+          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 whitespace-pre-wrap max-h-32 overflow-y-auto">{profile.bio || '—'}</span>
         )}
       </div>
     </>
@@ -461,23 +468,26 @@ function AdminFields({ form, set, editing, profile }) {
         </div>
         <ProfileField icon={null} label="ROLE TITLE"
           value={editing ? form.role_title : profile.role_title}
-          editing={editing} onChange={set('role_title')} placeholder="e.g. System Administrator" />
+          editing={editing} onChange={set('role_title')} placeholder="e.g. System Administrator" maxLength={50} />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
         <ProfileField icon={<BriefcaseIcon />} label="ORGANIZATION"
           value={editing ? form.organization : profile.organization}
-          editing={editing} onChange={set('organization')} />
+          editing={editing} onChange={set('organization')} maxLength={50} />
         <ProfileField icon={<BookIcon />} label="DEPARTMENT"
           value={editing ? form.department : profile.department}
-          editing={editing} onChange={set('department')} />
+          editing={editing} onChange={set('department')} maxLength={50} />
       </div>
       <div className="mb-3.5">
         <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">BIO</span>
         {editing ? (
-          <textarea className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-            rows={3} value={form.bio || ''} onChange={(e) => set('bio')(e.target.value)} placeholder="A brief description of your role and responsibilities…" />
+          <>
+            <textarea className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none max-h-40 overflow-y-auto"
+              rows={3} value={form.bio || ''} onChange={(e) => set('bio')(e.target.value)} placeholder="A brief description of your role and responsibilities…" maxLength={300} />
+            <p className="text-xs text-slate-400 mt-1 text-right">{(form.bio || '').length}/300</p>
+          </>
         ) : (
-          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 whitespace-pre-wrap">{profile.bio || '—'}</span>
+          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 whitespace-pre-wrap max-h-32 overflow-y-auto">{profile.bio || '—'}</span>
         )}
       </div>
       <div className="mb-3.5">
@@ -621,9 +631,9 @@ function PersonalInfoSection({ profile, onSave, role }) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
         <ProfileField icon={<UserIcon />} label="FIRST NAME"
-          value={editing ? form.first_name : profile.first_name} editing={editing} onChange={set('first_name')} />
+          value={editing ? form.first_name : profile.first_name} editing={editing} onChange={set('first_name')} maxLength={30} />
         <ProfileField icon={<UserIcon />} label="LAST NAME"
-          value={editing ? form.last_name : profile.last_name} editing={editing} onChange={set('last_name')} />
+          value={editing ? form.last_name : profile.last_name} editing={editing} onChange={set('last_name')} maxLength={30} />
       </div>
       <ProfileField icon={<MailIcon />} label="EMAIL ADDRESS"
         value={editing ? form.email : profile.email} editing={editing} onChange={set('email')} type="email" />
@@ -956,9 +966,9 @@ export default function ProfilePage({ role = 'participant' }) {
         <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-xl font-bold shrink-0">
           {initials}
         </div>
-        <div>
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <h1 className="text-xl font-bold text-slate-800">{role === 'caretaker' && profile.title ? `${profile.title} ` : ''}{profile.first_name} {profile.last_name}</h1>
+            <h1 className="text-xl font-bold text-slate-800 truncate max-w-full">{role === 'caretaker' && profile.title ? `${profile.title} ` : ''}{profile.first_name} {profile.last_name}</h1>
             <span className="text-xs font-bold text-blue-600 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
               {roleLabel}
             </span>

@@ -217,6 +217,8 @@ export default function IntakePage() {
     try {
       await api.submitIntake({ profile, answers });
       await api.completeOnboarding();
+      sessionStorage.removeItem('consent_answers');
+      sessionStorage.removeItem('consent_signature');
       await refetch(); // refresh auth context so intake_completed becomes true
       navigate('/participant');
     } catch (err) {
