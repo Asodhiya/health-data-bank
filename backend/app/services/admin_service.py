@@ -1812,6 +1812,11 @@ async def update_user(user_id: UUID, payload: AdminUserUpdate, actor_id: UUID, d
         elif requested_role == "caretaker":
             _invalidate_caretakers_cache()
 
+        if "participant" in current_role_names and requested_role != "participant":
+            memberships_closed = await _deactivate_participant_group_memberships(db, user_id)
+            if memberships_closed:
+                _invalidate_groups_cache()
+
         if requested_role not in current_role_names or len(current_roles) != 1:
             if current_roles:
                 keep_link = current_roles[0][0]

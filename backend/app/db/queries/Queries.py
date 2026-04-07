@@ -1257,6 +1257,8 @@ class CaretakersQuery:
             .join(Group, Group.group_id == GroupMember.group_id)
             .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
             .join(User, User.user_id == ParticipantProfile.user_id)
+            .join(UserRole, UserRole.user_id == User.user_id)
+            .join(Role, Role.role_id == UserRole.role_id)
             .outerjoin(deployed_sq, deployed_sq.c.group_id == GroupMember.group_id)
             .outerjoin(
                 submissions_sq,
@@ -1268,6 +1270,7 @@ class CaretakersQuery:
             .where(CaretakerProfile.user_id == user_id)
             .where(GroupMember.left_at == None)
             .where(User.status.is_(True))
+            .where(func.lower(Role.role_name) == "participant")
         )
 
         # ── Filters ───────────────────────────────────────────────────────────
