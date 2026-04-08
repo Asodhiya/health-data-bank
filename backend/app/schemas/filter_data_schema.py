@@ -54,12 +54,8 @@ class ParticipantFilter(BaseModel):
     occupation_status: Optional[str] = None
     living_arrangement: Optional[str] = None
     highest_education_level: Optional[str] = None
-<<<<<<< HEAD
     dependents_min: Optional[int] = None
     dependents_max: Optional[int] = None
-=======
-    dependents: Optional[int] = None
->>>>>>> origin/developer
     marital_status: Optional[str] = None
     age_min: Optional[int] = None
     age_max: Optional[int] = None

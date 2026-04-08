@@ -1090,73 +1090,7 @@ export default function GoalTemplates() {
                 </div>
               </div>
 
-<<<<<<< HEAD
               <div className="px-6 pb-5 flex gap-3 justify-end">
-=======
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
-                  Default Target
-                </label>
-                <input
-                  required
-                  type="number"
-                  className="w-full p-3 bg-slate-50 border-2 border-slate-100 rounded-xl outline-none focus:border-blue-400 font-bold text-sm"
-                  value={formData.default_target}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      default_target: e.target.value === "" ? 0 : Number(e.target.value),
-                    })
-                  }
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
-                    Direction
-                  </label>
-                  <select
-                    className="w-full p-3 bg-white border-2 border-slate-100 rounded-xl font-bold text-sm outline-none focus:border-blue-400"
-                    value={formData.direction}
-                    onChange={(e) => setFormData({ ...formData, direction: e.target.value })}
-                  >
-                    <option value="at_least">At least</option>
-                    <option value="at_most">At most</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
-                  Progress Mode
-                </label>
-                <select
-                  className="w-full p-3 bg-white border-2 border-slate-100 rounded-xl font-bold text-sm outline-none focus:border-blue-400"
-                  value={formData.progress_mode}
-                  onChange={(e) => setFormData({ ...formData, progress_mode: e.target.value })}
-                >
-                  <option value="incremental">Incremental</option>
-                  <option value="absolute">Absolute</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
-                  Description
-                </label>
-                <textarea
-                  rows="3"
-                  className="w-full p-3 bg-slate-50 border-2 border-slate-100 rounded-xl outline-none focus:border-blue-400 font-bold text-sm"
-                  value={formData.description}
-                  onChange={(e) =>
-                    setFormData({ ...formData, description: e.target.value })
-                  }
-                />
-              </div>
-
-              <div className="flex gap-3 pt-4">
->>>>>>> origin/developer
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}

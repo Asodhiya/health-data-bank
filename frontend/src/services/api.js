@@ -830,7 +830,6 @@ export const api = {
       method: "DELETE",
     }),
 
-<<<<<<< HEAD
   listDeletedGoalTemplates: () => request("/goal-templates/deleted"),
 
   restoreGoalTemplate: (templateId) =>
@@ -876,8 +875,7 @@ export const api = {
     window.URL.revokeObjectURL(url);
   },
 
-=======
->>>>>>> origin/developer
+
   // ── Participant: Profile ──
   participantGetProfile: () => request("/participant/profile"),
   participantUpdateProfile: (payload) =>

@@ -13,17 +13,10 @@
     "@tailwindcss/vite": "^4.1.18",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-<<<<<<< HEAD
     "react-markdown": "^9.1.0",
     "react-router-dom": "^7.13.0",
     "recharts": "^3.8.0",
     "remark-gfm": "^4.0.1"
-=======
-    "react-markdown": "^9.0.1",
-    "react-router-dom": "^7.13.0",
-    "recharts": "^3.8.0",
-    "remark-gfm": "^4.0.0"
->>>>>>> origin/developer
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
