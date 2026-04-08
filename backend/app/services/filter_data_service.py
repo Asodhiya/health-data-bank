@@ -1,29 +1,34 @@
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException
 from app.db.models import (
     User, FormSubmission, ParticipantProfile, SurveyForm,
     HealthDataPoint, DataElement, UserRole, Role, FormDeployment, Group, GroupMember,
 )
 from app.schemas.filter_data_schema import ParticipantFilter
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 import csv
 import io
 from typing import Optional, Set
 from starlette.responses import StreamingResponse
 
 
+def _utc_today() -> date:
+    return datetime.now(timezone.utc).date()
+
+
 def calculate_age(born):
     if not born:
         return None
-    today = date.today()
+    today = _utc_today()
     return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
 
 
 async def get_available_surveys(db: AsyncSession):
-    """Fetches published forms that have at least one completed submission."""
-    published_stmt = (
+    """Fetches forms (any status) that have at least one completed submission."""
+    stmt = (
         select(SurveyForm)
-        .where(SurveyForm.status == 'PUBLISHED')
+        .where(SurveyForm.status.in_(['PUBLISHED', 'ARCHIVED', 'DELETED']))
         .where(
             select(func.count(FormSubmission.submission_id))
             .where(
@@ -35,8 +40,8 @@ async def get_available_surveys(db: AsyncSession):
         )
     )
 
-    published_result = await db.execute(published_stmt)
-    forms = published_result.scalars().all()
+    result = await db.execute(stmt)
+    forms = result.scalars().all()
 
     if forms:
         form_ids = [f.form_id for f in forms]
@@ -52,6 +57,7 @@ async def get_available_surveys(db: AsyncSession):
             form.deployed_groups = group_map.get(form.form_id, [])
 
     return forms
+
 
 
 async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, filters: ParticipantFilter = None):
@@ -137,15 +143,21 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
         if filters.pronouns:
             conditions.append(func.lower(ParticipantProfile.pronouns) == filters.pronouns.lower())
         if filters.primary_language:
-            conditions.append(func.lower(ParticipantProfile.primary_language) == filters.primary_language.lower())
+            lang_conditions = [
+                func.lower(ParticipantProfile.primary_language).contains(lang.lower())
+                for lang in filters.primary_language
+            ]
+            conditions.append(or_(*lang_conditions))
         if filters.occupation_status:
             conditions.append(func.lower(ParticipantProfile.occupation_status) == filters.occupation_status.lower())
         if filters.living_arrangement:
             conditions.append(func.lower(ParticipantProfile.living_arrangement) == filters.living_arrangement.lower())
         if filters.highest_education_level:
             conditions.append(func.lower(ParticipantProfile.highest_education_level) == filters.highest_education_level.lower())
-        if filters.dependents is not None:
-            conditions.append(ParticipantProfile.dependents == filters.dependents)
+        if getattr(filters, "dependents_min", None) is not None:
+            conditions.append(ParticipantProfile.dependents >= filters.dependents_min)
+        if getattr(filters, "dependents_max", None) is not None:
+            conditions.append(ParticipantProfile.dependents <= filters.dependents_max)
         if filters.marital_status:
             conditions.append(func.lower(ParticipantProfile.marital_status) == filters.marital_status.lower())
         if filters.status:
@@ -159,10 +171,10 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
                 )
             )
         if filters.age_min:
-            max_dob = date.today() - timedelta(days=filters.age_min * 365.25)
+            max_dob = _utc_today() - timedelta(days=filters.age_min * 365.25)
             conditions.append(ParticipantProfile.dob <= max_dob)
         if filters.age_max:
-            min_dob = date.today() - timedelta(days=(filters.age_max + 1) * 365.25)
+            min_dob = _utc_today() - timedelta(days=(filters.age_max + 1) * 365.25)
             conditions.append(ParticipantProfile.dob >= min_dob)
         # search by name/email intentionally excluded to preserve anonymity
 
@@ -247,8 +259,7 @@ async def export_survey_results_csv(
             headers={"Content-Disposition": "attachment; filename=survey_results.csv"},
         )
 
-    excluded = exclude_columns or set()
-    visible_columns = [col for col in results["columns"] if col["id"] not in excluded]
+    visible_columns = _get_visible_export_columns(results, exclude_columns)
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -262,4 +273,47 @@ async def export_survey_results_csv(
         io.BytesIO(csv_bytes),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=survey_results.csv"},
+    )
+
+
+def _get_visible_export_columns(results: dict, exclude_columns: Optional[Set[str]] = None) -> list[dict]:
+    excluded = set(exclude_columns or set())
+    excluded.update({"participant_id", "user_id", "email", "phone", "username", "address"})
+    return [col for col in results["columns"] if col["id"] not in excluded]
+
+
+async def export_survey_results_excel(
+    db: AsyncSession,
+    survey_id: Optional[str] = None,
+    filters: Optional[ParticipantFilter] = None,
+    exclude_columns: Optional[Set[str]] = None,
+) -> StreamingResponse:
+    """Build and return an XLSX StreamingResponse of survey results."""
+    try:
+        from openpyxl import Workbook
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Excel export is unavailable because openpyxl is not installed.",
+        ) from exc
+
+    results = await get_survey_results_pivoted(db, survey_id, filters)
+    visible_columns = _get_visible_export_columns(results, exclude_columns)
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Survey Results"
+
+    sheet.append([col["text"] for col in visible_columns])
+    for record in results["data"]:
+        sheet.append([record.get(col["id"]) or "" for col in visible_columns])
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="survey_results.xlsx"'},
     )

@@ -193,7 +193,7 @@ function LikertConfig({ field, onChange }) {
 /* ═══════════════════════════════════════════
    DATA ELEMENT SELECTOR — searchable dropdown
    ═══════════════════════════════════════════ */
-function CreateDataElementModal({ onClose, onCreated, onLinked }) {
+export function CreateDataElementModal({ onClose, onCreated, onLinked }) {
   const [newLabel, setNewLabel] = useState('');
   const [newCode, setNewCode] = useState('');
   const [newDatatype, setNewDatatype] = useState('numeric');
@@ -211,6 +211,8 @@ function CreateDataElementModal({ onClose, onCreated, onLinked }) {
 
   useEffect(() => () => clearTimeout(errorTimer.current), []);
 
+  const supportsUnit = newDatatype === 'numeric';
+
   const handleCreate = async () => {
     if (!newLabel.trim() || !newCode.trim()) { showError('Label and code are required.'); return; }
     setSaving(true);
@@ -221,7 +223,7 @@ function CreateDataElementModal({ onClose, onCreated, onLinked }) {
         code: newCode.trim().toLowerCase().replace(/\s+/g, '_'),
         datatype: newDatatype,
         description: newDescription.trim() || undefined,
-        unit: newUnit.trim() || undefined,
+        unit: supportsUnit ? newUnit.trim() || undefined : undefined,
       });
       onCreated?.(el);
       onLinked(el.element_id);
@@ -258,7 +260,11 @@ function CreateDataElementModal({ onClose, onCreated, onLinked }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">Data Type</label>
-              <select value={newDatatype} onChange={(e) => setNewDatatype(e.target.value)}
+              <select value={newDatatype} onChange={(e) => {
+                const nextType = e.target.value;
+                setNewDatatype(nextType);
+                if (nextType !== 'numeric') setNewUnit('');
+              }}
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition bg-white">
                 <option value="numeric">Numeric</option>
                 <option value="text">Text</option>
@@ -269,8 +275,12 @@ function CreateDataElementModal({ onClose, onCreated, onLinked }) {
             <div>
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">Unit</label>
               <input value={newUnit} onChange={(e) => setNewUnit(e.target.value)}
+                disabled={!supportsUnit}
                 placeholder="e.g. mmHg, kg"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
+              <p className="text-xs text-slate-400 mt-1">
+                {supportsUnit ? 'Only numeric elements use units.' : 'Units are disabled for non-numeric elements.'}
+              </p>
             </div>
           </div>
           <div>
@@ -296,7 +306,7 @@ function CreateDataElementModal({ onClose, onCreated, onLinked }) {
   );
 }
 
-function SearchDataElementModal({ value, dataElements, onChange, onCreated, onClose }) {
+export function SearchDataElementModal({ value, dataElements, onChange, onCreated, onClose }) {
   const [search, setSearch] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
 
@@ -318,7 +328,7 @@ function SearchDataElementModal({ value, dataElements, onChange, onCreated, onCl
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col min-h-[70vh] max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-5 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-800">Link Data Element</h3>
@@ -386,11 +396,22 @@ function DataElementSelector({ value, dataElements = [], onChange, onCreated, re
   const selected = dataElements.find((e) => e.element_id === value);
 
   if (readOnly) {
+    const deactivated = value && !selected;
     return (
       <div>
         <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Linked Data Element</label>
-        <div className={`mt-1 px-3 py-2 text-sm border rounded-lg ${value ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-slate-50 text-slate-400 italic'}`}>
-          {selected ? `${selected.label || selected.code}` : 'No data element linked'}
+        <div className={`mt-1 px-3 py-2 text-sm border rounded-lg ${
+          selected
+            ? 'border-blue-300 bg-blue-50 text-blue-800'
+            : deactivated
+            ? 'border-slate-300 bg-slate-100 text-slate-500 italic'
+            : 'border-slate-200 bg-slate-50 text-slate-400 italic'
+        }`}>
+          {selected
+            ? `${selected.label || selected.code}`
+            : deactivated
+            ? 'Data element deactivated'
+            : 'No data element linked'}
         </div>
       </div>
     );

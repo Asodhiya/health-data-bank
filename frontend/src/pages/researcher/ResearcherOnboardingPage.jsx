@@ -82,7 +82,19 @@ function isFieldFilled(key, form) {
 
 export default function ResearcherOnboardingPage() {
   const navigate = useNavigate();
-  const { refetch } = useAuth();
+  const { logout, refetch } = useAuth();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      navigate('/login', { replace: true });
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   const [form, setForm] = useState({
     title: "",
@@ -110,7 +122,7 @@ export default function ResearcherOnboardingPage() {
   const completedCount = REQUIRED_FIELDS.length - missingFields.length;
   const progressPct = Math.round((completedCount / REQUIRED_FIELDS.length) * 100);
 
-  const showMissing = touched || attempted;
+  const showMissing = attempted;
   const isMissing = (key) => showMissing && !isFieldFilled(key, form);
   const isShaking = (key) => shakeFields.includes(key);
 
@@ -178,9 +190,14 @@ export default function ResearcherOnboardingPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-slate-100 flex justify-center p-4 sm:p-8">
       <div className="w-full max-w-2xl flex flex-col items-center">
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-800 tracking-tight mb-6 text-center">
-          Health Data Bank
-        </h1>
+        <div className="w-full mb-6 flex items-start justify-between gap-3">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-800 tracking-tight">
+            Health Data Bank
+          </h1>
+          <button type="button" className="shrink-0 rounded-xl border border-slate-200 bg-white/80 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60" disabled={isLoggingOut} onClick={handleLogout}>
+            {isLoggingOut ? 'Logging out...' : 'Logout'}
+          </button>
+        </div>
 
         <div className="w-full bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-slate-200/60 p-6 sm:p-8">
           {/* Header */}
@@ -270,6 +287,7 @@ export default function ResearcherOnboardingPage() {
                 placeholder="e.g. PhD, MSc, MD"
                 value={form.credentials}
                 onChange={setInput("credentials")}
+                maxLength={50}
               />
             </Field>
 
@@ -280,6 +298,7 @@ export default function ResearcherOnboardingPage() {
                   placeholder="e.g. UPEI Faculty of Science"
                   value={form.organization}
                   onChange={setInput("organization")}
+                  maxLength={50}
                 />
               </Field>
               <Field id="field-department" label="Department" required missing={isMissing("department")} shake={isShaking("department")}>
@@ -288,6 +307,7 @@ export default function ResearcherOnboardingPage() {
                   placeholder="e.g. Applied Human Sciences"
                   value={form.department}
                   onChange={setInput("department")}
+                  maxLength={50}
                 />
               </Field>
             </div>
@@ -298,6 +318,7 @@ export default function ResearcherOnboardingPage() {
                 placeholder="e.g. Community Health, Chronic Disease Management"
                 value={form.specialty}
                 onChange={setInput("specialty")}
+                maxLength={80}
               />
             </Field>
 
@@ -308,9 +329,9 @@ export default function ResearcherOnboardingPage() {
                 placeholder="Tell participants and colleagues about your research background..."
                 value={form.bio}
                 onChange={setInput("bio")}
-                maxLength={500}
+                maxLength={300}
               />
-              <p className="text-xs text-slate-400 mt-1 text-right">{form.bio.length}/500</p>
+              <p className="text-xs text-slate-400 mt-1 text-right">{form.bio.length}/300</p>
             </Field>
           </div>
 

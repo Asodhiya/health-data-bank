@@ -14,3 +14,5 @@ alembic
 python-multipart
 psutil
 apscheduler
+redis
+openpyxl

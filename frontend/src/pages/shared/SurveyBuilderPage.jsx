@@ -42,12 +42,17 @@ const TabletIco    = () => <Svg size={16} d={<><rect x="4" y="2" width="16" heig
 const PhoneIco     = () => <Svg size={16} d={<><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></>} />;
 
 function StatusBadge({ status }) {
-  const cls = status === 'PUBLISHED'
-    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-    : 'bg-amber-50 text-amber-700 border-amber-200';
+  const cls =
+    status === 'PUBLISHED' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+    status === 'ARCHIVED'  ? 'bg-slate-100 text-slate-500 border-slate-300' :
+    status === 'DELETED'   ? 'bg-rose-50 text-rose-500 border-rose-200' :
+                             'bg-amber-50 text-amber-700 border-amber-200';
   return <span className={`text-xs font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${cls}`}>{status}</span>;
 }
 
+
+const toTitleCase = (str = '') =>
+  str.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 
 /* ── HELPERS: Data Transformation ── */
 const transformForSave = (form) => {
@@ -77,7 +82,7 @@ const transformForSave = (form) => {
 const transformForEdit = (backendForm) => {
   return {
     ...backendForm,
-    fields: backendForm.fields.map(f => {
+    fields: (backendForm.fields || []).map(f => {
       if (f.field_type === 'likert') {
         const sortedOpts = f.options.sort((a, b) => a.value - b.value);
         const min = sortedOpts.length > 0 ? sortedOpts[0].value : 0;
@@ -118,7 +123,7 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
   return (
     <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-slate-800 mb-2">{title}</h3>
+        <h3 className="text-lg font-bold text-slate-900 mb-2">{title}</h3>
         <p className="text-sm text-slate-500 mb-4">{message}</p>
         {children}
         <div className="flex justify-end gap-2 mt-4">
@@ -138,7 +143,8 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
    FORM LIST VIEW
    #6 tab counts, #7 sort, #8 publish date, #9 empty state
    ══════════════════════════════════════════════ */
-function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublish, groups, pageTitle = 'Survey Forms' }) {
+function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, onUnpublish, onArchive, groups, pageTitle = 'Survey Forms' }) {
+  const [showHelp, setShowHelp]         = useState(false);
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sort, setSort]                 = useState('edited');
@@ -160,19 +166,47 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
   const [publishGroups, setPublishGroups] = useState(new Set());
   const [publishGroupSearch, setPublishGroupSearch] = useState('');
   const [publishError, setPublishError] = useState('');
+  const [expandedHistory, setExpandedHistory] = useState(new Set());
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   const hasDateFilter  = dateFrom || dateTo;
   const hasGroupFilter = groupFilter !== 'ALL';
   const activeFilterCount = (hasDateFilter ? 1 : 0) + (hasGroupFilter ? 1 : 0);
 
-  /* #6 — Status counts */
+  /* Group forms into version families — each family shows only its latest non-deleted version */
+  const families = (() => {
+    const familyMap = {};
+    forms.forEach((f) => {
+      const rootId = String(f.parent_form_id || f.form_id);
+      if (!familyMap[rootId]) familyMap[rootId] = [];
+      familyMap[rootId].push(f);
+    });
+    return Object.values(familyMap).flatMap((fam) => {
+      const byVersion = [...fam].sort((a, b) => (b.version || 1) - (a.version || 1));
+      const active = byVersion.filter((f) => f.status !== 'DELETED' && f.status !== 'ARCHIVED');
+      const inactive = byVersion.filter((f) => f.status === 'ARCHIVED' || f.status === 'DELETED');
+      // If no active versions, surface the top archived version as the card (skip fully-deleted families)
+      if (active.length === 0) {
+        const topArchived = inactive.find((f) => f.status === 'ARCHIVED');
+        if (!topArchived) return [];
+        const rest = inactive.filter((f) => f.form_id !== topArchived.form_id);
+        return [{ latest: topArchived, history: rest, rootId: String(topArchived.parent_form_id || topArchived.form_id) }];
+      }
+      const latest = active[0];
+      return [{ latest, history: [...active.slice(1), ...inactive], rootId: String(latest.parent_form_id || latest.form_id) }];
+    });
+  })();
+
+  /* #6 — Status counts (by latest version per family) */
   const counts = {
-    ALL: forms.length,
-    DRAFT: forms.filter((f) => f.status === 'DRAFT').length,
-    PUBLISHED: forms.filter((f) => f.status === 'PUBLISHED').length,
+    ALL: families.length,
+    DRAFT: families.filter(({ latest: f }) => f.status === 'DRAFT').length,
+    PUBLISHED: families.filter(({ latest: f }) => f.status === 'PUBLISHED').length,
+    ARCHIVED: families.filter(({ latest: f }) => f.status === 'ARCHIVED').length,
   };
 
-  const filtered = forms.filter((f) => {
+  const filtered = families.filter(({ latest: f }) => {
     const matchSearch = f.title.toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === 'ALL' || f.status === statusFilter;
     const matchGroup  = groupFilter === 'ALL' || (f.status === 'PUBLISHED' && Array.isArray(f.deployed_group_ids) && f.deployed_group_ids.map(String).includes(groupFilter));
@@ -184,28 +218,38 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
   /* #7 — Sort */
   const sortLabels = { newest: 'Newest first', oldest: 'Oldest first', alpha: 'A → Z', edited: 'Recently edited' };
   const sorted = [...filtered].sort((a, b) => {
-    if (sort === 'newest') return new Date(b.created_at) - new Date(a.created_at);
-    if (sort === 'oldest') return new Date(a.created_at) - new Date(b.created_at);
-    if (sort === 'alpha')  return a.title.localeCompare(b.title);
-    if (sort === 'edited') return new Date(b.updated_at) - new Date(a.updated_at);
+    const fa = a.latest, fb = b.latest;
+    if (sort === 'newest') return new Date(fb.created_at) - new Date(fa.created_at);
+    if (sort === 'oldest') return new Date(fa.created_at) - new Date(fb.created_at);
+    if (sort === 'alpha')  return fa.title.localeCompare(fb.title);
+    if (sort === 'edited') return new Date(fb.modified_at || fb.created_at) - new Date(fa.modified_at || fa.created_at);
     return 0;
   });
+
+  const toggleHistory = (rootId) => {
+    setExpandedHistory((prev) => { const n = new Set(prev); n.has(rootId) ? n.delete(rootId) : n.add(rootId); return n; });
+  };
 
   const toggleSelect = (id) => {
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
   const selectAll = () => {
     if (selected.size === filtered.length) setSelected(new Set());
-    else setSelected(new Set(filtered.map((f) => f.form_id)));
+    else setSelected(new Set(filtered.map(({ latest: f }) => f.form_id)));
   };
   const clearFilters = () => { setDateFrom(''); setDateTo(''); setGroupFilter('ALL'); setShowFilters(false); };
+
+  useEffect(() => { setPage(1); }, [search, statusFilter, sort, groupFilter, dateFrom, dateTo]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const paginated  = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const selectedForms     = forms.filter((f) => selected.has(f.form_id));
   const selectedDrafts    = selectedForms.filter((f) => f.status === 'DRAFT');
   const selectedPublished = selectedForms.filter((f) => f.status === 'PUBLISHED');
 
-  const handleConfirmDelete = () => {
-    modal.ids.forEach((id) => onDelete(id));
+  const handleConfirmDelete = (deleteAll = false) => {
+    modal.ids.forEach((id) => onDelete(id, deleteAll));
     setSelected((prev) => { const n = new Set(prev); modal.ids.forEach((id) => n.delete(id)); return n; });
     setModal(null);
   };
@@ -214,7 +258,7 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
     const groupIds = [...publishGroups];
     modal.ids.forEach((id) => {
       const f = forms.find((x) => x.form_id === id);
-      if (f && f.status === 'DRAFT') onPublish(id, groupIds);
+      if (f && (f.status === 'DRAFT' || f.status === 'ARCHIVED')) onPublish(id, groupIds);
     });
     setSelected((prev) => { const n = new Set(prev); modal.ids.forEach((id) => n.delete(id)); return n; });
     setModal(null);
@@ -229,25 +273,24 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
     setModal(null);
   };
 
-  const groupName = (gid) => (groups.find((g) => g.group_id === gid) || {}).name || '';
 
   /* #9 — Empty state */
   if (forms.length === 0) {
     return (
       <div>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-slate-800">{pageTitle}</h2>
+          <h2 className="text-2xl font-bold text-slate-900">{pageTitle}</h2>
         </div>
         <div className="text-center py-20">
           <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-5">
             <Svg size={36} sw={1.5} stroke="#3b82f6" d={<><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></>} />
           </div>
-          <h3 className="text-lg font-bold text-slate-800 mb-2">Create your first survey</h3>
+          <h3 className="text-lg font-bold text-slate-900 mb-2">Create your first survey</h3>
           <p className="text-sm text-slate-500 max-w-sm mx-auto mb-6">
             Build a survey form with questions, then publish it to a participant group to start collecting responses.
           </p>
           <button onClick={onCreate}
-            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition">
+            className="inline-flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition">
             <PlusIco /> New Form
           </button>
         </div>
@@ -263,14 +306,51 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
           <div className="flex items-center gap-1.5 text-xs mb-1">
             <span className="text-slate-400">Dashboard</span><span className="text-slate-300">/</span><span className="text-slate-600 font-medium">Surveys</span>
           </div>
-          <h2 className="text-xl font-bold text-slate-800">{pageTitle}</h2>
-          <p className="text-sm text-slate-500 mt-0.5">{forms.length} forms total</p>
+          <h2 className="text-2xl font-bold text-slate-900">{pageTitle}</h2>
+          <p className="text-sm text-slate-500 mt-0.5">{families.length} form{families.length !== 1 ? 's' : ''} total</p>
         </div>
-        <button onClick={onCreate}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors">
-          <PlusIco /> New Form
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => setShowHelp(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition">
+            <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">?</span>
+            How it works
+          </button>
+          <button onClick={onCreate}
+            className="flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors">
+            <PlusIco /> New Form
+          </button>
+        </div>
       </div>
+
+      {/* Help Modal */}
+      {showHelp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowHelp(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <span className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center text-base font-bold shrink-0">?</span>
+              <h3 className="text-lg font-bold text-slate-900">How Survey Builder Works</h3>
+            </div>
+            <ol className="space-y-3 text-sm text-slate-700">
+              <li className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">1</span>
+                <div><span className="font-semibold text-slate-900">Create a form.</span> Click <em>New Form</em>, give it a lowercase title, and save it as a draft while you build questions.</div>
+              </li>
+              <li className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">2</span>
+                <div><span className="font-semibold text-slate-900">Build your questions.</span> Add fields using the editor — text, multiple choice, Likert scale, and more. Questions auto-save as you type.</div>
+              </li>
+              <li className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">3</span>
+                <div><span className="font-semibold text-slate-900">Publish to a group.</span> Once ready, publish the form to a participant group. Only published forms collect responses.</div>
+              </li>
+              <li className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">4</span>
+                <div><span className="font-semibold text-slate-900">Version history.</span> Each form tracks versions. You can branch from any prior version to create an updated variant without losing history.</div>
+              </li>
+            </ol>
+            <button onClick={() => setShowHelp(false)} className="mt-6 w-full py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-sm font-semibold text-slate-700 transition">Got it</button>
+          </div>
+        </div>
+      )}
 
       {/* Search + Status + Sort + Filters */}
       <div className="flex flex-col gap-3 mb-5">
@@ -279,14 +359,14 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><SearchIco /></span>
             <input value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder="Search forms…"
-              className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition" />
+              className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-slate-400 transition" />
           </div>
 
           {/* #6 — Tabs with counts */}
           <div className="flex gap-0.5 bg-slate-100 p-1 rounded-xl shrink-0 self-start">
-            {['ALL', 'DRAFT', 'PUBLISHED'].map((f) => (
+            {['ALL', 'DRAFT', 'PUBLISHED', 'ARCHIVED'].map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${statusFilter === f ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${statusFilter === f ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 {f === 'ALL' ? 'All' : f.charAt(0) + f.slice(1).toLowerCase()}
                 <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${statusFilter === f ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-400'}`}>
                   {counts[f]}
@@ -421,36 +501,43 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
                 <UnpublishIco /> Unpublish{selectedPublished.length > 1 ? ` (${selectedPublished.length})` : ''}
               </button>
             )}
-            <button onClick={() => setModal({ type: 'delete', ids: [...selected], isPublished: selectedPublished.length > 0 })}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-600 bg-rose-100 hover:bg-rose-200 rounded-lg transition">
-              <TrashIco /> Delete{selected.size > 1 ? ` (${selected.size})` : ''}
-            </button>
+            {selectedPublished.length === 0 && (
+              <button onClick={() => setModal({ type: 'delete', ids: [...selected], isPublished: false })}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-600 bg-rose-100 hover:bg-rose-200 rounded-lg transition">
+                <TrashIco /> Delete{selected.size > 1 ? ` (${selected.size})` : ''}
+              </button>
+            )}
           </div>
         )}
       </div>
 
       {/* Form cards */}
       <div className="space-y-3">
-        {sorted.map((form) => {
+        {paginated.map(({ latest: form, history, rootId }) => {
           const isSel = selected.has(form.form_id);
           const fieldCount = form.field_count ?? (form.fields ? form.fields.length : 0);
+          const histExpanded = expandedHistory.has(rootId);
           return (
-            <div key={form.form_id}
-              className={`bg-white rounded-xl border p-4 sm:p-5 shadow-sm hover:shadow-md cursor-pointer transition-all group ${
+            <div key={rootId}
+              className={`bg-white rounded-xl border shadow-sm transition-all group ${
                 isSel ? 'border-blue-300 ring-1 ring-blue-100' :
                 form.status === 'DRAFT' ? 'border-l-4 border-amber-400 border-t border-r border-b border-t-slate-200 border-r-slate-200 border-b-slate-200' :
-                'border-slate-200 hover:border-slate-300'
+                'border-slate-200 hover:border-slate-300 hover:shadow-md'
               }`}>
-              <div className="flex items-start gap-3">
+              {/* Main card row */}
+              <div className="p-4 sm:p-5 flex items-start gap-3 cursor-pointer" onClick={() => onEdit(form)}>
                 <input type="checkbox" checked={isSel}
                   onChange={() => toggleSelect(form.form_id)}
                   onClick={(e) => e.stopPropagation()}
                   className="w-4 h-4 mt-1 rounded border-slate-300 text-blue-600 focus:ring-blue-400 shrink-0 cursor-pointer" />
 
-                <div className="flex-1 min-w-0" onClick={() => onEdit(form)}>
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2.5 mb-1">
-                    <h3 className="text-sm font-bold text-slate-800 truncate group-hover:text-blue-600 transition-colors">{form.title}</h3>
+                    <h3 className="text-sm font-bold text-slate-900 truncate group-hover:text-blue-600 transition-colors">{toTitleCase(form.title)}</h3>
                     <StatusBadge status={form.status} />
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 shrink-0">
+                      v{form.version || 1}
+                    </span>
                   </div>
                   {form.description && <p className="text-xs text-slate-500 line-clamp-1">{form.description}</p>}
                   {form.deployed_groups?.length > 0 && (
@@ -466,21 +553,13 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
                     <span className="flex items-center gap-1"><CalIco /> {new Date(form.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                     <span>·</span>
                     <span>{fieldCount} question{fieldCount !== 1 ? 's' : ''}</span>
-
-                    {form.status === 'DRAFT' && form.updated_at && (
-                      <><span>·</span><span className="text-amber-500 font-medium">Edited {daysSince(form.updated_at)}</span></>
+                    {form.status === 'DRAFT' && form.modified_at && (
+                      <><span>·</span><span className="text-amber-500 font-medium">Edited {daysSince(form.modified_at)}</span></>
                     )}
-
-                    {/* #8 — Publish date on published cards */}
                     {form.status === 'PUBLISHED' && form.published_at && (
                       <><span>·</span><span className="text-emerald-600 font-medium">Published {daysSince(form.published_at)}</span></>
                     )}
-
-                    {form.status === 'PUBLISHED' && form.group_id && (
-                      <><span>·</span><span className="flex items-center gap-1"><UsersIco /> {groupName(form.group_id)}</span></>
-                    )}
                   </div>
-
                   {form.status === 'DRAFT' && fieldCount < 5 && (
                     <div className="mt-2.5 flex items-center gap-1.5 text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 w-fit">
                       <AlertIco /> Only {fieldCount} question{fieldCount !== 1 ? 's' : ''} — add more before publishing
@@ -489,12 +568,13 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
                 </div>
 
                 {/* Quick actions on hover */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
                   {form.status === 'DRAFT' && (
                     <button className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition" title="Publish"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (!form.field_count || form.field_count === 0) {
+                        const count = form.field_count ?? (form.fields ? form.fields.length : 0);
+                        if (count === 0) {
                           setPublishError(`"${form.title}" has no questions. Add at least one question before publishing.`);
                           setTimeout(() => setPublishError(''), 5000);
                           return;
@@ -506,25 +586,79 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
                     </button>
                   )}
                   {form.status === 'PUBLISHED' && (
-                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition" title="Unpublish"
-                      onClick={(e) => { e.stopPropagation(); setModal({ type: 'unpublish', ids: [form.form_id], formTitle: form.title }); }}>
-                      <UnpublishIco />
+                    <>
+                      <button className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition" title="Unpublish"
+                        onClick={(e) => { e.stopPropagation(); setModal({ type: 'unpublish', ids: [form.form_id], formTitle: form.title }); }}>
+                        <UnpublishIco />
+                      </button>
+                      <button className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition text-[10px] font-bold px-2" title="Archive"
+                        onClick={(e) => { e.stopPropagation(); setModal({ type: 'archive', ids: [form.form_id], formTitle: form.title, isPublished: true }); }}>
+                        Archive
+                      </button>
+                      <button className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition text-[10px] font-bold px-2" title="Update survey"
+                        onClick={(e) => { e.stopPropagation(); onBranch(form); }}>
+                        Update
+                      </button>
+                    </>
+                  )}
+                  {form.status === 'DRAFT' && (
+                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition" title="Edit"
+                      onClick={(e) => { e.stopPropagation(); onEdit(form); }}>
+                      <EditIco />
                     </button>
                   )}
-                  <button className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition" title="Edit"
-                    onClick={(e) => { e.stopPropagation(); onEdit(form); }}>
-                    <EditIco />
-                  </button>
+                  {form.status === 'ARCHIVED' && (
+                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition text-[10px] font-bold px-2" title="Create new version"
+                      onClick={(e) => { e.stopPropagation(); onBranch(form); }}>
+                      New Version
+                    </button>
+                  )}
                   <button className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition" title="Delete"
-                    onClick={(e) => { e.stopPropagation(); setModal({ type: 'delete', ids: [form.form_id], formTitle: form.title, isPublished: form.status === 'PUBLISHED' }); }}>
+                    onClick={(e) => { e.stopPropagation(); setModal({ type: 'delete', ids: [form.form_id], formTitle: form.title, isPublished: form.status === 'PUBLISHED', hasFamily: history.length > 0, version: form.version || 1 }); }}>
                     <TrashIco />
                   </button>
                 </div>
 
-                <span className="text-slate-300 group-hover:text-blue-500 transition-colors mt-1 shrink-0" onClick={() => onEdit(form)}>
+                <span className="text-slate-300 group-hover:text-blue-500 transition-colors mt-1 shrink-0">
                   <Svg size={18} d="M9 5l7 7-7 7" />
                 </span>
               </div>
+
+              {/* Version history */}
+              {history.length > 0 && (
+                <div className="border-t border-slate-100 px-4 sm:px-5 pb-3">
+                  <button
+                    onClick={() => toggleHistory(rootId)}
+                    className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 transition mt-2.5">
+                    <Svg size={12} d={histExpanded ? "M18 15l-6-6-6 6" : "M6 9l6 6 6-6"} />
+                    {histExpanded ? 'Hide' : 'Show'} {history.length} older version{history.length > 1 ? 's' : ''}
+                  </button>
+                  {histExpanded && (
+                    <div className="mt-2 space-y-1.5">
+                      {history.map((v) => (
+                        <div key={v.form_id}
+                          className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-slate-50 hover:bg-slate-100 transition text-xs text-slate-600 group/hist">
+                          <div className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer" onClick={() => onEdit(v, { locked: true })}>
+                            <span className="font-bold text-violet-700 bg-violet-50 border border-violet-100 px-1.5 py-0.5 rounded text-[10px] shrink-0">v{v.version || 1}</span>
+                            <StatusBadge status={v.status} />
+                            <span className="flex-1 truncate font-medium">{toTitleCase(v.title)}</span>
+                            <span className="text-slate-400 shrink-0">{new Date(v.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                            {v.submission_count > 0 && <span className="text-slate-400 shrink-0">{v.submission_count} responses</span>}
+                          </div>
+                          {v.status === 'DRAFT' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setModal({ type: 'delete', ids: [v.form_id], formTitle: `${v.title} (v${v.version || 1})`, isPublished: false, hasFamily: false }); }}
+                              className="shrink-0 p-1 rounded text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition opacity-0 group-hover/hist:opacity-100"
+                              title="Delete this draft version">
+                              <TrashIco />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -538,27 +672,116 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
         )}
       </div>
 
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <span className="text-xs text-slate-400">
+            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} of {sorted.length} forms
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-40 transition"
+            >
+              ‹ Prev
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPage(p)}
+                className={`w-8 h-8 text-xs rounded-lg font-semibold transition ${
+                  p === page ? "bg-blue-600 text-white" : "border border-slate-200 text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-40 transition"
+            >
+              Next ›
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── DELETE MODAL ── */}
       {modal?.type === 'delete' && (
-        <ConfirmModal title={modal.ids.length === 1 ? 'Delete Form' : 'Delete Forms'}
-          message={modal.formTitle ? `Are you sure you want to delete "${modal.formTitle}"? This action cannot be undone.` : `Are you sure you want to delete ${modal.ids.length} form${modal.ids.length > 1 ? 's' : ''}? This action cannot be undone.`}
-          confirmLabel="Delete" confirmClass="bg-rose-600 hover:bg-rose-700" onConfirm={handleConfirmDelete} onClose={() => setModal(null)}>
-          {modal.isPublished && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-xs text-amber-700 mb-2">
-              <div className="flex items-start gap-2">
-                <span className="shrink-0 mt-0.5"><WarnIco /></span>
-                <div><strong>Warning:</strong> {modal.ids.length === 1 ? 'This form is' : 'Some selected forms are'} currently published.
-                  <button onClick={() => setModal({ ...modal, type: 'unpublish' })} className="ml-1 underline font-semibold hover:text-amber-900 transition">Unpublish instead?</button></div>
-              </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="px-6 pt-6 pb-4">
+              <h3 className="text-base font-bold text-slate-900 mb-1">
+                {modal.ids.length === 1 ? 'Delete Form' : 'Delete Forms'}
+              </h3>
+              <p className="text-sm text-slate-500 mb-4">
+                {modal.formTitle
+                  ? `You are about to delete "${toTitleCase(modal.formTitle)}". This cannot be undone.`
+                  : `You are about to delete ${modal.ids.length} form${modal.ids.length > 1 ? 's' : ''}. This cannot be undone.`}
+              </p>
+              {modal.isPublished && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-xs text-amber-700 mb-3 flex items-start gap-2">
+                  <span className="shrink-0 mt-0.5"><WarnIco /></span>
+                  <div><strong>Warning:</strong> {modal.ids.length === 1 ? 'This form is' : 'Some selected forms are'} currently published.
+                    <button onClick={() => setModal({ ...modal, type: 'unpublish' })} className="ml-1 underline font-semibold hover:text-amber-900 transition">Unpublish instead?</button>
+                  </div>
+                </div>
+              )}
+              {modal.hasFamily && !modal.isPublished && (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => handleConfirmDelete(false)}
+                    className="w-full flex items-start gap-3 px-4 py-3 border-2 border-rose-200 hover:border-rose-400 hover:bg-rose-50 rounded-xl transition text-left">
+                    <div className="w-8 h-8 rounded-lg bg-rose-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <Svg size={15} sw={2} stroke="#dc2626" d={<><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></>} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Delete this version only</p>
+                      <p className="text-xs text-slate-500 mt-0.5">Remove v{modal.version} — the previous version becomes the current one.</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => handleConfirmDelete(true)}
+                    className="w-full flex items-start gap-3 px-4 py-3 border-2 border-slate-200 hover:border-rose-400 hover:bg-rose-50 rounded-xl transition text-left">
+                    <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <Svg size={15} sw={2} stroke="#64748b" d={<><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></>} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Delete all versions</p>
+                      <p className="text-xs text-slate-500 mt-0.5">Permanently remove every version of this form and its history.</p>
+                    </div>
+                  </button>
+                </div>
+              )}
+              {modal.hasFamily && modal.isPublished && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600 mt-4">
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5"><InfoIco /></span>
+                    <span>Because this form belongs to a version family and has been published, you can only archive it. Deletion is disabled to protect historical participant data.</span>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </ConfirmModal>
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+              <button onClick={() => setModal(null)} className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
+                Cancel
+              </button>
+              {!modal.hasFamily && (
+                <button onClick={() => handleConfirmDelete(false)} className="px-4 py-2 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition shadow-sm">
+                  Delete
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── PUBLISH MODAL (multi-group) ── */}
       {modal?.type === 'publish' && (
-        <ConfirmModal title={modal.formTitle ? `Publish "${modal.formTitle}"` : 'Publish Forms'}
-          message={modal.formTitle ? `Assign "${modal.formTitle}" to one or more groups.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select groups to assign.`}
+        <ConfirmModal title={modal.formTitle ? `Publish "${toTitleCase(modal.formTitle)}"` : 'Publish Forms'}
+          message={modal.formTitle ? `Assign "${toTitleCase(modal.formTitle)}" to one or more groups.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select groups to assign.`}
           confirmLabel={publishGroups.size > 1 ? `Publish to ${publishGroups.size} Groups` : 'Publish'}
           confirmClass="bg-emerald-600 hover:bg-emerald-700" onConfirm={handleConfirmPublish}
           onClose={() => { setModal(null); setPublishGroups(new Set()); setPublishGroupSearch(''); }} disabled={publishGroups.size === 0}>
@@ -609,13 +832,39 @@ function FormListView({ forms, onEdit, onCreate, onDelete, onPublish, onUnpublis
 
       {/* ── UNPUBLISH MODAL ── */}
       {modal?.type === 'unpublish' && (
-        <ConfirmModal title={modal.formTitle ? `Unpublish "${modal.formTitle}"` : 'Unpublish Forms'}
-          message={modal.formTitle ? `Unpublish "${modal.formTitle}"? It will revert to draft status.` : `Unpublish ${selectedPublished.length} form${selectedPublished.length > 1 ? 's' : ''}?`}
+        <ConfirmModal title={modal.formTitle ? `Unpublish "${toTitleCase(modal.formTitle)}"` : 'Unpublish Forms'}
+          message={modal.formTitle ? `Unpublish "${toTitleCase(modal.formTitle)}"? It will be archived.` : `Unpublish ${selectedPublished.length} form${selectedPublished.length > 1 ? 's' : ''}?`}
           confirmLabel="Unpublish" confirmClass="bg-amber-600 hover:bg-amber-700" onConfirm={handleConfirmUnpublish} onClose={() => setModal(null)}>
           <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600">
             <div className="flex items-start gap-2">
               <span className="shrink-0 mt-0.5"><InfoIco /></span>
-              <span>Unpublished forms revert to draft. Participants will lose access.</span>
+              <span>Unpublished forms are archived. Participants will lose access.</span>
+            </div>
+          </div>
+        </ConfirmModal>
+      )}
+
+      {/* ── ARCHIVE MODAL ── */}
+      {modal?.type === 'archive' && (
+        <ConfirmModal title={`Archive "${toTitleCase(modal.formTitle)}"`}
+          message={null}
+          confirmLabel="Archive" confirmClass="bg-slate-600 hover:bg-slate-700"
+          onConfirm={() => { onArchive(modal.ids[0]); setModal(null); }}
+          onClose={() => setModal(null)}>
+          <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600 space-y-1.5">
+            <div className="flex items-start gap-2">
+              <span className="shrink-0 mt-0.5"><InfoIco /></span>
+              <span>This form will be hidden from active authoring and moved to history.</span>
+            </div>
+            {modal.isPublished && (
+              <div className="flex items-start gap-2 text-amber-700">
+                <span className="shrink-0 mt-0.5"><WarnIco /></span>
+                <span>This form is currently <strong>published</strong>. Archiving will remove it from all groups and participants will lose access immediately.</span>
+              </div>
+            )}
+            <div className="flex items-start gap-2 text-emerald-700">
+              <span className="shrink-0 mt-0.5"><CheckIco /></span>
+              <span>All existing responses are preserved. Use <strong>Update</strong> to create a new editable version.</span>
             </div>
           </div>
         </ConfirmModal>
@@ -658,7 +907,7 @@ function PreviewView({ title, description, fields }) {
           { k: 'phone',   ico: <PhoneIco />,   l: 'Phone' },
         ].map((d) => (
           <button key={d.k} onClick={() => setDevice(d.k)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${device === d.k ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${device === d.k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
             {d.ico} {d.l}
           </button>
         ))}
@@ -704,11 +953,13 @@ function PreviewView({ title, description, fields }) {
    PUBLISH MODAL — multi-group checkbox select
    Used by BuilderView; fetches groups via api.listGroups()
    ══════════════════════════════════════════════ */
-function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds = [] }) {
+function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds = [], formId }) {
   const [groups, setGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState(new Set());
   const [groupSearch, setGroupSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [preview, setPreview] = useState({}); // { groupId: inProgressCount }
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
     api.listGroups().then((data) => {
@@ -717,6 +968,20 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
+
+  // Fetch in-progress counts whenever selection changes (only if form has a parent, i.e. is a version)
+  useEffect(() => {
+    if (!formId || selectedGroups.size === 0) { setPreview({}); return; }
+    setPreviewLoading(true);
+    api.getPublishPreview(formId, [...selectedGroups])
+      .then((data) => {
+        const map = {};
+        data.forEach((row) => { map[row.group_id] = row.in_progress_count; });
+        setPreview(map);
+      })
+      .catch(() => setPreview({}))
+      .finally(() => setPreviewLoading(false));
+  }, [formId, [...selectedGroups].sort().join(',')]);
 
   const toggleGroup = (gid) => {
     setSelectedGroups((prev) => {
@@ -731,10 +996,12 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
     else setSelectedGroups(new Set(groups.map((g) => g.group_id)));
   };
 
+  const totalInProgress = Object.values(preview).reduce((s, n) => s + n, 0);
+
   return (
     <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-slate-800 mb-1">Publish Survey</h3>
+        <h3 className="text-lg font-bold text-slate-900 mb-1">Publish Survey</h3>
         <p className="text-sm text-slate-500 mb-4">
           {formTitle ? `Assign "${formTitle}" to one or more groups.` : 'Select groups to assign this survey to.'}
         </p>
@@ -796,13 +1063,21 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
             </div>
           </div>
         )}
+        {totalInProgress > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-2.5 text-xs text-amber-800">
+            <WarnIco />
+            <span>
+              <strong>{totalInProgress} participant{totalInProgress > 1 ? 's' : ''}</strong> in the selected group{Object.keys(preview).length > 1 ? 's' : ''} have an in-progress submission on the previous version. Publishing will replace it — they will need to restart on this new version.
+            </span>
+          </div>
+        )}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium hover:text-slate-700 transition">Cancel</button>
           <button
             onClick={() => onConfirm([...selectedGroups], new Set(deployedGroupIds.map(String)))}
-            disabled={selectedGroups.size === 0 && deployedGroupIds.length === 0}
+            disabled={(selectedGroups.size === 0 && deployedGroupIds.length === 0) || previewLoading}
             className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">
-            Save
+            {previewLoading ? 'Checking…' : 'Save'}
           </button>
         </div>
       </div>
@@ -815,7 +1090,7 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
    BUILDER VIEW
    #1 unsaved changes, #2 auto-save, #3 drag reorder, #4 validation
    ══════════════════════════════════════════════ */
-function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, onDataElementCreated }) {
+function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onArchive, dataElements, onDataElementCreated }) {
   const [title, setTitle]       = useState(form?.title || '');
   const [desc, setDesc]         = useState(form?.description || '');
   const [fields, setFields]     = useState(form?.fields || []);
@@ -831,8 +1106,10 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, 
   const [lastSaved, setLastSaved]       = useState(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
 
-  const isDraft = !form?.status || form.status === 'DRAFT';
+  const isLocked = !!form?._locked;
+  const isDraft = !isLocked && (!form?.status || form.status === 'DRAFT');
   const autoSaveTimer = useRef(null);
   const isDirtyRef = useRef(false);
 
@@ -858,18 +1135,20 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, 
     }, 5000);
   }, [title, desc, fields, form]);
 
-  const handleTitleChange = (v) => { setTitle(v); triggerAutoSave(); };
+  const handleTitleChange = (v) => { setTitle(v.toLowerCase()); triggerAutoSave(); };
   const handleDescChange = (v) => { setDesc(v); triggerAutoSave(); };
 
   /* #1 — Unsaved changes warning */
   const handleBackClick = () => {
-    if (isDirtyRef.current) setShowUnsavedModal(true);
-    else onBack();
+    if (form?.status === 'DRAFT' && isDirtyRef.current) {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+      setShowUnsavedModal(true);
+    } else onBack();
   };
 
   /* #1 — beforeunload protection */
   useEffect(() => {
-    const handler = (e) => { if (isDirtyRef.current) { e.preventDefault(); e.returnValue = ''; } };
+    const handler = (e) => { if (form?.status === 'DRAFT' && isDirtyRef.current) { e.preventDefault(); e.returnValue = ''; } };
     window.addEventListener('beforeunload', handler);
     return () => { window.removeEventListener('beforeunload', handler); if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
   }, []);
@@ -984,45 +1263,74 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, 
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
-        <button onClick={handleBackClick} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 font-medium transition">
-          <BackIco /> All Forms
-        </button>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* #2 — Auto-save indicator */}
-          {lastSaved && (
-            <span className="text-xs text-slate-400 flex items-center gap-1 mr-2">
-              {autoSaveStatus === 'saving' ? (
-                <><span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" /> Saving...</>
-              ) : autoSaveStatus === 'saved' ? (
-                <><Svg size={11} sw={2.5} stroke="#16a34a" d={<polyline points="20 6 9 17 4 12" />} /> Saved</>
-              ) : (
-                <>Auto-saved {timeAgo(lastSaved)}</>
-              )}
+        <div className="flex items-center gap-2">
+          <button onClick={handleBackClick} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 font-medium transition">
+            <BackIco /> All Forms
+          </button>
+          {form?.version && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">
+              v{form.version}
             </span>
           )}
-          {isDraft ? (
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {isLocked ? (
+            <span className="text-xs text-slate-500 bg-slate-100 border border-slate-200 px-3 py-2 rounded-xl font-medium flex items-center gap-1.5">
+              <Svg size={12} sw={2} d={<><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>} /> Read-only
+            </span>
+          ) : (
             <>
-              <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg">
-                <button onClick={() => setMode('edit')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'edit' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>Edit</button>
-                <button onClick={() => setMode('preview')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'preview' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>Preview</button>
-              </div>
-              <button onClick={handleSaveDraft} className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm flex items-center gap-1.5">
-                <SaveIco /> Save Draft
+              {/* #2 — Auto-save indicator */}
+              {lastSaved && (
+                <span className="text-xs text-slate-400 flex items-center gap-1 mr-2">
+                  {autoSaveStatus === 'saving' ? (
+                    <><span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" /> Saving...</>
+                  ) : autoSaveStatus === 'saved' ? (
+                    <><Svg size={11} sw={2.5} stroke="#16a34a" d={<polyline points="20 6 9 17 4 12" />} /> Saved</>
+                  ) : (
+                    <>Auto-saved {timeAgo(lastSaved)}</>
+                  )}
+                </span>
+              )}
+              {isDraft ? (
+                <>
+                  <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg">
+                    <button onClick={() => setMode('edit')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'edit' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Edit</button>
+                    <button onClick={() => setMode('preview')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'preview' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Preview</button>
+                  </div>
+                  <button onClick={handleSaveDraft} className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm flex items-center gap-1.5">
+                    <SaveIco /> Save Draft
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl font-medium">
+                    {form?.status === 'ARCHIVED' ? 'Archived — view only' : 'Published — view only'}
+                  </span>
+                  {onArchive && form?.status !== 'ARCHIVED' && (
+                    <button onClick={() => setShowArchiveModal(true)}
+                      className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 transition shadow-sm">
+                      Archive
+                    </button>
+                  )}
+                  {onBranch && (
+                    <button onClick={() => onBranch(form)}
+                      className="px-4 py-2 text-sm font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-xl hover:bg-violet-100 transition shadow-sm">
+                      Update
+                    </button>
+                  )}
+                </>
+              )}
+              {form?.form_id && !form.form_id.startsWith('tmp-') && (
+                <button onClick={() => setShowDelete(true)} className="px-4 py-2 text-sm font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-xl hover:bg-rose-100 transition shadow-sm">
+                  Delete
+                </button>
+              )}
+              <button onClick={handlePublishClick} className={`px-4 py-2 text-sm font-semibold text-white rounded-xl transition shadow-sm ${isDraft ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                {isDraft ? 'Publish' : 'Manage Groups'}
               </button>
             </>
-          ) : (
-            <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl font-medium">
-              Remove from all groups to edit
-            </span>
           )}
-          {form?.form_id && !form.form_id.startsWith('tmp-') && (
-            <button onClick={() => setShowDelete(true)} className="px-4 py-2 text-sm font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-xl hover:bg-rose-100 transition shadow-sm">
-              Delete
-            </button>
-          )}
-          <button onClick={handlePublishClick} className={`px-4 py-2 text-sm font-semibold text-white rounded-xl transition shadow-sm ${isDraft ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
-            {isDraft ? 'Publish' : 'Manage Groups'}
-          </button>
         </div>
       </div>
 
@@ -1036,15 +1344,27 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, 
         </div>
       )}
 
-      {!isDraft && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-xs text-amber-800">
-          This form is published and cannot be edited. Use <strong>Manage Groups</strong> to remove it from all groups, which will revert it to a draft.
+      {isLocked && (
+        <div className="bg-slate-100 border border-slate-300 rounded-xl px-4 py-3 mb-4 text-xs text-slate-600 flex items-center gap-3">
+          <Svg size={15} sw={2} stroke="#64748b" d={<><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>} />
+          <span>This is an older version — it is read-only. Open the latest version to make changes.</span>
+        </div>
+      )}
+      {!isDraft && !isLocked && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-xs text-amber-800 flex items-center justify-between gap-4">
+          <span>This form is {form?.status === 'ARCHIVED' ? 'archived' : 'published'} and cannot be edited directly. Create a new version to make changes — the original and its responses are preserved.</span>
+          {onBranch && (
+            <button onClick={() => onBranch(form)}
+              className="shrink-0 px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 transition">
+              Update
+            </button>
+          )}
         </div>
       )}
 
       {mode === 'edit' ? (
         <div className="flex-1 overflow-y-auto pr-1">
-          <div className={`rounded-xl border p-5 mb-4 shadow-sm ${!isDraft ? 'pointer-events-none bg-slate-50 border-slate-200' : 'bg-white border-slate-200'}`}>
+          <div className={`rounded-xl border p-5 mb-4 shadow-sm ${(!isDraft || isLocked) ? 'pointer-events-none bg-slate-50 border-slate-200' : 'bg-white border-slate-200'}`}>
             <input value={title} onChange={(e) => handleTitleChange(e.target.value)} placeholder="Form title…"
               className={`w-full text-lg font-bold text-slate-800 bg-transparent border-0 border-b-2 pb-2 focus:outline-none transition placeholder-slate-300 ${
                 !title.trim() && validationErrors.length > 0 ? 'border-rose-300 focus:border-rose-500' : 'border-slate-200 focus:border-blue-500'
@@ -1087,7 +1407,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, 
                 isExpanded={expanded === f.id}
                 isSelected={selected.has(f.id)}
                 hasError={validationErrorIds.has(f.id)}
-                readOnly={!isDraft}
+                readOnly={!isDraft || isLocked}
                 onToggle={() => setExpanded(expanded === f.id ? null : f.id)}
                 onSelect={() => toggleSelect(f.id)}
                 onUpdate={(data) => updateField(f.id, data)}
@@ -1101,7 +1421,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, 
                 onDataElementCreated={onDataElementCreated} />
             ))}
           </div>
-          {fields.length < MAX_FIELDS ? (
+          {!isLocked && (fields.length < MAX_FIELDS ? (
             <button onClick={() => setShowAdd(true)} className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm font-semibold text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-all flex items-center justify-center gap-2">
               <PlusIco /> Add Question <span className="text-xs font-normal opacity-60">{fields.length} / {MAX_FIELDS}</span>
             </button>
@@ -1109,7 +1429,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, 
             <div className="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400 flex items-center justify-center gap-2">
               Maximum of {MAX_FIELDS} questions reached
             </div>
-          )}
+          ))}
           {showAdd && <AddFieldPanel onAdd={addField} onClose={() => setShowAdd(false)} />}
         </div>
       ) : (
@@ -1117,7 +1437,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, 
       )}
 
       {showPublish && (
-        <PublishModal title={title} onClose={() => setShowPublish(false)} deployedGroupIds={form?.deployed_group_ids || []} onConfirm={(groupIds, prevDeployed) => onPublish({ ...form, title, description: desc, fields }, groupIds, prevDeployed)} />
+        <PublishModal title={title} formId={form?.form_id} onClose={() => setShowPublish(false)} deployedGroupIds={form?.deployed_group_ids || []} onConfirm={(groupIds, prevDeployed) => onPublish({ ...form, title, description: desc, fields }, groupIds, prevDeployed)} />
       )}
 
       {showDelete && (
@@ -1129,6 +1449,48 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, 
 
 
       {/* #1 — Unsaved changes modal */}
+      {showArchiveModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowArchiveModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 pt-6 pb-4">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
+                  <Svg size={20} sw={2} stroke="#475569" d={<><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></>} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Archive this form?</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">This action affects participants immediately.</p>
+                </div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5 text-xs text-slate-600">
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 font-bold text-[10px]">!</span>
+                  <span>The form will be removed from all groups — participants will lose access immediately.</span>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 font-bold text-[10px]">!</span>
+                  <span>Archived forms cannot be edited. Use <strong>Update</strong> to create a new editable version.</span>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-bold text-[10px]">✓</span>
+                  <span>All existing responses are preserved and remain accessible.</span>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+              <button onClick={() => setShowArchiveModal(false)}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
+                Cancel
+              </button>
+              <button onClick={() => { setShowArchiveModal(false); onArchive(form?.form_id); }}
+                className="px-4 py-2 text-sm font-semibold text-white bg-slate-700 hover:bg-slate-800 rounded-xl transition shadow-sm">
+                Archive
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showUnsavedModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowUnsavedModal(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
@@ -1136,7 +1498,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, dataElements, 
               <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Svg size={24} sw={2} d="M12 9v2m0 4h.01M12 3a9 9 0 100 18 9 9 0 000-18z" stroke="#d97706" />
               </div>
-              <h3 className="text-base font-bold text-slate-800 text-center mb-1">Unsaved changes</h3>
+              <h3 className="text-base font-bold text-slate-900 text-center mb-1">Unsaved changes</h3>
               <p className="text-sm text-slate-500 text-center">You have changes that haven't been saved. What would you like to do?</p>
             </div>
             <div className="flex flex-col gap-2 px-6 pb-6">
@@ -1172,6 +1534,8 @@ export default function SurveyBuilderPage() {
   const [editingForm, setEditingForm] = useState(null);
   const [toast, setToast]             = useState(null);
   const [dataElements, setDataElements] = useState([]);
+  const [branchModal, setBranchModal] = useState(null); // { form }
+  const [branching, setBranching]     = useState(false);
 
   useEffect(() => { api.listElements().then(setDataElements).catch(() => {}); }, []);
 
@@ -1226,15 +1590,38 @@ export default function SurveyBuilderPage() {
     setTimeout(() => setToast(null), 2500);
   };
 
-  const handleEdit = async (form) => {
+  const handleEdit = async (form, { locked = false } = {}) => {
     try {
       const fullForm = await api.getFormDetail(form.form_id);
-      const transformed = transformForEdit(fullForm);
+      const transformed = { ...transformForEdit(fullForm), _locked: locked };
       localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: fullForm.form_id, form: transformed }));
       setEditingForm(transformed);
       setView('builder');
     } catch (err) {
       showToast('Error loading form');
+    }
+  };
+
+  const handleBranch = (form) => {
+    setBranchModal({ form });
+  };
+
+  const confirmBranch = async () => {
+    const form = branchModal.form;
+    setBranching(true);
+    try {
+      const result = await api.branchForm(form.form_id);
+      setBranchModal(null);
+      showToast(`v${result.version} created — opening draft…`);
+      const fullForm = await api.getFormDetail(result.form_id);
+      const transformed = transformForEdit(fullForm);
+      localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: fullForm.form_id, form: transformed }));
+      setEditingForm(transformed);
+      setView('builder');
+    } catch (err) {
+      showToast(err.message || 'Error creating new version');
+    } finally {
+      setBranching(false);
     }
   };
 
@@ -1291,10 +1678,18 @@ export default function SurveyBuilderPage() {
     }
   };
 
-  const handleDelete = async (formId) => {
+  const handleDelete = async (formId, deleteAll = false) => {
     try {
-      await api.deleteForm(formId);
-      setForms((prev) => prev.filter((f) => f.form_id !== formId));
+      if (deleteAll) {
+        await api.deleteFormFamily(formId);
+        // Remove all forms in the same family
+        const target = forms.find((f) => f.form_id === formId);
+        const rootId = target?.parent_form_id || formId;
+        setForms((prev) => prev.filter((f) => f.form_id !== rootId && f.parent_form_id !== rootId && f.form_id !== formId));
+      } else {
+        await api.deleteForm(formId);
+        setForms((prev) => prev.filter((f) => f.form_id !== formId));
+      }
       if (view === 'builder') handleBack();
       showToast('Form deleted');
     } catch (err) {
@@ -1323,6 +1718,22 @@ export default function SurveyBuilderPage() {
     }
   };
 
+  const handleArchive = async (formId) => {
+    try {
+      await api.archiveForm(formId);
+      showToast('Form archived');
+      if (view === 'builder') {
+        localStorage.removeItem('hdb_builder_session');
+        setView('list');
+        setEditingForm(null);
+      }
+      loadForms();
+    } catch (err) {
+      showToast(err.message || 'Error archiving form');
+    }
+  };
+
+
   if (loading) return (
     <div className="max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-6"><div className="h-7 w-40 bg-slate-200 rounded-lg animate-pulse" /><div className="h-10 w-28 bg-slate-200 rounded-xl animate-pulse" /></div>
@@ -1345,10 +1756,12 @@ export default function SurveyBuilderPage() {
           forms={forms}
           groups={groups}
           onEdit={handleEdit}
+          onBranch={handleBranch}
           onCreate={handleCreate}
           onDelete={handleDelete}
           onPublish={handlePublishFromList}
           onUnpublish={handleUnpublish}
+          onArchive={handleArchive}
           pageTitle={pageTitle}
         />
       )}
@@ -1360,10 +1773,60 @@ export default function SurveyBuilderPage() {
           onPublish={handlePublishFromBuilder}
           onUnpublish={handleUnpublish}
           onDelete={handleDelete}
+          onBranch={handleBranch}
+          onArchive={handleArchive}
           dataElements={dataElements}
           onDataElementCreated={(el) => setDataElements((prev) => [...prev, el])}
-
         />
+      )}
+
+      {/* Branch confirmation modal */}
+      {branchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="px-6 pt-6 pb-4">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
+                  <Svg size={20} sw={2} stroke="#7c3aed" d={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Update this survey?</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    v{(branchModal.form.version || 1) + 1} will be created as a draft
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5 text-xs text-slate-600">
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-bold text-[10px]">✓</span>
+                  <span>{branchModal.form.status === 'ARCHIVED' ? 'The archived version and all its responses are preserved.' : 'The current published version and all its responses are preserved.'}</span>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-bold text-[10px]">✓</span>
+                  <span>A new draft copy is created — you can edit and publish it when ready.</span>
+                </div>
+                {branchModal.form.status !== 'ARCHIVED' && (
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 font-bold text-[10px]">!</span>
+                    <span>Participants assigned to this survey will need to fill out the new version.</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+              <button onClick={() => setBranchModal(null)} disabled={branching}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition disabled:opacity-50">
+                Cancel
+              </button>
+              <button onClick={confirmBranch} disabled={branching}
+                className="px-4 py-2 text-sm font-semibold text-white bg-violet-600 hover:bg-violet-700 rounded-xl transition shadow-sm disabled:opacity-50 flex items-center gap-2">
+                {branching ? <><span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Creating…</> : 'Create new version'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {toast && (

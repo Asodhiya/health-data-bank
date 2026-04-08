@@ -3,25 +3,88 @@ Authentication Routes
 """
 from fastapi import APIRouter, HTTPException, status, Response, Depends, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.models import User, GroupMember, ParticipantProfile, ResearcherProfile
-from sqlalchemy import select
-from datetime import datetime, timezone
+from app.db.models import User, GroupMember, ParticipantProfile, ResearcherProfile, CaretakerProfile, Group, Role, UserRole, AuditLog
+from sqlalchemy import select, func
+from datetime import datetime, timezone, timedelta
+import secrets
 from app.db.session import get_db
 from app.core.security import PasswordHash, create_access_token, generate_reset_token, hash_reset_token, reset_token_expiry
 from app.schemas.schemas import UserSignup
 from app.services.cookies import _set_cookie
-from app.services.auth_service import authenticate_user, reset_forgot_password, create_user_with_role, reset_password
+from app.services.auth_service import (
+    authenticate_user,
+    reset_forgot_password,
+    reset_password,
+    register_user_from_invite,
+    validate_signup_invite_token,
+)
 from app.schemas.schemas import LoginRequest, UserResponse, ForgotPasswordIn, ResetPasswordIn
 from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import SEND_INVITE
 from app.services.email_sender import send_reset_email, send_invite_email
 from app.core.security import InviteTokenGenerator
 from app.schemas.schemas import SignupInviteRequest
-from app.db.queries.Queries import RoleQuery, UserQuery, InviteQuery
+from app.db.queries.Queries import UserQuery
 from app.services.audit_service import write_audit_log
+from app.services.notification_service import create_notifications_bulk, create_notification, notification_exists_recent
+from app.core.rate_limit import rate_limit
+from app.services.session_service import (
+    create_user_session,
+    revoke_session,
+    get_session_token_expiry_minutes,
+)
 
 
 router = APIRouter()
+
+
+async def _login_identifier_key(request: Request) -> str:
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    identifier = str(body.get("identifier", "")).strip().lower()
+    return identifier or "unknown-identifier"
+
+
+async def _email_key(request: Request) -> str:
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    email = str(body.get("email", "")).strip().lower()
+    return email or "unknown-email"
+
+
+login_ip_rate_limit = rate_limit(
+    scope="auth:login:ip",
+    limit=5,
+    window_seconds=60,
+    key_kind="ip",
+)
+login_identifier_rate_limit = rate_limit(
+    scope="auth:login:identifier",
+    limit=5,
+    window_seconds=300,
+    key_func=_login_identifier_key,
+    key_kind="identifier",
+)
+register_rate_limit = rate_limit(scope="auth:register", limit=10, window_seconds=3600)
+forgot_password_rate_limit = rate_limit(
+    scope="auth:forgot-password:ip",
+    limit=5,
+    window_seconds=300,
+    key_kind="ip",
+)
+forgot_password_email_rate_limit = rate_limit(
+    scope="auth:forgot-password:email",
+    limit=5,
+    window_seconds=1800,
+    key_func=_email_key,
+    key_kind="email",
+)
+reset_password_rate_limit = rate_limit(scope="auth:reset-password", limit=10, window_seconds=300)
+invite_rate_limit = rate_limit(scope="auth:signup_invite", limit=20, window_seconds=3600)
 
 
 def _get_client_ip(request: Request) -> str:
@@ -36,7 +99,52 @@ def _get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-@router.post("/login")
+async def _notify_admins_about_locked_account(
+    db: AsyncSession,
+    *,
+    identifier: str,
+    user_id,
+) -> None:
+    admin_rows = await db.execute(
+        select(User.user_id)
+        .join(UserRole, UserRole.user_id == User.user_id)
+        .join(Role, Role.role_id == UserRole.role_id)
+        .where(Role.role_name == "admin")
+    )
+    admin_ids = [row[0] for row in admin_rows.all()]
+    if not admin_ids:
+        return
+
+    source_type = "locked_account"
+    source_id = user_id
+    message = f"An account was temporarily locked after repeated failed sign-in attempts for '{identifier}'."
+    for admin_id in admin_ids:
+        exists = await notification_exists_recent(
+            db,
+            user_id=admin_id,
+            notification_type="flag",
+            source_type=source_type,
+            source_id=source_id,
+            within_hours=1,
+        )
+        if not exists:
+            await create_notification(
+                db=db,
+                user_id=admin_id,
+                notification_type="flag",
+                title="Account lock detected",
+                message=message,
+                link="/audit-logs",
+                role_target="admin",
+                source_type=source_type,
+                source_id=source_id,
+            )
+
+
+@router.post(
+    "/login",
+    dependencies=[Depends(login_ip_rate_limit), Depends(login_identifier_rate_limit)],
+)
 async def login(
     data: LoginRequest,
     response: Response,
@@ -48,7 +156,7 @@ async def login(
 
     try:
         user = await authenticate_user(data.identifier, data.password, db)
-    except HTTPException:
+    except HTTPException as exc:
         await write_audit_log(
             db,
             action="LOGIN_FAILED",
@@ -57,7 +165,64 @@ async def login(
             entity_type="user",
             details={"identifier_attempted": data.identifier},
         )
-        raise  # re-raise the original 401
+
+        if exc.status_code == status.HTTP_423_LOCKED:
+            locked_user = await db.scalar(
+                select(User).where(
+                    (User.email == data.identifier) | (User.username == data.identifier)
+                )
+            )
+            await write_audit_log(
+                db,
+                action="ACCOUNT_LOCKED",
+                ip_address=ip,
+                actor_user_id=None,
+                entity_type="user",
+                entity_id=locked_user.user_id if locked_user else None,
+                details={"identifier_attempted": data.identifier},
+            )
+            await _notify_admins_about_locked_account(
+                db,
+                identifier=data.identifier,
+                user_id=locked_user.user_id if locked_user else None,
+            )
+
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+        failed_count = await db.scalar(
+            select(func.count(AuditLog.audit_id))
+            .where(AuditLog.action == "LOGIN_FAILED")
+            .where(AuditLog.created_at >= one_hour_ago)
+        )
+        if (failed_count or 0) >= 5:
+            admin_rows = await db.execute(
+                select(User.user_id)
+                .join(UserRole, UserRole.user_id == User.user_id)
+                .join(Role, Role.role_id == UserRole.role_id)
+                .where(Role.role_name == "admin")
+            )
+            admin_ids = [row[0] for row in admin_rows.all()]
+            for admin_id in admin_ids:
+                exists = await notification_exists_recent(
+                    db,
+                    user_id=admin_id,
+                    notification_type="flag",
+                    source_type="login_failed_spike",
+                    source_id=None,
+                    within_hours=1,
+                )
+                if not exists:
+                    await create_notification(
+                        db=db,
+                        user_id=admin_id,
+                        notification_type="flag",
+                        title="Login failure spike detected",
+                        message=f"{failed_count} failed login attempts were recorded in the last hour.",
+                        link="/audit-logs",
+                        role_target="admin",
+                        source_type="login_failed_spike",
+                        source_id=None,
+                    )
+        raise exc
 
     # Successful login
     await write_audit_log(
@@ -70,12 +235,20 @@ async def login(
         details={"email": user.email},
     )
 
-    token = create_access_token({"sub": str(user.user_id)})
-    _set_cookie(response, token)
+    session = await create_user_session(user.user_id, db)
+    token = create_access_token(
+        {"sub": str(user.user_id), "session_id": str(session.session_id)},
+        expires_minutes=get_session_token_expiry_minutes(),
+    )
+    _set_cookie(
+        response,
+        token,
+        max_age_seconds=get_session_token_expiry_minutes() * 60,
+    )
     return {"detail": "Login successful"}
 
 
-@router.post("/register")
+@router.post("/register", dependencies=[Depends(register_rate_limit)])
 async def register(
     token: str,
     payload: UserSignup,
@@ -84,66 +257,18 @@ async def register(
 ):
     """User registration via invite link."""
     ip = _get_client_ip(request)
-    invite_queries = InviteQuery(db)
-    role_queries = RoleQuery(db)
-
-    invite = await invite_queries.get_invite_by_token_hash(hash_reset_token(token))
-    if not invite:
-        raise HTTPException(status_code=400, detail="Invalid invite token")
-    if invite.used:
-        raise HTTPException(status_code=400, detail="Invite has already been used")
-    if invite.expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=400, detail="Invite has expired")
-    if invite.email != payload.email:
-        raise HTTPException(status_code=400, detail="Email does not match invite")
-
-    role = await role_queries.get_role_by_id(invite.role_id)
-    new_user = await create_user_with_role(payload, role.role_name, db)
-
-    invite.used = True
-
-    if role.role_name == "participant" and invite.group_id:
-        participant_profile = new_user.participant_profile
-        if participant_profile:
-            db.add(GroupMember(
-                group_id=invite.group_id,
-                participant_id=participant_profile.participant_id,
-            ))
-
-    await db.commit()
-
-    await write_audit_log(
-        db,
-        action="REGISTER_SUCCESS",
-        ip_address=ip,
-        actor_user_id=new_user.user_id,
-        entity_type="user",
-        entity_id=new_user.user_id,
-        details={"email": new_user.email, "role": role.role_name},
-    )
-
-    return new_user
+    return await register_user_from_invite(token, payload, ip, db)
 
 
 @router.get("/validate-invite")
 async def get_token(token: str, db: AsyncSession = Depends(get_db)):
-    invite_queries = InviteQuery(db)
-    role_queries = RoleQuery(db)
-
-    invite = await invite_queries.get_invite_by_token_hash(hash_reset_token(token))
-    if not invite:
-        raise HTTPException(status_code=400, detail="Invalid invite token")
-    if invite.used:
-        raise HTTPException(status_code=400, detail="Invite has already been used")
-    if invite.expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=400, detail="Invite has expired")
-
-    role = await role_queries.get_role_by_id(invite.role_id)
+    invite_context = await validate_signup_invite_token(token, db)
+    role = invite_context["role"]
 
     return {
-        "email": invite.email,
+        "email": invite_context["email"],
         "role": role.role_name,
-        "expires_at": invite.expires_at,
+        "expires_at": invite_context["expires_at"],
     }
 
 
@@ -156,6 +281,10 @@ async def logout(
 ):
     """User logout endpoint - clears the auth cookie and logs the event."""
     ip = _get_client_ip(request)
+    current_session = getattr(request.state, "session", None)
+
+    if current_session:
+        await revoke_session(current_session.session_id, db)
 
     await write_audit_log(
         db,
@@ -169,6 +298,105 @@ async def logout(
 
     response.delete_cookie("token")
     return {"message": "Logged out successfully"}
+
+
+@router.post("/self-deactivate")
+async def self_deactivate_account(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(check_current_user),
+):
+    """
+    Self-deactivate flow for any signed-in user:
+    - Account is deactivated (not hard-deleted)
+    - Participant memberships are closed
+    - Caretaker group assignments are cleared
+    - Admins are notified
+    """
+    ip = _get_client_ip(request)
+    user_queries = UserQuery(db)
+    roles = await user_queries.get_user_roles(user.user_id)
+    allowed_roles = {"participant", "researcher", "caretaker", "admin"}
+    if not any(r in allowed_roles for r in roles):
+        raise HTTPException(status_code=403, detail="This account type cannot self-deactivate.")
+
+    role_label = next((r for r in roles if r in allowed_roles), roles[0] if roles else "unknown")
+
+    user.status = False
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    user.reset_token_hash = None
+    user.reset_token_expires_at = None
+    user.password_hash = PasswordHash.from_password(secrets.token_urlsafe(32)).to_str()
+
+    if role_label == "participant":
+        participant_id = await db.scalar(
+            select(ParticipantProfile.participant_id).where(ParticipantProfile.user_id == user.user_id)
+        )
+        if participant_id:
+            active_memberships = (
+                await db.execute(
+                    select(GroupMember)
+                    .where(GroupMember.participant_id == participant_id)
+                    .where(GroupMember.left_at.is_(None))
+                )
+            ).scalars().all()
+            now = datetime.now(timezone.utc)
+            for membership in active_memberships:
+                membership.left_at = now
+    elif role_label == "caretaker":
+        caretaker_id = await db.scalar(
+            select(CaretakerProfile.caretaker_id).where(CaretakerProfile.user_id == user.user_id)
+        )
+        if caretaker_id:
+            groups = (
+                await db.execute(
+                    select(Group).where(Group.caretaker_id == caretaker_id)
+                )
+            ).scalars().all()
+            for group in groups:
+                group.caretaker_id = None
+
+    admin_rows = await db.execute(
+        select(User.user_id)
+        .join(UserRole, UserRole.user_id == User.user_id)
+        .join(Role, Role.role_id == UserRole.role_id)
+        .where(Role.role_name == "admin")
+        .where(User.user_id != user.user_id)
+    )
+    admin_ids = [row[0] for row in admin_rows.all()]
+
+    if admin_ids:
+        await create_notifications_bulk(
+            db=db,
+            user_ids=admin_ids,
+            notification_type="flag",
+            title="User self-deactivated",
+            message=f"A {role_label} account was deactivated.",
+            link="/users",
+            role_target="admin",
+                source_type="user_self_deactivated",
+            source_id=user.user_id,
+        )
+
+    await write_audit_log(
+        db,
+        action="USER_SELF_DEACTIVATED",
+        ip_address=ip,
+        actor_user_id=user.user_id,
+        entity_type="user",
+        entity_id=user.user_id,
+        details={
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": role_label,
+        },
+        commit=False,
+    )
+    await db.commit()
+
+    return {"detail": "Account deactivated successfully."}
 
 
 @router.get("/me")
@@ -213,7 +441,10 @@ async def get_current_user(
     }
 
 
-@router.post("/forgot-password")
+@router.post(
+    "/forgot-password",
+    dependencies=[Depends(forgot_password_rate_limit), Depends(forgot_password_email_rate_limit)],
+)
 async def forgot_password(
     payload: ForgotPasswordIn,
     background: BackgroundTasks,
@@ -236,7 +467,7 @@ async def forgot_password(
     return {"message": "If the email exists, a reset link has been sent."}
 
 
-@router.post("/reset-password")
+@router.post("/reset-password", dependencies=[Depends(reset_password_rate_limit)])
 async def reset_password_endpoint(
     payload: ResetPasswordIn,
     request: Request,
@@ -259,7 +490,7 @@ async def reset_password_endpoint(
     return {"message": "Password has been reset successfully."}
 
 
-@router.post("/signup_invite")
+@router.post("/signup_invite", dependencies=[Depends(invite_rate_limit)])
 async def signup_invite(
     Payload: SignupInviteRequest,
     request: Request,
@@ -308,5 +539,26 @@ async def signup_invite(
             "sent_by_role": user_roles[0],
         },
     )
+
+    admin_rows = await db.execute(
+        select(User.user_id)
+        .join(UserRole, UserRole.user_id == User.user_id)
+        .join(Role, Role.role_id == UserRole.role_id)
+        .where(Role.role_name == "admin")
+        .where(User.user_id != current_user.user_id)
+    )
+    admin_ids = [row[0] for row in admin_rows.all()]
+    if admin_ids:
+        await create_notifications_bulk(
+            db=db,
+            user_ids=admin_ids,
+            notification_type="invite",
+            title="New invite sent",
+            message=f"{Payload.email} was invited as {target_role}.",
+            link="/admin/users",
+            role_target="admin",
+            source_type="invite_sent",
+            source_id=None,
+        )
 
     return result

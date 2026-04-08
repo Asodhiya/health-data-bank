@@ -26,23 +26,29 @@ import IntakePage from "./pages/onboarding/IntakePage";
 // ── Shared pages ──
 import ProfilePage from "./pages/shared/ProfilePage";
 import SurveyBuilderPage from "./pages/shared/SurveyBuilderPage";
+import MaintenancePage from "./pages/shared/MaintenancePage";
 
 // ── Participant pages ──
 import FormListPage from "./pages/participant/FormListPage";
 import SurveyFillPage from "./pages/participant/SurveyFillPage";
 import HealthGoals from "./pages/participant/HealthGoals";
-import Messages from "./pages/participant/Message";
+import ParticipantFeedback from "./pages/participant/ParticipantFeedback";
+import ParticipantHealthSummary from "./pages/participant/ParticipantHealthSummary";
 
 // ── Admin pages ──
 import UserManagementPage from "./pages/admin/UserManagementPage";
+import UserDetailPage from "./pages/admin/UserDetailPage";
 import AuditLogPage from "./pages/admin/AuditLogPage";
 import BackupRestorePage from "./pages/admin/BackupRestorePage";
 import SystemSettingsPage from "./pages/admin/SystemSettingsPage";
 import AdminOnboardingPage from "./pages/admin/AdminOnboardingPage";
+import AdminInsightsPage from "./pages/admin/AdminInsightsPage";
+import AdminMessagesPage from "./pages/admin/AdminMessagesPage";
+import OnboardingManagementPage from "./pages/admin/OnboardingManagementPage";
 
 // --- Researcher pages ---
 import ResearcherOnboardingPage from "./pages/researcher/ResearcherOnboardingPage";
-import DataElementManager from "./pages/researcher/DataElementMangaer";
+import DataElementManager from "./pages/researcher/DataElementManager";
 import Groups from "./pages/researcher/Group_Chorts";
 import GoalTemplates from "./pages/researcher/GoalTemplates";
 
@@ -81,6 +87,7 @@ function App() {
         <Route path="/" element={<DefaultRoute />} />
         <Route path="/dashboard" element={<DefaultRoute />} />
         <Route path="/logout" element={<Navigate to="/login" replace />} />
+        <Route path="/maintenance" element={<MaintenancePage />} />
 
         {/* ── Admin ── */}
         <Route element={<AdminRoute />}>
@@ -91,9 +98,15 @@ function App() {
               path="/admin/profile"
               element={<ProfilePage role="admin" />}
             />
+            <Route path="/admin/insights" element={<AdminInsightsPage />} />
+            <Route path="/admin/system-insights" element={<AdminInsightsPage />} />
+            <Route path="/admin/messages" element={<AdminMessagesPage />} />
+            <Route path="/admin/feedback" element={<AdminMessagesPage />} />
             <Route path="/surveys" element={<SurveyBuilderPage />} />
             <Route path="/users" element={<UserManagementPage />} />
+            <Route path="/admin/users/:id" element={<UserDetailPage />} />
             <Route path="/audit-logs" element={<AuditLogPage />} /> 
+            <Route path="/onboarding-management" element={<OnboardingManagementPage />} />
             <Route path="/settings" element={<SystemSettingsPage />} />
             <Route path="/backup" element={<BackupRestorePage />} />
           </Route>
@@ -108,7 +121,8 @@ function App() {
               element={<ProfilePage role="participant" />}
             />
             <Route path="/participant/healthgoals" element={<HealthGoals />} />
-            <Route path="/participant/messages" element={<Messages />} />
+            <Route path="/participant/feedback" element={<ParticipantFeedback />} />
+            <Route path="/participant/health-summary" element={<ParticipantHealthSummary />} />
             <Route path="/participant/survey" element={<FormListPage />} />
             <Route
               path="/participant/surveys/:id"

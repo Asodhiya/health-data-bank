@@ -1,23 +1,19 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import api from "../utils/axiosInstance";
-import { api as authApi } from "../services/api";
 import { DASHBOARD_NAV } from "../config/navigation";
 import NotificationBell from "../components/NotificationBell";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function DashboardLayout({ role }) {
+  const { user, roles, loading, logout, switchRole } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  const [user, setUser] = useState(null);
   const location = useLocation();
   const navigate = useNavigate();
-
-  useEffect(() => {
-    api
-      .get("/auth/me")
-      .then((response) => setUser(response.data))
-      .catch((error) => console.error("Not logged in:", error));
-  }, []);
+  const canSwitchRoles =
+    import.meta.env.DEV &&
+    roles.length > 1 &&
+    user?.email === "dev.allroles@healthdatabank.local";
 
   useEffect(() => {
     if (!isProfileMenuOpen) return;
@@ -31,6 +27,16 @@ export default function DashboardLayout({ role }) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isProfileMenuOpen]);
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+        <p className="text-xl font-semibold animate-pulse text-blue-600">
+          Loading Health Data Bank...
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900">
@@ -72,7 +78,7 @@ export default function DashboardLayout({ role }) {
               onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
               className="w-8 h-8 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center font-bold transition-colors"
             >
-              {user?.first_name?.charAt(0).toUpperCase() ||
+              {user?.first_name?.charAt(0)?.toUpperCase() ||
                 role.charAt(0).toUpperCase()}
             </button>
 
@@ -92,12 +98,44 @@ export default function DashboardLayout({ role }) {
                 >
                   Settings
                 </Link>
+                {canSwitchRoles && (
+                  <>
+                    <div className="border-t border-slate-100 my-1"></div>
+                    <div className="px-4 py-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                        Dev Role Switch
+                      </p>
+                      <div className="flex flex-col gap-1">
+                        {roles.map((availableRole) => {
+                          const active = availableRole === role;
+                          return (
+                            <button
+                              key={availableRole}
+                              onClick={() => {
+                                switchRole(availableRole);
+                                setIsProfileMenuOpen(false);
+                                navigate(`/${availableRole}`, { replace: true });
+                              }}
+                              className={`rounded-md px-2.5 py-1.5 text-left text-sm font-medium capitalize transition-colors ${
+                                active
+                                  ? "bg-blue-50 text-blue-700"
+                                  : "text-slate-600 hover:bg-slate-50"
+                              }`}
+                            >
+                              {availableRole}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
                 <div className="border-t border-slate-100 my-1"></div>
                 <button
                   onClick={async () => {
                     setIsProfileMenuOpen(false);
-                    await authApi.logout();
-                    navigate("/login");
+                    await logout();
+                    navigate("/login", { replace: true });
                   }}
                   className="block w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-slate-50"
                 >
@@ -121,10 +159,8 @@ export default function DashboardLayout({ role }) {
         {/* Sidebar */}
         <aside
           className={`${
-            isSidebarOpen
-              ? "fixed top-0 left-0 z-50 h-screen shadow-xl"
-              : "hidden"
-          } bg-white border-r border-gray-200 md:flex md:flex-col md:w-64`}
+            isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+          } fixed top-0 left-0 z-50 h-screen w-64 shadow-xl transition-transform duration-300 ease-in-out md:translate-x-0 md:relative md:z-auto md:shadow-none bg-white border-r border-gray-200 md:flex md:flex-col md:w-64`}
         >
           <nav className="flex-1 p-6 flex flex-col gap-2">
             {/* USER PROFILE CARD */}
@@ -135,7 +171,7 @@ export default function DashboardLayout({ role }) {
                 </p>
                 <p className="text-sm font-extrabold text-slate-800 truncate capitalize">
                   {user
-                    ? `${user.first_name} ${user.last_name || ""}`
+                    ? `${user.first_name || ""} ${user.last_name || ""}`.trim()
                     : "Loading Profile..."}
                 </p>
 

@@ -3,27 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { sanitizeText, sanitizeEmail, trimPayload } from '../../utils/sanitize';
 import { api } from '../../services/api';
 
-/*
-  All 13 consent items from Appendix B.
-  "required: true" means the user MUST answer YES to proceed.
-  "required: false" means the user can answer YES or NO freely.
-*/
-const CONSENT_ITEMS = [
-  { id: 'read_understood', text: 'I have read and understand the Background Information Sheet.', required: true },
-  { id: 'right_to_withdraw', text: 'I understand that I have the right to withdraw from the research study at any time without reason, and I will receive no penalty.', required: true },
-  { id: 'direct_quotations', text: 'I give permission for the use of direct quotations.', required: false },
-  { id: 'future_contact', text: 'I give permission for the research team to contact me for future research studies.', required: false },
-  { id: 'freedom_withdraw', text: 'I understand that I have the freedom to withdraw from the research study by February 28, 2023. All information collected from you within this study will be deleted.', required: true },
-  { id: 'no_waiver', text: 'I understand that no waiver of rights is sought.', required: true },
-  { id: 'keep_copy', text: 'I understand that I can keep a copy of the signed and dated consent form.', required: true },
-  { id: 'confidential', text: 'I understand that the information will be kept confidential within the limits of the law.', required: true },
-  { id: 'agree_participate', text: 'I agree to participate in the research study.', required: true },
-  { id: 'use_data', text: 'I give permission for the use of my data.', required: true },
-  { id: 'contact_ethics', text: 'I understand that I can contact the UPEI Research Ethics Board at (902) 620-5104, or by email at researchcompliance@upei.ca.', required: true },
-  { id: 'group_confidential', text: 'I understand that the program will take place in a group setting so information shared within the group will remain confidential.', required: true },
-  { id: 'no_guarantee', text: 'Participants are reminded to keep information shared during group sessions confidential but that the research team cannot guarantee confidentiality of group sessions.', required: true },
-];
-
 /* Format today's date for display */
 function formatDate() {
   return new Date().toLocaleDateString('en-US', {
@@ -66,14 +45,36 @@ function YesNoToggle({ value, onChange }) {
 
 export default function ConsentPage() {
   const navigate = useNavigate();
+  const [consentItems, setConsentItems] = useState([]);
+  const [templateTitle, setTemplateTitle] = useState('Letter of Informed Consent');
+  const [templateSubtitle, setTemplateSubtitle] = useState('Appendix B — Connections for Healthy Living');
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState('');
   const [answers, setAnswers] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem('consent_answers') || '{}'); } catch { return {}; }
   });
   const [signature, setSignature] = useState(() => sessionStorage.getItem('consent_signature') || '');
-  //const [wantResults, setWantResults] = useState(false);
-  //const [resultEmail, setResultEmail] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  /* Fetch consent template from backend */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.getConsentForm();
+        if (cancelled) return;
+        setConsentItems(data.items || []);
+        if (data.title) setTemplateTitle(data.title);
+        if (data.subtitle) setTemplateSubtitle(data.subtitle);
+      } catch (err) {
+        if (!cancelled) setFetchError(err.message || 'Failed to load consent form.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => { sessionStorage.setItem('consent_answers', JSON.stringify(answers)); }, [answers]);
   useEffect(() => { sessionStorage.setItem('consent_signature', signature); }, [signature]);
@@ -81,8 +82,8 @@ export default function ConsentPage() {
   const setAnswer = (id, val) => setAnswers({ ...answers, [id]: val });
 
   /* Validation checks */
-  const allAnswered = CONSENT_ITEMS.every((c) => answers[c.id] !== undefined);
-  const requiredItems = CONSENT_ITEMS.filter((c) => c.required);
+  const allAnswered = consentItems.length > 0 && consentItems.every((c) => answers[c.id] !== undefined);
+  const requiredItems = consentItems.filter((c) => c.required);
   const allRequiredYes = requiredItems.every((c) => answers[c.id] === 'yes');
   const canSubmit = allAnswered && allRequiredYes && signature.trim().length > 0;
 
@@ -107,8 +108,6 @@ export default function ConsentPage() {
         signature,
       });
       await api.submitConsent(payload);
-      sessionStorage.removeItem('consent_answers');
-      sessionStorage.removeItem('consent_signature');
       navigate('/onboarding/intake');
     } catch (err) {
       setError(err.message || 'Failed to submit consent. Please try again.');
@@ -122,27 +121,40 @@ export default function ConsentPage() {
       {/* Page heading */}
       <div className="text-center mb-5">
         <h2 className="text-2xl font-bold text-slate-800 mb-1">
-          Letter of Informed Consent
+          {templateTitle}
         </h2>
         <p className="text-sm text-slate-400">
-          Appendix B — Connections for Healthy Living
+          {templateSubtitle}
         </p>
       </div>
 
+      {/* Loading state */}
+      {loading && (
+        <div className="text-center py-12 text-slate-400 text-sm">Loading consent form...</div>
+      )}
+
+      {/* Fetch error */}
+      {fetchError && (
+        <div className="bg-rose-50 border border-rose-100 text-rose-700 text-sm px-4 py-2.5 rounded-lg mb-4">
+          {fetchError}
+        </div>
+      )}
+
       {/* Error */}
-      {error && (
+      {!loading && !fetchError && error && (
         <div className="bg-rose-50 border border-rose-100 text-rose-700 text-sm px-4 py-2.5 rounded-lg mb-4">
           {error}
         </div>
       )}
 
+      {!loading && !fetchError && (<>
       {/* ── Section 1: Consent Checklist ── */}
       <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
         Participant Consent Checklist
       </p>
 
       <div className="space-y-3 mb-6">
-        {CONSENT_ITEMS.map((item) => {
+        {consentItems.map((item) => {
           const val = answers[item.id];
           const isRequiredNo = item.required && val === 'no';
 
@@ -220,45 +232,11 @@ export default function ConsentPage() {
           <span className="text-slate-400 ml-1">(recorded automatically)</span>
         </span>
       </div>
-      
-      {/* 
-      <hr className="border-slate-100 mb-5" />
-      */}
-      {/* 
-      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-        Sharing Study Results (Optional)
-      </p>
 
-      <div className="border border-slate-100 rounded-xl p-4 mb-5">
-        <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={wantResults}
-            onChange={(e) => setWantResults(e.target.checked)}
-            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-          />
-          <span className="text-sm text-slate-700">
-            I would like to receive the results of the study by email
-          </span>
-        </label>
-
-        {wantResults && (
-          <input
-            type="email"
-            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow mt-3"
-            placeholder="your.email@example.com"
-            maxLength={254}
-            value={resultEmail}
-            onChange={(e) => setResultEmail(sanitizeEmail(e.target.value))}
-          />
-        )}
-      </div>
-      */}
-      
       {/* ── Progress counter ── */}
       <div className="flex items-center justify-between text-xs text-slate-400 mb-4">
         <span>
-          {Object.keys(answers).length} of {CONSENT_ITEMS.length} items answered
+          {Object.keys(answers).length} of {consentItems.length} items answered
         </span>
         {canSubmit && (
           <span className="text-emerald-600 font-bold">✓ Ready to submit</span>
@@ -287,6 +265,8 @@ export default function ConsentPage() {
           {isSubmitting ? 'Submitting...' : 'Sign & Continue to Intake Form'}
         </button>
       </div>
+      </>
+      )}
     </>
   );
 }

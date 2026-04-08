@@ -6,6 +6,15 @@ import { api } from '../../services/api';
 const COOLDOWN_SECONDS = 90;  // 1 minute 30 seconds
 const MAX_RESENDS = 5;
 
+function getForgotPasswordErrorMessage(err) {
+  const message = err?.message?.trim();
+  if (!message) return 'Unable to reach the server. Please try again later.';
+  if (message === 'Failed to fetch' || message.includes('NetworkError')) {
+    return 'Unable to reach the server. Please try again later.';
+  }
+  return message;
+}
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
@@ -63,10 +72,8 @@ export default function ForgotPasswordPage() {
 
     try {
       await api.forgotPassword(email.trim());
-    } catch {
-      // Only block on a true network failure (server unreachable).
-      // Any other outcome still shows success to prevent email enumeration.
-      setError('Unable to reach the server. Please try again later.');
+    } catch (err) {
+      setError(getForgotPasswordErrorMessage(err));
       return;
     }
 
@@ -80,8 +87,8 @@ export default function ForgotPasswordPage() {
 
     try {
       await api.forgotPassword(email.trim());
-    } catch {
-      setError('Unable to reach the server. Please try again later.');
+    } catch (err) {
+      setError(getForgotPasswordErrorMessage(err));
       return;
     }
 

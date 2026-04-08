@@ -173,7 +173,7 @@ function ConfirmDeleteModal({ open, onClose, onConfirm, backupName, loading }) {
 }
 
 // ── Backup Detail Drawer ─────────────────────────────────────────────────────
-function BackupDetail({ backup }) {
+function BackupDetail({ backup, onUploadLegacy }) {
   const hasCounts = backup.table_row_counts && Object.keys(backup.table_row_counts).length > 0;
   const groups = hasCounts
     ? TABLE_GROUPS.filter((g) => g.keys.some((k) => backup.table_row_counts[k] !== undefined))
@@ -181,6 +181,23 @@ function BackupDetail({ backup }) {
 
   return (
     <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 animate-fade-in">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${backup.can_inline_restore ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+          {backup.can_inline_restore ? "One-click restore ready" : "Manual upload restore"}
+        </span>
+        <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+          Checksum verified
+        </span>
+        {backup.can_inline_restore ? null : (
+          <button
+            onClick={() => onUploadLegacy?.(backup)}
+            className="text-xs font-semibold text-blue-700 hover:text-blue-800 underline underline-offset-2"
+          >
+            Upload this backup file to restore
+          </button>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         {[
           { label: "Snapshot name", value: backup.storage_path || backup.snapshot_name || "—" },
@@ -249,10 +266,119 @@ function Toast({ show, type, message, onClose }) {
   );
 }
 
-// ── Auto-Backup Settings (frontend-only for now) ─────────────────────────────
-// TODO (backend): Implement a scheduler (e.g. APScheduler, Celery Beat, or cron)
-// that calls the backup endpoint on a schedule. Store config in a settings table.
-function AutoBackupPanel() {
+function SearchableSelect({ value, onChange, options, placeholder = "Search..." }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+  const inputRef = useRef(null);
+
+  const filtered = (() => {
+    if (!query) return options;
+    const normalized = query.toLowerCase();
+    const startsWith = options.filter((o) => o.toLowerCase().startsWith(normalized));
+    const contains = options.filter(
+      (o) => !o.toLowerCase().startsWith(normalized) && o.toLowerCase().includes(normalized),
+    );
+    return [...startsWith, ...contains];
+  })();
+
+  const handleSelect = (selected) => {
+    onChange(selected);
+    setQuery("");
+    setOpen(false);
+    setHighlightedIndex(0);
+  };
+
+  const handleFocus = () => {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    }
+    setOpen(true);
+    setHighlightedIndex(0);
+  };
+
+  const handleKeyDown = (e) => {
+    if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      handleFocus();
+      e.preventDefault();
+      return;
+    }
+
+    if (!open) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightedIndex((idx) => Math.min(idx + 1, Math.max(filtered.length - 1, 0)));
+      return;
+    }
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightedIndex((idx) => Math.max(idx - 1, 0));
+      return;
+    }
+
+    if (e.key === "Enter" && filtered[highlightedIndex]) {
+      e.preventDefault();
+      handleSelect(filtered[highlightedIndex]);
+      return;
+    }
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+      setQuery("");
+    }
+  };
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all"
+        placeholder={placeholder}
+        value={open ? query : value || ""}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); setHighlightedIndex(0); }}
+        onFocus={handleFocus}
+        onKeyDown={handleKeyDown}
+      />
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setQuery(""); }} />
+          <ul
+            className="fixed z-20 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg"
+            style={{ top: `${dropdownPos.top}px`, left: `${dropdownPos.left}px`, width: `${dropdownPos.width}px` }}
+          >
+            {filtered.length === 0 ? (
+              <li className="px-3 py-2.5 text-sm text-slate-400">No results</li>
+            ) : (
+              filtered.map((opt, index) => (
+                <li
+                  key={opt}
+                  className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
+                    index === highlightedIndex
+                      ? "bg-blue-50 text-blue-700 font-medium"
+                      : opt === value
+                        ? "text-blue-700 font-medium"
+                        : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  onClick={() => handleSelect(opt)}
+                >
+                  {opt}
+                </li>
+              ))
+            )}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AutoBackupPanel({ showToast }) {
   const [enabled, setEnabled] = useState(false);
   const [frequency, setFrequency] = useState("weekly");
   const [time, setTime] = useState("03:00");
@@ -260,18 +386,87 @@ function AutoBackupPanel() {
   const [dayOfMonth, setDayOfMonth] = useState("1");
   const [retention, setRetention] = useState("5");
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [notifyOnSuccess, setNotifyOnSuccess] = useState(true);
   const [notifyOnFail, setNotifyOnFail] = useState(true);
   const [autoScope, setAutoScope] = useState("full");
-
-  // Auto-detect user's timezone, allow manual override
+  const [nextRunAt, setNextRunAt] = useState(null);
   const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const [timezone, setTimezone] = useState(detectedTz);
 
-  const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2500); };
+  useEffect(() => {
+    let active = true;
+
+    const loadSchedule = async () => {
+      try {
+        setLoading(true);
+        const schedule = await api.adminGetBackupSchedule();
+        if (!active) return;
+        setEnabled(Boolean(schedule.enabled));
+        setFrequency(schedule.frequency || "weekly");
+        setTime(schedule.time || "03:00");
+        setDay(schedule.day_of_week || "sunday");
+        setDayOfMonth(String(schedule.day_of_month || 1));
+        setRetention(String(schedule.retention_count ?? 5));
+        setNotifyOnSuccess(Boolean(schedule.notify_on_success));
+        setNotifyOnFail(Boolean(schedule.notify_on_failure));
+        setAutoScope(schedule.scope || "full");
+        setTimezone(schedule.timezone || detectedTz);
+        setNextRunAt(schedule.next_run_at || null);
+      } catch (err) {
+        if (active) showToast("error", err.message || "Failed to load backup schedule.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    loadSchedule();
+    return () => {
+      active = false;
+    };
+  }, [detectedTz]);
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      const schedule = await api.adminUpdateBackupSchedule({
+        enabled,
+        frequency,
+        time,
+        day_of_week: frequency === "weekly" || frequency === "biweekly" ? day : null,
+        day_of_month: frequency === "monthly" ? Number(dayOfMonth) : null,
+        timezone,
+        scope: autoScope,
+        retention_count: Number(retention),
+        notify_on_success: notifyOnSuccess,
+        notify_on_failure: notifyOnFail,
+      });
+      setNextRunAt(schedule.next_run_at || null);
+      setSaved(true);
+      showToast("success", "Automatic backup schedule saved.");
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      showToast("error", err.message || "Failed to save backup schedule.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const tzShort = timezone.replace(/_/g, " ");
   const nextBackupLabel = () => {
+    if (nextRunAt) {
+      return new Date(nextRunAt).toLocaleString(undefined, {
+        weekday: "long",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: timezone,
+        timeZoneName: "short",
+      });
+    }
     if (frequency === "daily") return `Tomorrow at ${time} (${tzShort})`;
     if (frequency === "monthly") {
       const s = dayOfMonth === "1" ? "st" : dayOfMonth === "2" ? "nd" : dayOfMonth === "3" ? "rd" : "th";
@@ -299,13 +494,17 @@ function AutoBackupPanel() {
         </button>
       </div>
 
-      {enabled ? (
+      {loading ? (
+        <div className="px-6 py-8 text-center animate-fade-in">
+          <p className="text-sm text-slate-400">Loading automatic backup settings…</p>
+        </div>
+      ) : enabled ? (
         <div className="p-6 space-y-5 animate-fade-in">
-          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-700">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 flex items-start gap-2 text-xs text-blue-700">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M18 10A8 8 0 112 10a8 8 0 0116 0zm-7-3a1 1 0 10-2 0v3a1 1 0 00.293.707l2 2a1 1 0 101.414-1.414L11 9.586V7z" clipRule="evenodd" />
             </svg>
-            <span><span className="font-semibold">Coming soon.</span> Automatic backup scheduling requires a backend scheduler. These settings are saved locally for now and will activate once the scheduler is deployed.</span>
+            <span><span className="font-semibold">Live schedule.</span> Automatic backups now run from the backend scheduler. Full Backup is the active scope for scheduled runs right now.</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
@@ -336,23 +535,12 @@ function AutoBackupPanel() {
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Timezone</label>
-              <select value={timezone} onChange={(e) => setTimezone(e.target.value)}
-                className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all">
-                {Intl.supportedValuesOf("timeZone").map((tz) => (
-                  <option key={tz} value={tz}>{tz.replace(/_/g, " ")}{tz === detectedTz ? " (detected)" : ""}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Backup Scope</label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {BACKUP_SCOPES.filter((s) => ["full", "health_data", "system_config"].includes(s.id)).map((s) => (
-                <button key={s.id} onClick={() => setAutoScope(s.id)} className={`px-3 py-2.5 text-sm font-medium rounded-xl border transition-all text-left ${selClass(s.id, autoScope)}`}>
-                  <span className="block">{s.label}</span><span className="block text-[10px] opacity-60 mt-0.5">{s.tables}</span>
-                </button>
-              ))}
+              <SearchableSelect
+                value={timezone}
+                onChange={setTimezone}
+                options={Intl.supportedValuesOf("timeZone")}
+                placeholder="Search for a timezone..."
+              />
             </div>
           </div>
 
@@ -367,9 +555,9 @@ function AutoBackupPanel() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Email Notifications</label>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Admin Notifications</label>
             <div className="flex flex-col sm:flex-row gap-3">
-              {[{ checked: notifyOnSuccess, set: setNotifyOnSuccess, title: "On success", desc: "Confirmation when backup completes" }, { checked: notifyOnFail, set: setNotifyOnFail, title: "On failure", desc: "Alert if a scheduled backup fails" }].map((n) => (
+              {[{ checked: notifyOnSuccess, set: setNotifyOnSuccess, title: "On success", desc: "Notify admins when a scheduled backup completes" }, { checked: notifyOnFail, set: setNotifyOnFail, title: "On failure", desc: "Notify admins if a scheduled backup fails" }].map((n) => (
                 <label key={n.title} className="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors flex-1">
                   <input type="checkbox" checked={n.checked} onChange={(e) => n.set(e.target.checked)} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                   <div><p className="text-sm font-medium text-slate-700">{n.title}</p><p className="text-xs text-slate-400">{n.desc}</p></div>
@@ -383,8 +571,8 @@ function AutoBackupPanel() {
               <IconCalendar />
               <span>Next backup: <span className="font-semibold text-slate-800">{nextBackupLabel()}</span></span>
             </div>
-            <button onClick={handleSave} className={`px-5 py-2 text-sm font-semibold rounded-xl transition-all flex items-center gap-2 shrink-0 ${saved ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
-              {saved ? <><IconCheck /> Saved</> : "Save Schedule"}
+            <button onClick={handleSave} disabled={saving} className={`px-5 py-2 text-sm font-semibold rounded-xl transition-all flex items-center gap-2 shrink-0 ${saved ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-blue-600 text-white hover:bg-blue-700"} ${saving ? "opacity-70 cursor-not-allowed" : ""}`}>
+              {saving ? <><Spinner /> Saving…</> : saved ? <><IconCheck /> Saved</> : "Save Schedule"}
             </button>
           </div>
         </div>
@@ -394,6 +582,35 @@ function AutoBackupPanel() {
         </div>
       )}
     </div>
+  );
+}
+
+function ConfirmHistoryRestoreModal({ open, onClose, onConfirm, backupName, loading }) {
+  return (
+    <Modal open={open} onClose={() => !loading && onClose()}>
+      <div className="flex items-center gap-3">
+        <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center shrink-0"><IconWarning /></div>
+        <div><h3 className="text-lg font-bold text-slate-800">Restore From Backup History</h3><p className="text-sm text-slate-500 mt-0.5">This action cannot be undone</p></div>
+      </div>
+      <div className="mt-4 bg-rose-50 border border-rose-100 rounded-xl p-4 space-y-2">
+        <p className="text-sm font-semibold text-rose-800">This will permanently:</p>
+        <ul className="text-sm text-rose-700 space-y-1 ml-4 list-disc">
+          <li>Wipe all current data in the affected tables</li>
+          <li>Replace it with the selected backup snapshot</li>
+          <li>Log out all active users</li>
+        </ul>
+      </div>
+      <div className="mt-3 bg-slate-50 border border-slate-100 rounded-xl p-3 flex items-center gap-3">
+        <IconDatabase />
+        <div className="min-w-0"><p className="text-sm font-semibold text-slate-700 truncate">{backupName}</p><p className="text-xs text-slate-400">Backup snapshot selected for one-click restore</p></div>
+      </div>
+      <div className="flex gap-3 pt-4">
+        <button onClick={onClose} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors disabled:opacity-50">Cancel</button>
+        <button onClick={onConfirm} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-70">
+          {loading ? <><Spinner /> Restoring…</> : "Restore This Backup"}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -407,14 +624,17 @@ export default function BackupRestorePage() {
   const [selectedScope, setSelectedScope] = useState("full");
   const [scopeExpanded, setScopeExpanded] = useState(false);
   const [restoreFile, setRestoreFile] = useState(null);
+  const [restorePreview, setRestorePreview] = useState(null);
   const [dragOver, setDragOver] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [toast, setToast] = useState({ show: false, type: "success", message: "" });
   const [confirmRestore, setConfirmRestore] = useState(false);
+  const [historyRestoreTarget, setHistoryRestoreTarget] = useState(null);
   const [restoreLoading, setRestoreLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const fileInputRef = useRef(null);
+  const restoreSectionRef = useRef(null);
 
   const showToast = (type, message) => {
     setToast({ show: true, type, message });
@@ -427,7 +647,8 @@ export default function BackupRestorePage() {
   const fetchBackups = useCallback(async () => {
     try {
       setBackupsLoading(true);
-      const data = await api.listBackups();
+      // Keep initial admin load light; full history can be added with pagination later.
+      const data = await api.listBackups(50);
       setBackups(data);
     } catch (err) {
       console.error("Failed to load backup history:", err);
@@ -462,6 +683,13 @@ export default function BackupRestorePage() {
       return;
     }
     setRestoreFile(file);
+    setRestorePreview(null);
+  };
+
+  const triggerLegacyUpload = (backup) => {
+    restoreSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    fileInputRef.current?.click();
+    showToast("success", `Select the downloaded JSON file for '${backup.storage_path}' to continue restoring.`);
   };
   const onDrop = useCallback((e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }, []);
   const onDragOver = useCallback((e) => { e.preventDefault(); setDragOver(true); }, []);
@@ -474,10 +702,52 @@ export default function BackupRestorePage() {
       const result = await api.restoreBackup(restoreFile);
       showToast("success", result.message || "Database restored successfully.");
       setRestoreFile(null);
+      setRestorePreview(null);
       setConfirmRestore(false);
       fetchBackups();
     } catch (err) {
       showToast("error", err.message || "Restore failed. The file may be corrupted or invalid.");
+    } finally {
+      setRestoreLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPreview = async () => {
+      if (!restoreFile) {
+        setRestorePreview(null);
+        return;
+      }
+
+      try {
+        const preview = await api.previewRestoreBackup(restoreFile);
+        if (active) setRestorePreview(preview);
+      } catch (err) {
+        if (active) {
+          setRestorePreview(null);
+          showToast("error", err.message || "Failed to preview backup file.");
+        }
+      }
+    };
+
+    loadPreview();
+    return () => {
+      active = false;
+    };
+  }, [restoreFile]);
+
+  const handleHistoryRestore = async () => {
+    if (!historyRestoreTarget) return;
+    setRestoreLoading(true);
+    try {
+      const result = await api.restoreBackupFromHistory(historyRestoreTarget.backup_id);
+      showToast("success", result.message || "Database restored successfully.");
+      setHistoryRestoreTarget(null);
+      fetchBackups();
+    } catch (err) {
+      showToast("error", err.message || "Restore failed for this backup.");
     } finally {
       setRestoreLoading(false);
     }
@@ -510,6 +780,7 @@ export default function BackupRestorePage() {
 
       <Toast {...toast} onClose={() => setToast((t) => ({ ...t, show: false }))} />
       <ConfirmRestoreModal open={confirmRestore} onClose={() => setConfirmRestore(false)} onConfirm={handleRestore} fileName={restoreFile?.name || ""} loading={restoreLoading} />
+      <ConfirmHistoryRestoreModal open={!!historyRestoreTarget} onClose={() => setHistoryRestoreTarget(null)} onConfirm={handleHistoryRestore} backupName={historyRestoreTarget?.storage_path || ""} loading={restoreLoading} />
       <ConfirmDeleteModal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} backupName={deleteTarget?.storage_path || ""} loading={deleteLoading} />
 
       {/* Header */}
@@ -530,7 +801,7 @@ export default function BackupRestorePage() {
       {/* Two-column: Create / Restore */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Create Backup */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col">
+        <div ref={restoreSectionRef} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center"><IconDownload /></div>
             <div><h2 className="text-lg font-bold text-slate-800">Create Backup</h2><p className="text-xs text-slate-400">Export a database snapshot</p></div>
@@ -615,6 +886,45 @@ export default function BackupRestorePage() {
                 </div>
               )}
             </div>
+            {restorePreview && (
+              <div className="mt-3 bg-slate-50 border border-slate-100 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{restorePreview.snapshot_name}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {restorePreview.created_at ? formatDate(restorePreview.created_at) : "Unknown backup time"}
+                    </p>
+                  </div>
+                  <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+                    restorePreview.checksum_verified
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}>
+                    {restorePreview.checksum_verified ? "Verified" : "Unverified"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="bg-white rounded-lg border border-slate-100 p-3">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tables</p>
+                    <p className="text-sm font-semibold text-slate-700 mt-1">{restorePreview.table_count}</p>
+                  </div>
+                  <div className="bg-white rounded-lg border border-slate-100 p-3">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Rows</p>
+                    <p className="text-sm font-semibold text-slate-700 mt-1">{restorePreview.total_rows?.toLocaleString?.() || restorePreview.total_rows}</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className={`px-2 py-1 rounded-full ${restorePreview.auth_fields_sanitized ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"}`}>
+                    {restorePreview.auth_fields_sanitized ? "Auth fields sanitized" : "Auth sanitization unknown"}
+                  </span>
+                  {restorePreview.matched_backup_id && (
+                    <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-600">
+                      Matched backup history record
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="mt-3 bg-amber-50 border border-amber-100 rounded-xl p-3 flex items-start gap-2">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
@@ -629,7 +939,7 @@ export default function BackupRestorePage() {
       </div>
 
       {/* Auto-Backup Settings */}
-      <AutoBackupPanel />
+      <AutoBackupPanel showToast={showToast} />
 
       {/* Backup History */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
@@ -672,6 +982,20 @@ export default function BackupRestorePage() {
                       </div>
                     </button>
                     <div className="flex items-center gap-2 shrink-0 pl-12 sm:pl-0">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (b.can_inline_restore) {
+                            setHistoryRestoreTarget(b);
+                          } else {
+                            triggerLegacyUpload(b);
+                          }
+                        }}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${b.can_inline_restore ? "text-amber-700 bg-amber-50 hover:bg-amber-100" : "text-blue-700 bg-blue-50 hover:bg-blue-100"}`}
+                        title={b.can_inline_restore ? "Restore this backup from history" : "This older backup must be restored by uploading its downloaded JSON file in the Restore from Backup panel"}
+                      >
+                        {b.can_inline_restore ? "Restore" : "Upload file"}
+                      </button>
                       <span className="text-[10px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Verified</span>
                       <span className="text-xs text-slate-400 hidden sm:inline">{daysAgo(b.created_at)}</span>
                       <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(b); }}
@@ -680,7 +1004,7 @@ export default function BackupRestorePage() {
                       </button>
                     </div>
                   </div>
-                  {isExpanded && <BackupDetail backup={b} />}
+                  {isExpanded && <BackupDetail backup={b} onUploadLegacy={triggerLegacyUpload} />}
                 </div>
               );
             })}

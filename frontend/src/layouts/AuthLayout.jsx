@@ -1,6 +1,11 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet, Navigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function AuthLayout() {
+  const { user, role, loading } = useAuth();
+  if (loading) return null;
+  if (user && role) return <Navigate to={`/${role}`} replace />;
+  
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-slate-100 flex items-center justify-center p-4 sm:p-8">
       <div className="w-full max-w-md flex flex-col items-center">

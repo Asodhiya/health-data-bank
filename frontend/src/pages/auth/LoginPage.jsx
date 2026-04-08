@@ -5,7 +5,7 @@ import { useAuth } from "../../contexts/AuthContext";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { refetch } = useAuth();
+  const { refetch, maintenance } = useAuth();
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -21,7 +21,15 @@ export default function LoginPage() {
     try {
       await api.login(identifier.trim(), password);
       const me = await refetch(); 
-      const role = me?.Role?.[0] ?? null;
+      const roles = Array.from(
+        new Set(
+          (Array.isArray(me?.Role) ? me.Role : [])
+            .map((value) => String(value || "").trim().toLowerCase())
+            .filter(Boolean),
+        ),
+      );
+      const savedRole = window.localStorage.getItem("hdb:active-role");
+      const role = savedRole && roles.includes(savedRole) ? savedRole : (roles[0] ?? null);
       if (role) {
         navigate(`/${role}`, { replace: true });
       } else {
@@ -51,15 +59,15 @@ export default function LoginPage() {
         </div>
       )}
 
+      {maintenance && (
+        <div className="bg-amber-50 border border-amber-100 text-amber-700 text-sm px-4 py-2.5 rounded-lg mb-4">
+          Maintenance mode is active. Admins can still sign in.
+        </div>
+      )}
+
       {/* Form */}
       <form
         onSubmit={handleSubmit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !loading) {
-            e.preventDefault();
-            handleSubmit(e);
-          }
-        }}
         className="flex flex-col gap-4"
       >
         {/* Email field */}

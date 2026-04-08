@@ -17,7 +17,20 @@ const REQUIRED_FIELDS = [
 
 export default function AdminOnboardingPage() {
   const navigate = useNavigate();
-  const { user, refetch } = useAuth();
+  const { user, logout, refetch } = useAuth();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      navigate('/login', { replace: true });
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
+
   const [form, setForm] = useState({
     title: "",
     role_title: "",
@@ -68,6 +81,13 @@ export default function AdminOnboardingPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-start justify-center px-4 py-10 md:py-16">
       <div className="w-full max-w-xl space-y-6">
+        {/* Logout */}
+        <div className="flex justify-end">
+          <button type="button" className="rounded-xl border border-slate-200 bg-white/80 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60" disabled={isLoggingOut} onClick={handleLogout}>
+            {isLoggingOut ? 'Logging out...' : 'Logout'}
+          </button>
+        </div>
+
         {/* Header */}
         <div className="text-center">
           <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center mx-auto mb-4">
@@ -129,9 +149,9 @@ export default function AdminOnboardingPage() {
             <div ref={el => fieldRefs.current.role_title = el}
               className={`rounded-xl transition-all ${isReq("role_title") ? "border-l-4 border-rose-400 bg-rose-50/30 pl-3" : ""}`}>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                Position / Role Title {isReq("role_title") && <span className="text-rose-500 normal-case font-semibold ml-1">Required</span>}
+                Position / Role Title <span className="text-rose-500">*</span> {isReq("role_title") && <span className="text-rose-500 normal-case font-semibold ml-1">Required</span>}
               </label>
-              <input type="text" value={form.role_title} onChange={set("role_title")} placeholder="e.g. System Administrator, IT Director"
+              <input type="text" value={form.role_title} onChange={set("role_title")} placeholder="e.g. System Administrator, IT Director" maxLength={50}
                 className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent text-slate-800 placeholder:text-slate-300" />
             </div>
 
@@ -139,9 +159,9 @@ export default function AdminOnboardingPage() {
             <div ref={el => fieldRefs.current.department = el}
               className={`rounded-xl transition-all ${isReq("department") ? "border-l-4 border-rose-400 bg-rose-50/30 pl-3" : ""}`}>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                Department {isReq("department") && <span className="text-rose-500 normal-case font-semibold ml-1">Required</span>}
+                Department <span className="text-rose-500">*</span> {isReq("department") && <span className="text-rose-500 normal-case font-semibold ml-1">Required</span>}
               </label>
-              <input type="text" value={form.department} onChange={set("department")} placeholder="e.g. Information Technology, Operations"
+              <input type="text" value={form.department} onChange={set("department")} placeholder="e.g. Information Technology, Operations" maxLength={50}
                 className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent text-slate-800 placeholder:text-slate-300" />
             </div>
 
@@ -149,17 +169,18 @@ export default function AdminOnboardingPage() {
             <div ref={el => fieldRefs.current.organization = el}
               className={`rounded-xl transition-all ${isReq("organization") ? "border-l-4 border-rose-400 bg-rose-50/30 pl-3" : ""}`}>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                Organization {isReq("organization") && <span className="text-rose-500 normal-case font-semibold ml-1">Required</span>}
+                Organization <span className="text-rose-500">*</span> {isReq("organization") && <span className="text-rose-500 normal-case font-semibold ml-1">Required</span>}
               </label>
-              <input type="text" value={form.organization} onChange={set("organization")} placeholder="e.g. UPEI, Halifax Health Authority"
+              <input type="text" value={form.organization} onChange={set("organization")} placeholder="e.g. UPEI, Halifax Health Authority" maxLength={50}
                 className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent text-slate-800 placeholder:text-slate-300" />
             </div>
 
             {/* Bio — optional */}
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Bio <span className="text-slate-300 font-normal normal-case">(optional)</span></label>
-              <textarea value={form.bio} onChange={set("bio")} rows={3} placeholder="A brief description of your role and responsibilities…"
+              <textarea value={form.bio} onChange={set("bio")} rows={3} placeholder="A brief description of your role and responsibilities…" maxLength={300}
                 className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent text-slate-800 placeholder:text-slate-300 resize-none" />
+              <p className="text-xs text-slate-400 mt-1 text-right">{(form.bio || "").length}/300</p>
             </div>
 
             {/* Contact Preference */}
