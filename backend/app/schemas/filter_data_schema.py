@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional, Dict, List
 from uuid import UUID
 from datetime import datetime
@@ -21,10 +21,11 @@ class ParticipantProfileOut(BaseModel):
     gender: Optional[str] = None
     pronouns: Optional[str] = None
     primary_language: Optional[str] = None
+    country_of_origin: Optional[str] = None
     occupation_status: Optional[str] = None
     living_arrangement: Optional[str] = None
     highest_education_level: Optional[str] = None
-    dependents: Optional[bool] = None
+    dependents: Optional[int] = None
     marital_status: Optional[str] = None
     address: Optional[str] = None
 
@@ -37,10 +38,11 @@ class ParticipantProfileUpdate(BaseModel):
     gender: Optional[str] = None
     pronouns: Optional[str] = None
     primary_language: Optional[str] = None
+    country_of_origin: Optional[str] = None
     occupation_status: Optional[str] = None
     living_arrangement: Optional[str] = None
     highest_education_level: Optional[str] = None
-    dependents: Optional[bool] = None
+    dependents: Optional[int] = None
     marital_status: Optional[str] = None
     address: Optional[str] = None
 
@@ -48,11 +50,12 @@ class ParticipantProfileUpdate(BaseModel):
 class ParticipantFilter(BaseModel):
     gender: Optional[str] = None
     pronouns: Optional[str] = None
-    primary_language: Optional[str] = None
+    primary_language: List[str] = []
     occupation_status: Optional[str] = None
     living_arrangement: Optional[str] = None
     highest_education_level: Optional[str] = None
-    dependents: Optional[bool] = None
+    dependents_min: Optional[int] = None
+    dependents_max: Optional[int] = None
     marital_status: Optional[str] = None
     age_min: Optional[int] = None
     age_max: Optional[int] = None
@@ -60,6 +63,18 @@ class ParticipantFilter(BaseModel):
     group_ids: List[UUID] = []
     search: Optional[str] = None
     survey_id: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_null_bytes(cls, values):
+        if not isinstance(values, dict):
+            return values
+        for k, v in values.items():
+            if isinstance(v, str) and "\x00" in v:
+                raise ValueError(f"Field '{k}' contains an invalid null byte character.")
+            if isinstance(v, list) and any(isinstance(i, str) and "\x00" in i for i in v):
+                raise ValueError(f"Field '{k}' contains an invalid null byte character.")
+        return values
 
 class ParticipantResponse(BaseModel):
     id: int

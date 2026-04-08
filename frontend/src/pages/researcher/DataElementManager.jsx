@@ -14,6 +14,8 @@ const normalizeType = (dt = "") => {
   return "number";
 };
 
+const supportsUnit = (dt = "") => normalizeType(dt) === "number";
+
 const typeLabel = (dt) => {
   const t = normalizeType(dt);
   return t.charAt(0).toUpperCase() + t.slice(1);
@@ -32,6 +34,8 @@ const DataElementManager = () => {
   const [sort, setSort] = useState("newest"); // "newest" | "alpha"
   const [surveyCountMap, setSurveyCountMap] = useState({});
   const [elementLinksMap, setElementLinksMap] = useState({});
+  const [goalCountMap, setGoalCountMap] = useState({});
+  const [goalLinksMap, setGoalLinksMap] = useState({});
 
   // Create modal
   const [showCreate, setShowCreate] = useState(false);
@@ -50,6 +54,10 @@ const DataElementManager = () => {
 
   // Mapping load error
   const [mappingError, setMappingError] = useState(false);
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 15;
 
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState(null); // element object to delete
@@ -75,21 +83,44 @@ const DataElementManager = () => {
   };
 
   const buildSurveyCounts = async () => {
+    setElementLinksMap({});
+    setGoalLinksMap({});
     try {
-      const mappings = await api.getAllMappings();
-      const countMap = {};
-      const linksMap = {};
-      (mappings || []).forEach(({ element_id, field_id, field_label, form_id, form_title, form_status, form_version }) => {
-        if (!countMap[element_id]) countMap[element_id] = new Set();
-        countMap[element_id].add(form_id);
-        if (!linksMap[element_id]) linksMap[element_id] = [];
-        linksMap[element_id].push({ form_id, form_title, form_status, form_version, field_id, field_label });
-      });
-      setSurveyCountMap(
-        Object.fromEntries(Object.entries(countMap).map(([k, v]) => [k, v.size]))
-      );
-      setElementLinksMap(linksMap);
-      setMappingError(false);
+      const [mappingsResult, templatesResult] = await Promise.allSettled([
+        api.getAllMappings(),
+        api.listGoalTemplates(),
+      ]);
+
+      if (mappingsResult.status === "fulfilled") {
+        const mappings = mappingsResult.value || [];
+        const countMap = {};
+        const linksMap = {};
+        mappings.forEach(({ element_id, field_id, field_label, form_id, form_title, form_status, form_version }) => {
+          if (!countMap[element_id]) countMap[element_id] = new Set();
+          countMap[element_id].add(form_id);
+          if (!linksMap[element_id]) linksMap[element_id] = [];
+          linksMap[element_id].push({ form_id, form_title, form_status, form_version, field_id, field_label });
+        });
+        setSurveyCountMap(Object.fromEntries(Object.entries(countMap).map(([k, v]) => [k, v.size])));
+        setElementLinksMap(linksMap);
+      }
+
+      if (templatesResult.status === "fulfilled") {
+        const templates = templatesResult.value || [];
+        const gCountMap = {};
+        const gLinksMap = {};
+        templates.forEach((t) => {
+          if (!t.element_id) return;
+          gCountMap[t.element_id] = (gCountMap[t.element_id] || 0) + 1;
+          if (!gLinksMap[t.element_id]) gLinksMap[t.element_id] = [];
+          gLinksMap[t.element_id].push({ template_id: t.template_id, name: t.name });
+        });
+        setGoalCountMap(gCountMap);
+        setGoalLinksMap(gLinksMap);
+      }
+
+      const hadError = mappingsResult.status === "rejected" || templatesResult.status === "rejected";
+      setMappingError(hadError);
     } catch (err) {
       console.error("Survey count error:", err);
       setMappingError(true);
@@ -102,7 +133,7 @@ const DataElementManager = () => {
     const q = search.toLowerCase();
     return elements.filter((el) => {
       const id = el.element_id || el.id;
-      const isMapped = (surveyCountMap[id] || 0) > 0;
+      const isMapped = (surveyCountMap[id] || 0) > 0 || (goalCountMap[id] || 0) > 0;
       const matchSearch =
         !q ||
         (el.label || "").toLowerCase().includes(q) ||
@@ -121,7 +152,12 @@ const DataElementManager = () => {
       const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
       return tb - ta;
     });
-  }, [elements, search, typeFilter, mappingFilter, surveyCountMap, sort]);
+  }, [elements, search, typeFilter, mappingFilter, surveyCountMap, goalCountMap, sort]);
+
+  useEffect(() => { setPage(1); }, [search, typeFilter, mappingFilter, sort, goalCountMap]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // ── Create ──────────────────────────────────────────────────────────────────
 
@@ -133,7 +169,7 @@ const DataElementManager = () => {
         code: newEl.code.trim().toLowerCase(),
         label: newEl.name.trim(),
         datatype: newEl.datatype,
-        unit: newEl.unit.trim() || null,
+        unit: supportsUnit(newEl.datatype) ? newEl.unit.trim() || null : null,
         description: newEl.description.trim() || null,
       });
       setElements((p) => [...p, res]);
@@ -300,7 +336,7 @@ const DataElementManager = () => {
         {/* Stats row */}
         {(() => {
           const total = elements.length;
-          const mapped = elements.filter((el) => surveyCountMap[el.element_id || el.id] > 0).length;
+          const mapped = elements.filter((el) => (surveyCountMap[el.element_id || el.id] || 0) > 0 || (goalCountMap[el.element_id || el.id] || 0) > 0).length;
           const unmapped = total - mapped;
           return (
             <div className="grid grid-cols-3 gap-3 mb-5">
@@ -412,10 +448,11 @@ const DataElementManager = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filtered.map((el) => {
+              {paginated.map((el) => {
                 const id = el.element_id || el.id;
                 const count = surveyCountMap[id] || 0;
-                const isMapped = count > 0;
+                const goalCount = goalCountMap[id] || 0;
+                const isMapped = count > 0 || goalCount > 0;
 
                 return (
                   <tr
@@ -439,6 +476,11 @@ const DataElementManager = () => {
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="flex items-center justify-end gap-2">
+                        {goalCount > 0 && (
+                          <span className="px-2 py-0.5 bg-violet-50 text-violet-700 text-xs font-semibold rounded-full border border-violet-100">
+                            {goalCount} {goalCount === 1 ? "goal" : "goals"}
+                          </span>
+                        )}
                         {isMapped && (
                           <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full border border-emerald-100">
                             {count} {count === 1 ? "survey" : "surveys"}
@@ -457,6 +499,42 @@ const DataElementManager = () => {
               })}
             </tbody>
           </table>
+        )}
+
+        {/* Pagination */}
+        {!loading && !loadError && totalPages > 1 && (
+          <div className="flex items-center justify-between pt-4 pb-2">
+            <p className="text-xs text-slate-400">
+              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+              >
+                Previous
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPage(p)}
+                  className={`w-8 h-8 text-xs font-semibold rounded-lg transition ${
+                    p === page ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100"
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         )}
       </div>
 
@@ -493,7 +571,7 @@ const DataElementManager = () => {
                     placeholder="e.g. blood_pressure"
                     className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm font-mono outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition"
                     value={newEl.code}
-                    onChange={(e) => setNewEl({ ...newEl, code: e.target.value })}
+                    onChange={(e) => setNewEl({ ...newEl, code: e.target.value.replace(/\s/g, "_").toLowerCase() })}
                     required
                   />
                   <p className="text-xs text-slate-400 mt-1.5">
@@ -529,7 +607,13 @@ const DataElementManager = () => {
                     <select
                       className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition bg-white"
                       value={newEl.datatype}
-                      onChange={(e) => setNewEl({ ...newEl, datatype: e.target.value })}
+                      onChange={(e) =>
+                        setNewEl((prev) => ({
+                          ...prev,
+                          datatype: e.target.value,
+                          unit: supportsUnit(e.target.value) ? prev.unit : "",
+                        }))
+                      }
                     >
                       <option value="number">Number</option>
                       <option value="string">Text</option>
@@ -549,12 +633,15 @@ const DataElementManager = () => {
                     </label>
                     <input
                       placeholder="e.g. mmHg, hrs, kg"
+                      disabled={!supportsUnit(newEl.datatype)}
                       className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition"
                       value={newEl.unit}
                       onChange={(e) => setNewEl({ ...newEl, unit: e.target.value })}
                     />
                     <p className="text-xs text-slate-400 mt-1.5">
-                      The unit of measurement displayed alongside values.
+                      {supportsUnit(newEl.datatype)
+                        ? "The unit of measurement displayed alongside numeric values."
+                        : "Units are only used for numeric data elements."}
                     </p>
                   </div>
                 </div>
@@ -661,6 +748,7 @@ const DataElementManager = () => {
                 byForm[form_id].fields.push(field_label);
               });
               const surveyCount = Object.keys(byForm).length;
+              const linkedGoals = goalLinksMap[elId] || [];
 
               return (
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -768,6 +856,34 @@ const DataElementManager = () => {
                             </div>
                           );
                         })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Linked health goals */}
+                  <div>
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-3">
+                      Linked Health Goals
+                      {linkedGoals.length > 0 && (
+                        <span className="ml-2 bg-violet-100 text-violet-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                          {linkedGoals.length}
+                        </span>
+                      )}
+                    </p>
+                    {linkedGoals.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center">
+                        <p className="text-sm text-slate-400">Not linked to any health goals yet.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {linkedGoals.map((g) => (
+                          <div key={g.template_id} className="rounded-xl border border-violet-100 bg-violet-50 px-4 py-3 flex items-center gap-2">
+                            <svg className="w-4 h-4 text-violet-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="text-sm font-semibold text-violet-900">{toTitleCase(g.name)}</p>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>

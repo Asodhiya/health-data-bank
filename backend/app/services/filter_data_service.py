@@ -1,4 +1,4 @@
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 from app.db.models import (
@@ -143,15 +143,21 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
         if filters.pronouns:
             conditions.append(func.lower(ParticipantProfile.pronouns) == filters.pronouns.lower())
         if filters.primary_language:
-            conditions.append(func.lower(ParticipantProfile.primary_language) == filters.primary_language.lower())
+            lang_conditions = [
+                func.lower(ParticipantProfile.primary_language).contains(lang.lower())
+                for lang in filters.primary_language
+            ]
+            conditions.append(or_(*lang_conditions))
         if filters.occupation_status:
             conditions.append(func.lower(ParticipantProfile.occupation_status) == filters.occupation_status.lower())
         if filters.living_arrangement:
             conditions.append(func.lower(ParticipantProfile.living_arrangement) == filters.living_arrangement.lower())
         if filters.highest_education_level:
             conditions.append(func.lower(ParticipantProfile.highest_education_level) == filters.highest_education_level.lower())
-        if filters.dependents is not None:
-            conditions.append(ParticipantProfile.dependents == filters.dependents)
+        if getattr(filters, "dependents_min", None) is not None:
+            conditions.append(ParticipantProfile.dependents >= filters.dependents_min)
+        if getattr(filters, "dependents_max", None) is not None:
+            conditions.append(ParticipantProfile.dependents <= filters.dependents_max)
         if filters.marital_status:
             conditions.append(func.lower(ParticipantProfile.marital_status) == filters.marital_status.lower())
         if filters.status:

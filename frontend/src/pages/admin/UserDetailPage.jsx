@@ -75,9 +75,11 @@ function ChangeRoleModal({ open, onClose, user, onConfirm }) {
     if (!sel || sel === user.role) return;
     setLoading(true);
     try {
-      await api.request(`/admin_only/linkrole`, { method: "POST", body: JSON.stringify({ user_id: user.id, role_name: sel }) });
-      onConfirm(sel);
-    } catch (err) { console.error("Role change failed:", err); }
+      await api.adminUpdateUser(user.id, { role: sel });
+      await onConfirm(sel);
+    } catch (err) {
+      console.error("Role change failed:", err);
+    }
     finally { setLoading(false); setSel(""); }
   };
   return <Modal open={open} onClose={() => { setSel(""); onClose(); }}>
@@ -221,10 +223,11 @@ export default function UserDetailPage() {
     gender: u.gender || null,
     pronouns: u.pronouns || null,
     primaryLanguage: u.primary_language || null,
+    countryOfOrigin: u.country_of_origin || null,
     maritalStatus: u.marital_status || null,
     highestEducation: u.highest_education_level || null,
     occupationStatus: u.occupation_status || null,
-    dependents: u.dependents || null,
+    dependents: u.dependents ?? null,
     livingArrangement: u.living_arrangement || null,
     onboardingStatus: u.onboarding_status || null,
     programEnrolledAt: u.program_enrolled_at || null,
@@ -253,13 +256,12 @@ export default function UserDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const [allUsers, grps, cts] = await Promise.all([
-        api.adminListUsers(),
+      const [rawUser, grps, cts] = await Promise.all([
+        api.adminGetUserById(userId),
         api.adminGetGroups(),
         api.adminGetCaretakers(),
       ]);
 
-      const rawUser = (allUsers || []).find(u => String(u.id) === String(userId));
       if (!rawUser) { setError("User not found."); setLoading(false); return; }
 
       const transformed = transformUser(rawUser);
@@ -275,12 +277,8 @@ export default function UserDetailPage() {
 
       // Fetch activity logs (audit logs filtered to this user — requires backend user_id filter)
       try {
-        const logs = await api.getAuditLogs({ limit: 50, offset: 0 });
-        // Client-side filter until backend supports user_id param
-        const userLogs = (logs?.logs || logs || []).filter(l =>
-          String(l.actor_user_id) === String(userId) || String(l.entity_id) === String(userId)
-        );
-        setActivityLogs(userLogs);
+        const logs = await api.getAuditLogs({ limit: 50, offset: 0, user_id: userId });
+        setActivityLogs(logs?.logs || []);
       } catch { setActivityLogs([]); }
 
     } catch (err) {
@@ -340,6 +338,7 @@ export default function UserDetailPage() {
     setUser(p => ({ ...p, status: p.status === "active" ? "inactive" : "active" }));
     setShowStatusModal(false);
     msg(user.status === "active" ? "User deactivated." : "User reactivated.");
+    fetchData();
   };
 
   const handleUnlocked = async () => {
@@ -473,6 +472,7 @@ export default function UserDetailPage() {
                     <InfoRow label="Gender" value={user.gender} />
                     <InfoRow label="Pronouns" value={user.pronouns} />
                     <InfoRow label="Language" value={user.primaryLanguage} />
+                    <InfoRow label="Country of Origin" value={user.countryOfOrigin} />
                   </div>
                 </div>
                 <div>
@@ -481,7 +481,7 @@ export default function UserDetailPage() {
                     <InfoRow label="Marital Status" value={user.maritalStatus} />
                     <InfoRow label="Education" value={user.highestEducation} />
                     <InfoRow label="Employment" value={user.occupationStatus} />
-                    <InfoRow label="Dependents" value={user.dependents != null ? (user.dependents ? "Yes" : "No") : null} />
+                    <InfoRow label="Dependents" value={user.dependents != null ? String(user.dependents) : null} />
                     <InfoRow label="Living Arrangement" value={user.livingArrangement} />
                     <InfoRow label="Onboarding" value={user.onboardingStatus ? <span className={user.onboardingStatus === "COMPLETED" ? "text-emerald-600 font-semibold" : "text-amber-600 font-semibold"}>{user.onboardingStatus}</span> : null} />
                     <InfoRow label="Enrolled" value={fmtTime(user.programEnrolledAt)} />
@@ -591,7 +591,7 @@ export default function UserDetailPage() {
               {submissions === null ? (
                 <div className="flex items-center justify-center py-8 gap-2"><Spinner /><span className="text-sm text-slate-400">Loading submissions…</span></div>
               ) : submissions.length === 0 ? (
-                <ApiPendingBanner endpoint="GET /admin_only/users/{id}/submissions" description="Submission history will appear here once data is available." />
+                <ApiPendingBanner endpoint="GET /admin_only/users/{id}/submissions" description="No submission history found for this user." />
               ) : (
                 <div className="space-y-2">
                   {submissions.map(s => {
@@ -634,7 +634,7 @@ export default function UserDetailPage() {
               {goals === null ? (
                 <div className="flex items-center justify-center py-8 gap-2"><Spinner /><span className="text-sm text-slate-400">Loading goals…</span></div>
               ) : goals.length === 0 ? (
-                <ApiPendingBanner endpoint="GET /admin_only/users/{id}/goals" description="Health goals will appear here once data is available." />
+                <ApiPendingBanner endpoint="GET /admin_only/users/{id}/goals" description="No health goals found for this user." />
               ) : (
                 <div className="space-y-3">
                   {goals.map(g => {
@@ -699,7 +699,6 @@ export default function UserDetailPage() {
                   <InfoRow label="Failed Login Attempts" value={<span className={user.failedLoginAttempts > 3 ? "text-rose-600 font-semibold" : ""}>{user.failedLoginAttempts}</span>} />
                   <InfoRow label="Account Locked" value={locked ? <span className="text-rose-600 font-semibold">Until {fmtTime(user.lockedUntil)}</span> : <span className="text-emerald-600">No</span>} />
                   <InfoRow label="Last Login" value={fmtTime(user.lastLoginAt)} />
-                  <InfoRow label="MFA" value={<span className="text-amber-600 font-medium">Not implemented</span>} />
                 </div>
               </div>
               <div>
@@ -723,7 +722,7 @@ export default function UserDetailPage() {
                     )}
                   </div>
                 ) : (
-                  <ApiPendingBanner endpoint="GET /admin_only/audit-logs?user_id=..." description="Security events will appear once the audit log supports user filtering." />
+                  <ApiPendingBanner endpoint="GET /admin_only/audit-logs?user_id=..." description="Could not load security events for this user." />
                 )}
               </div>
             </div>

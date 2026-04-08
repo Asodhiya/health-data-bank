@@ -1,4 +1,6 @@
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 
 /*
   Figure out which step (1–3) is active based on the current URL.
@@ -76,18 +78,41 @@ function Stepper({ currentStep }) {
 
 export default function OnboardingLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Match current path to step number, default to 1
   const currentStep =
     STEPS.find((s) => location.pathname === s.path)?.num || 1;
 
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      navigate('/login', { replace: true });
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-slate-100 flex justify-center p-4 sm:p-8">
       <div className="w-full max-w-2xl flex flex-col items-center">
-        {/* Brand — same as AuthLayout */}
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-800 tracking-tight mb-5 text-center">
-          Health Data Bank
-        </h1>
+        <div className="w-full mb-5 flex items-start justify-between gap-3">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-800 tracking-tight text-center sm:text-left">
+            Health Data Bank
+          </h1>
+          <button
+            type="button"
+            className="shrink-0 rounded-xl border border-slate-200 bg-white/80 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isLoggingOut}
+            onClick={handleLogout}
+          >
+            {isLoggingOut ? 'Logging out...' : 'Logout'}
+          </button>
+        </div>
 
         {/* Step indicator */}
         <Stepper currentStep={currentStep} />

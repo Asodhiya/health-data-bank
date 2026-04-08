@@ -72,7 +72,7 @@ async def list_notifications(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(FORM_VIEW)),
 ):
-    rows = await list_notifications_for_user(db, current_user.user_id)
+    rows = await list_notifications_for_user(db, current_user.user_id, role_target="researcher")
     return [
         NotificationItem(
             notification_id=n.notification_id,

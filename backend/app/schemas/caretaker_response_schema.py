@@ -59,12 +59,20 @@ class CaretakerDashboardResponse(BaseModel):
 class ParticipantListItem(BaseModel):
     participant_id: UUID
     name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    dob: Optional[date] = None
     gender: Optional[str] = None
     age: Optional[int] = None
     status: Literal["highly_active", "moderately_active", "low_active", "inactive"]
     group_id: Optional[UUID] = None
+    enrolled_at: Optional[datetime] = None
     survey_progress: Literal["not_started", "in_progress", "completed"]
     goal_progress: Literal["not_started", "in_progress", "completed"]
+    survey_submitted_count: int = 0
+    survey_deployed_count: int = 0
+    goals_completed_count: int = 0
+    goals_total_count: int = 0
     last_login_at: Optional[datetime] = None
     last_submission_at: Optional[date] = None
 
@@ -118,6 +126,22 @@ class SubmissionListItem(BaseModel):
     form_id: UUID
     form_name: str
     submitted_at: Optional[datetime]
+
+
+class GroupDeployedFormItem(BaseModel):
+    deployment_id: UUID
+    form_id: UUID
+    group_id: UUID
+    group_name: str
+    form_title: str
+    form_description: Optional[str] = None
+    form_status: Optional[str] = None
+    deployed_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    is_active: bool = True
+    participant_count: int = 0
+    submitted_count: int = 0
+    completion_rate: float = 0.0
 
 
 class SubmissionAnswerItem(BaseModel):
@@ -213,6 +237,7 @@ class GroupItem(BaseModel):
     name: str
     description: Optional[str] = None
     caretaker_id: Optional[UUID] = None
+    member_count: int = 0
 
 
 class GroupUpdateRequest(BaseModel):

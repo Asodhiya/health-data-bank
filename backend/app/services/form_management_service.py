@@ -11,7 +11,7 @@ import asyncio
 
 from app.db.models import (
     SurveyForm, FormField, FieldOption, FormDeployment, Group, FieldElementMap,
-    FormSubmission, GroupMember, ParticipantProfile
+    FormSubmission, GroupMember, ParticipantProfile, CaretakerProfile
 )
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
 from app.services.notification_service import create_notifications_bulk
@@ -473,6 +473,26 @@ async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: 
             message=f"A new survey '{form.title}' is now assigned to your group.",
             link="/participant/survey",
             role_target="participant",
+            source_type="form_deployment",
+            source_id=deployment.deployment_id,
+            deployment_id=deployment.deployment_id,
+        )
+
+    caretaker_user_row = await db.execute(
+        select(CaretakerProfile.user_id)
+        .join(Group, Group.caretaker_id == CaretakerProfile.caretaker_id)
+        .where(Group.group_id == group_id)
+    )
+    caretaker_user_ids = [row[0] for row in caretaker_user_row.all()]
+    if caretaker_user_ids:
+        await create_notifications_bulk(
+            db=db,
+            user_ids=caretaker_user_ids,
+            notification_type="summary",
+            title="New survey deployed to your group",
+            message=f"A new survey '{form.title}' has been deployed to one of your assigned groups.",
+            link="/caretaker",
+            role_target="caretaker",
             source_type="form_deployment",
             source_id=deployment.deployment_id,
             deployment_id=deployment.deployment_id,

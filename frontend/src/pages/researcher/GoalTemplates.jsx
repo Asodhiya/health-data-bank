@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../../services/api";
-import { SearchDataElementModal, CreateDataElementModal as CreateElementModal } from "../../components/survey/FieldEditor";
+import { SearchDataElementModal } from "../../components/survey/FieldEditor";
 import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -59,9 +59,9 @@ function RawDataTable({ rawData, loadingRaw, unit, templateId }) {
           </thead>
           <tbody className="divide-y divide-slate-50">
             {paginated.map((r, i) => {
-              const [datePart, timePart] = r.observed_at.split(" ");
+              const [datePart, timePart] = (r.observed_at || "— —").split(" ");
               return (
-                <tr key={i} className="hover:bg-slate-50 transition">
+                <tr key={r.observed_at ? `${r.observed_at}-${r.value}` : i} className="hover:bg-slate-50 transition">
                   <td className="px-3 py-2.5 text-slate-300 text-xs font-medium">{startIdx + i + 1}</td>
                   <td className="px-3 py-2.5 text-slate-600 font-medium">{datePart}</td>
                   <td className="px-3 py-2.5 text-slate-400">{timePart}</td>
@@ -155,6 +155,7 @@ function StatsPanel({ template, dataElements, onClose }) {
           <p className="text-xs text-slate-400 mt-0.5">
             Metric: {element?.label || template.element?.label || "Unknown"}
             {unit && <> · Unit: {unit}</>}
+            {" · "}{template.direction === "at_most" ? "At most" : "At least"} · {template.progress_mode === "absolute" ? "Absolute" : "Incremental"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -206,38 +207,51 @@ function StatsPanel({ template, dataElements, onClose }) {
             </div>
           )}
           {/* Export buttons */}
-          <div className="flex items-center gap-1 ml-1">
-            <button
-              disabled={exporting !== null}
-              onClick={async () => {
-                setExporting("summary");
-                try { await api.exportGoalSummary(template.template_id, granularity, template.name); }
-                catch (e) { alert("Export failed: " + e.message); }
-                finally { setExporting(null); }
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-40 transition"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              {exporting === "summary" ? "Exporting…" : "Summary CSV"}
-            </button>
-            <button
-              disabled={exporting !== null}
-              onClick={async () => {
-                setExporting("raw");
-                try { await api.exportGoalRaw(template.template_id, template.name); }
-                catch (e) { alert("Export failed: " + e.message); }
-                finally { setExporting(null); }
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-40 transition"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              {exporting === "raw" ? "Exporting…" : "Raw CSV"}
-            </button>
-          </div>
+          {(() => {
+            const hasData = stats && (
+              (stats.progress_over_time?.length > 0) ||
+              (stats.distribution?.length > 0) ||
+              (stats.avg_current_value != null)
+            );
+            const exportDisabled = exporting !== null || !hasData;
+            const exportTitle = !hasData ? "No data to export yet" : undefined;
+            return (
+              <div className="flex items-center gap-1 ml-1">
+                <button
+                  disabled={exportDisabled}
+                  title={exportTitle}
+                  onClick={async () => {
+                    setExporting("summary");
+                    try { await api.exportGoalSummary(template.template_id, granularity, template.name); }
+                    catch (e) { alert("Export failed: " + e.message); }
+                    finally { setExporting(null); }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  {exporting === "summary" ? "Exporting…" : "Summary CSV"}
+                </button>
+                <button
+                  disabled={exportDisabled}
+                  title={exportTitle}
+                  onClick={async () => {
+                    setExporting("raw");
+                    try { await api.exportGoalRaw(template.template_id, template.name); }
+                    catch (e) { alert("Export failed: " + e.message); }
+                    finally { setExporting(null); }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  {exporting === "raw" ? "Exporting…" : "Raw CSV"}
+                </button>
+              </div>
+            );
+          })()}
           <button
             onClick={onClose}
             className="ml-2 text-slate-300 hover:text-slate-500 transition"
@@ -257,7 +271,9 @@ function StatsPanel({ template, dataElements, onClose }) {
         <div className="h-56 flex flex-col items-center justify-center gap-2">
           <p className="text-sm text-slate-400">Failed to load stats.</p>
           <button
+            disabled={loadingStats}
             onClick={() => {
+              if (loadingStats) return;
               setStatsError(false);
               setLoadingStats(true);
               api.getGoalTemplateStats(template.template_id, granularity)
@@ -265,7 +281,7 @@ function StatsPanel({ template, dataElements, onClose }) {
                 .catch(() => setStatsError(true))
                 .finally(() => setLoadingStats(false));
             }}
-            className="text-xs text-blue-500 hover:underline"
+            className="text-xs text-blue-500 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Retry
           </button>
@@ -302,7 +318,9 @@ function StatsPanel({ template, dataElements, onClose }) {
                         formatter={(v) => [fmt(v, unit), "Avg value"]}
                       />
                       {stats.default_target != null && (
-                        <ReferenceLine y={stats.default_target} stroke="#86efac" strokeDasharray="6 3" strokeWidth={2} />
+                        <ReferenceLine y={stats.default_target} stroke="#86efac" strokeDasharray="6 3" strokeWidth={2}
+                          label={{ value: template.direction === "at_most" ? "Target (at most)" : "Target (at least)", position: "insideBottomLeft", fontSize: 10, fill: "#4ade80", fontWeight: 600, dy: -4 }}
+                        />
                       )}
                       <Line type="monotone" dataKey="avg" stroke="#1e40af" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} name="Avg participant value" />
                     </LineChart>
@@ -314,7 +332,8 @@ function StatsPanel({ template, dataElements, onClose }) {
                     </span>
                     {stats.default_target != null && (
                       <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                        <span className="w-6 h-0.5 bg-green-400 inline-block border-dashed border-t-2" /> Target
+                        <span className="w-6 h-0.5 bg-green-400 inline-block border-dashed border-t-2" />
+                        Target ({template.direction === "at_most" ? "at most" : "at least"})
                       </span>
                     )}
                   </div>
@@ -395,13 +414,25 @@ export default function GoalTemplates() {
   const [showCreateElement, setShowCreateElement] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState("newest");
   const [showHelp, setShowHelp] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const showToast = (msg) => setToast(msg);
 
   const [formData, setFormData] = useState({
     name: "",
     description: "",
     element_id: "",
     default_target: 0,
+    progress_mode: "incremental",
+    direction: "at_least",
   });
 
   const fetchAllData = useCallback(async () => {
@@ -427,7 +458,14 @@ export default function GoalTemplates() {
 
   const openCreateModal = () => {
     setEditingId(null);
-    setFormData({ name: "", description: "", element_id: "", default_target: 0 });
+    setFormData({
+      name: "",
+      description: "",
+      element_id: "",
+      default_target: 0,
+      progress_mode: "incremental",
+      direction: "at_least",
+    });
     setShowModal(true);
   };
 
@@ -439,21 +477,28 @@ export default function GoalTemplates() {
       description: template.description || "",
       element_id: template.element_id || "",
       default_target: template.default_target || 0,
+      progress_mode: template.progress_mode || "incremental",
+      direction: template.direction || "at_least",
     });
     setShowModal(true);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.element_id) return;
+    if (!formData.element_id) {
+      showToast("Please select a data element before saving.");
+      return;
+    }
     try {
       if (editingId) {
         await api.updateGoalTemplate(editingId, formData);
         if (selectedTemplate?.template_id === editingId) {
-          setSelectedTemplate((prev) => ({ ...prev, ...formData }));
+          setSelectedTemplate((prev) => prev ? ({ ...prev, ...formData }) : null);
         }
+        showToast("Changes saved successfully");
       } else {
         await api.createGoalTemplate(formData);
+        showToast("Goal template created");
       }
       setShowModal(false);
       fetchAllData();
@@ -490,15 +535,26 @@ export default function GoalTemplates() {
   const filtered = (showDeleted ? deletedTemplates : templates).filter((t) => {
     const q = search.toLowerCase();
     const elLabel = showDeleted
-      ? (t.element?.label || "")
-      : (dataElements.find((el) => el.element_id === t.element_id)?.label || "");
+      ? (t.element?.label || "Unknown")
+      : (dataElements.find((el) => el.element_id === t.element_id)?.label || "Unknown");
     return t.name.toLowerCase().includes(q) || elLabel.toLowerCase().includes(q);
+  }).sort((a, b) => {
+    if (sort === "alpha") return (a.name || "").localeCompare(b.name || "");
+    if (sort === "modified") {
+      const ta = a.modified_at ? new Date(a.modified_at).getTime() : 0;
+      const tb = b.modified_at ? new Date(b.modified_at).getTime() : 0;
+      return tb - ta;
+    }
+    // newest (default)
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return tb - ta;
   });
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  useEffect(() => { setPage(1); }, [search, showDeleted]);
+  useEffect(() => { setPage(1); }, [search, showDeleted, sort]);
 
   return (
     <div className="w-full space-y-6">
@@ -600,7 +656,7 @@ export default function GoalTemplates() {
         </div>
       )}
 
-      {/* Search + Active/Deleted toggle */}
+      {/* Search + Sort + Active/Deleted toggle */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex items-center gap-3">
         <div className="flex-1 flex items-center border border-slate-200 rounded-xl p-1.5 bg-white focus-within:border-slate-400 transition-all">
           <span className="pl-2 pr-2 text-slate-400">
@@ -618,6 +674,21 @@ export default function GoalTemplates() {
           <span className="text-xs text-slate-400 font-medium pr-2">
             {filtered.length} template{filtered.length !== 1 ? "s" : ""}
           </span>
+        </div>
+
+        {/* Sort */}
+        <div className="flex items-center bg-slate-100 rounded-lg p-1 gap-1 shrink-0">
+          {[{ key: "newest", label: "Newest" }, { key: "modified", label: "Modified" }, { key: "alpha", label: "A → Z" }].map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setSort(key)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${
+                sort === key ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {/* Active / Deleted toggle */}
@@ -687,7 +758,16 @@ export default function GoalTemplates() {
                   </div>
 
                   <h3 className="text-base font-bold text-slate-600 mb-1">{toTitleCase(t.name)}</h3>
-                  <p className="text-xs text-slate-400 line-clamp-2 mb-4 leading-relaxed">{t.description}</p>
+                  <p className="text-xs text-slate-400 line-clamp-2 mb-3 leading-relaxed">{t.description}</p>
+
+                  <div className="flex gap-1.5 mb-4">
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400">
+                      {t.direction === "at_most" ? "At most" : "At least"}
+                    </span>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400">
+                      {t.progress_mode === "absolute" ? "Absolute" : "Incremental"}
+                    </span>
+                  </div>
 
                   <div className="flex items-end justify-between pt-3 border-t border-slate-100">
                     <div>
@@ -742,7 +822,16 @@ export default function GoalTemplates() {
                 </div>
 
                 <h3 className="text-base font-bold text-slate-900 mb-1">{toTitleCase(t.name)}</h3>
-                <p className="text-xs text-slate-500 line-clamp-2 mb-4 leading-relaxed">{t.description}</p>
+                <p className="text-xs text-slate-500 line-clamp-2 mb-3 leading-relaxed">{t.description}</p>
+
+                <div className="flex gap-1.5 mb-4">
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                    {t.direction === "at_most" ? "At most" : "At least"}
+                  </span>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                    {t.progress_mode === "absolute" ? "Absolute" : "Incremental"}
+                  </span>
+                </div>
 
                 <div className="flex items-end justify-between pt-3 border-t border-slate-100">
                   <div>
@@ -851,7 +940,7 @@ export default function GoalTemplates() {
       {/* Create / Edit modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
 
             {/* Modal header */}
             <div className="px-6 pt-6 pb-4 border-b border-slate-100 flex items-center gap-3">
@@ -869,6 +958,12 @@ export default function GoalTemplates() {
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {editingId ? "Update the name, target, or description" : "Define a new goal for participants to track"}
+                </p>
+                <p className="text-[10px] font-black uppercase text-slate-400 mt-2">
+                  Behavior:{" "}
+                  <span className="text-slate-600">
+                    {formData.progress_mode || "incremental"} · {formData.direction || "at_least"}
+                  </span>
                 </p>
               </div>
             </div>
@@ -930,12 +1025,16 @@ export default function GoalTemplates() {
                   <div className="mt-1.5 flex items-center gap-2">
                     <input
                       required
-                      type="number"
-                      min="0"
-                      placeholder="0"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      placeholder="e.g. 10000"
                       className="flex-1 px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition placeholder-slate-300"
-                      value={formData.default_target}
-                      onChange={(e) => setFormData({ ...formData, default_target: parseInt(e.target.value) || 0 })}
+                      value={formData.default_target === 0 ? "" : formData.default_target}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9]/g, "");
+                        setFormData({ ...formData, default_target: val === "" ? 0 : parseInt(val) });
+                      }}
                     />
                     {(() => {
                       const unit = dataElements.find((el) => el.element_id === formData.element_id)?.unit;
@@ -943,6 +1042,32 @@ export default function GoalTemplates() {
                         <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-3 py-2.5 rounded-xl shrink-0">{unit}</span>
                       ) : null;
                     })()}
+                  </div>
+                </div>
+
+                {/* Direction + Progress Mode */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Direction</label>
+                    <select
+                      className="mt-1.5 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition"
+                      value={formData.direction}
+                      onChange={(e) => setFormData({ ...formData, direction: e.target.value })}
+                    >
+                      <option value="at_least">At least</option>
+                      <option value="at_most">At most</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Progress mode</label>
+                    <select
+                      className="mt-1.5 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition"
+                      value={formData.progress_mode}
+                      onChange={(e) => setFormData({ ...formData, progress_mode: e.target.value })}
+                    >
+                      <option value="incremental">Incremental</option>
+                      <option value="absolute">Absolute</option>
+                    </select>
                   </div>
                 </div>
 
@@ -959,7 +1084,7 @@ export default function GoalTemplates() {
                 </div>
               </div>
 
-              <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+              <div className="px-6 pb-5 flex gap-3 justify-end">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
@@ -988,6 +1113,16 @@ export default function GoalTemplates() {
           onCreated={(newElement) => { setDataElements((prev) => [...prev, newElement]); }}
           onClose={() => setShowCreateElement(false)}
         />
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white text-sm font-medium px-5 py-3 rounded-xl shadow-lg flex items-center gap-2">
+          <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+          </svg>
+          {toast}
+        </div>
       )}
     </div>
   );

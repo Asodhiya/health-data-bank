@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, distinct, case, and_, or_
+from sqlalchemy import select, func, distinct, case, and_, or_, desc
 from sqlalchemy import Date as SADate
 from app.db.models import Role, User, UserRole, Permission, ParticipantProfile, CaretakerProfile, ResearcherProfile, SignupInvite, HealthGoal, GoalTemplate, DataElement, FieldElementMap, HealthDataPoint, FormDeployment, GroupMember, FormSubmission, Group, SurveyForm, CaretakerFeedback, Notification, Report, SubmissionAnswer
 from fastapi import HTTPException, status
@@ -310,24 +310,29 @@ class ParticipantQuery:
         goal, element = row
         return await self._serialize_goal(goal, element, participant_id)
 
-    async def add_goal_from_template(self, participant_id: uuid.UUID, template_id: uuid.UUID, target_value: float | None = None):
+    async def add_goal_from_template(
+        self,
+        participant_id: uuid.UUID,
+        template_id: uuid.UUID,
+        target_value: float | None = None,
+        window: str | None = None,
+    ):
         participants_goal = await self.get_goals(participant_id)
         if len(participants_goal) >= 10:
             raise HTTPException(status_code=400, detail="Maximum 10 goals allowed")
         template = await self.db.get(GoalTemplate, template_id)
         if not template or not template.is_active:
             raise HTTPException(status_code=404, detail="Goal template not found")
-        existing_active = await self.db.execute(
+        existing_goal_for_element = await self.db.execute(
             select(HealthGoal.goal_id)
             .where(HealthGoal.participant_id == participant_id)
             .where(HealthGoal.element_id == template.element_id)
-            .where(HealthGoal.status == "active")
             .limit(1)
         )
-        if existing_active.scalar_one_or_none():
+        if existing_goal_for_element.scalar_one_or_none():
             raise HTTPException(
                 status_code=409,
-                detail="An active goal for this metric already exists.",
+                detail="A goal for this metric already exists.",
             )
 
         goal = HealthGoal(
@@ -335,6 +340,9 @@ class ParticipantQuery:
             template_id=template.template_id,
             element_id=template.element_id,
             target_value=target_value if target_value is not None else template.default_target,
+            progress_mode=template.progress_mode or "incremental",
+            direction=template.direction or "at_least",
+            window=window or "daily",
         )
         self.db.add(goal)
         try:
@@ -486,6 +494,69 @@ class ParticipantQuery:
         await self.db.flush()
         await self.db.refresh(data_point)
         return data_point
+
+    async def get_goal_logs(
+        self,
+        goal_id: uuid.UUID,
+        participant_id: uuid.UUID,
+        days: int = 7,
+    ) -> dict:
+        result = await self.db.execute(
+            select(HealthGoal, DataElement).join(
+                DataElement, DataElement.element_id == HealthGoal.element_id
+            ).where(
+                HealthGoal.goal_id == goal_id,
+                HealthGoal.participant_id == participant_id,
+            )
+        )
+        row = result.one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Goal not found")
+        goal, element = row
+
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        rows = await self.db.execute(
+            select(
+                HealthDataPoint.data_id,
+                HealthDataPoint.value_number,
+                HealthDataPoint.value_text,
+                HealthDataPoint.notes,
+                HealthDataPoint.observed_at,
+            )
+            .where(HealthDataPoint.participant_id == participant_id)
+            .where(HealthDataPoint.element_id == goal.element_id)
+            .where(HealthDataPoint.source_type == "goal")
+            .where(HealthDataPoint.observed_at >= since)
+            .order_by(HealthDataPoint.observed_at.asc())
+        )
+        entries = []
+        daily_totals: dict[str, float] = {}
+        for r in rows.all():
+            observed = r.observed_at
+            if observed and observed.tzinfo is None:
+                observed = observed.replace(tzinfo=timezone.utc)
+            date_key = observed.date().isoformat() if observed else None
+            value = float(r.value_number) if r.value_number is not None else r.value_text
+            entries.append({
+                "data_id": r.data_id,
+                "value": value,
+                "notes": r.notes,
+                "observed_at": observed.isoformat() if observed else None,
+                "date": date_key,
+            })
+            if date_key and isinstance(value, float):
+                daily_totals[date_key] = round(daily_totals.get(date_key, 0.0) + value, 4)
+
+        return {
+            "goal_id": goal_id,
+            "element": {"label": element.label, "unit": element.unit, "datatype": element.datatype},
+            "window": goal.window or "daily",
+            "progress_mode": goal.progress_mode or "incremental",
+            "target_value": float(goal.target_value) if goal.target_value is not None else None,
+            "entries": entries,
+            "daily_totals": daily_totals,
+        }
+
 
 class GoalTemplateQuery:
 
@@ -1055,6 +1126,89 @@ class StatsQuery:
             for row in rows
         ]
 
+    async def get_participant_health_timeseries(
+        self,
+        participant_id: uuid.UUID,
+        element_ids: list[uuid.UUID] | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> list[dict]:
+        stmt = (
+            select(
+                DataElement.element_id,
+                DataElement.code,
+                DataElement.label,
+                DataElement.unit,
+                DataElement.datatype,
+                HealthDataPoint.data_id,
+                HealthDataPoint.observed_at,
+                HealthDataPoint.source_type,
+                HealthDataPoint.source_submission_id,
+                HealthDataPoint.source_field_id,
+                HealthDataPoint.value_number,
+                HealthDataPoint.value_text,
+                HealthDataPoint.value_date,
+                HealthDataPoint.value_json,
+                HealthDataPoint.notes,
+            )
+            .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
+            .where(HealthDataPoint.participant_id == participant_id)
+            .order_by(
+                DataElement.element_id,
+                HealthDataPoint.observed_at,
+                HealthDataPoint.data_id,
+            )
+        )
+        if element_ids:
+            stmt = stmt.where(HealthDataPoint.element_id.in_(element_ids))
+        if date_from:
+            stmt = stmt.where(
+                HealthDataPoint.observed_at
+                >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc)
+            )
+        if date_to:
+            stmt = stmt.where(
+                HealthDataPoint.observed_at
+                < datetime.combine(date_to + timedelta(days=1), time.min).replace(tzinfo=timezone.utc)
+            )
+
+        rows = (await self.db.execute(stmt.limit(5000))).all()
+        series_by_element: dict[str, dict] = {}
+        for row in rows:
+            element_key = str(row.element_id)
+            if element_key not in series_by_element:
+                series_by_element[element_key] = {
+                    "element_id": element_key,
+                    "code": row.code,
+                    "label": row.label,
+                    "unit": row.unit,
+                    "datatype": row.datatype,
+                    "points": [],
+                }
+
+            series_by_element[element_key]["points"].append(
+                {
+                    "data_id": str(row.data_id),
+                    "observed_at": row.observed_at.isoformat() if row.observed_at else None,
+                    "source_type": row.source_type,
+                    "source_submission_id": (
+                        str(row.source_submission_id) if row.source_submission_id else None
+                    ),
+                    "source_field_id": (
+                        str(row.source_field_id) if row.source_field_id else None
+                    ),
+                    "value_number": (
+                        float(row.value_number) if row.value_number is not None else None
+                    ),
+                    "value_text": row.value_text,
+                    "value_date": row.value_date.isoformat() if row.value_date else None,
+                    "value_json": row.value_json,
+                    "notes": row.notes,
+                }
+            )
+
+        return list(series_by_element.values())
+
     
 
 
@@ -1090,6 +1244,7 @@ class CaretakersQuery:
             .join(User, User.user_id == ParticipantProfile.user_id)
             .where(GroupMember.group_id == group_id)
             .where(GroupMember.left_at == None)
+            .where(User.status.is_(True))
         )
         return result.all()
 
@@ -1101,6 +1256,7 @@ class CaretakersQuery:
             .where(GroupMember.group_id == group_id)
             .where(ParticipantProfile.participant_id == participant_id)
             .where(GroupMember.left_at == None)
+            .where(User.status.is_(True))
         )
         row = result.one_or_none()
         if not row:
@@ -1120,9 +1276,12 @@ class CaretakersQuery:
                 GroupMember.joined_at,
             )
             .join(GroupMember, GroupMember.group_id == Group.group_id)
+            .join(ParticipantProfile, ParticipantProfile.participant_id == GroupMember.participant_id)
+            .join(User, User.user_id == ParticipantProfile.user_id)
             .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
             .where(GroupMember.participant_id == participant_id)
             .where(GroupMember.left_at == None)
+            .where(User.status.is_(True))
             .where(CaretakerProfile.user_id == caretaker_user_id)
             .order_by(Group.name)
         )
@@ -1163,13 +1322,18 @@ class CaretakersQuery:
         ).label("activity")
 
         stmt = (
-            select(activity_expr, func.count(ParticipantProfile.participant_id).label("cnt"))
+            select(activity_expr, func.count(distinct(ParticipantProfile.participant_id)).label("cnt"))
             .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
             .join(Group, Group.group_id == GroupMember.group_id)
             .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .join(User, User.user_id == ParticipantProfile.user_id)
+            .join(UserRole, UserRole.user_id == User.user_id)
+            .join(Role, Role.role_id == UserRole.role_id)
             .outerjoin(last_submission_sq, last_submission_sq.c.participant_id == ParticipantProfile.participant_id)
             .where(CaretakerProfile.user_id == user_id)
             .where(GroupMember.left_at == None)
+            .where(User.status.is_(True))
+            .where(func.lower(Role.role_name) == "participant")
             .group_by(activity_expr)
         )
         if group_id:
@@ -1181,7 +1345,7 @@ class CaretakersQuery:
             counts[row.activity] = row.cnt
         return counts
 
-    async def _compute_goal_progress_map(self, participant_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    async def _compute_goal_stats_map(self, participant_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
         if not participant_ids:
             return {}
 
@@ -1198,11 +1362,15 @@ class CaretakersQuery:
             grouped.setdefault(goal.participant_id, []).append((goal, datatype))
 
         participant_query = ParticipantQuery(self.db)
-        progress_map: dict[uuid.UUID, str] = {}
+        stats_map: dict[uuid.UUID, dict] = {}
         for pid in participant_ids:
             goals = grouped.get(pid, [])
             if not goals:
-                progress_map[pid] = "not_started"
+                stats_map[pid] = {
+                    "progress": "not_started",
+                    "completed_count": 0,
+                    "total_count": 0,
+                }
                 continue
 
             completed_count = 0
@@ -1214,28 +1382,39 @@ class CaretakersQuery:
                     completed_count += 1
 
             if completed_count == 0:
-                progress_map[pid] = "in_progress"
+                progress = "in_progress"
             elif completed_count == len(goals):
-                progress_map[pid] = "completed"
+                progress = "completed"
             else:
-                progress_map[pid] = "in_progress"
+                progress = "in_progress"
 
-        return progress_map
+            stats_map[pid] = {
+                "progress": progress,
+                "completed_count": int(completed_count),
+                "total_count": int(len(goals)),
+            }
+
+        return stats_map
 
     async def get_participants(
         self,
         user_id: uuid.UUID,
         group_id: uuid.UUID | None = None,
+        q: str | None = None,
         status: str | None = None,
         gender: str | None = None,
         age_min: int | None = None,
         age_max: int | None = None,
         has_alerts: bool | None = None,
         survey_progress: str | None = None,
+        goal_progress: str | None = None,
         # goal_progress: str | None = None,
         sort_by: str | None = None,
+        sort_dir: str = "asc",
         submission_date_from: date | None = None,
         submission_date_to: date | None = None,
+        limit: int | None = None,
+        offset: int = 0,
         # goal_date: date | None = None,
     ):
         deployed_sq = (
@@ -1259,8 +1438,17 @@ class CaretakersQuery:
         submissions_stmt = (
             select(
                 FormSubmission.participant_id,
+                FormSubmission.group_id,
                 func.count(distinct(FormSubmission.form_id)).label("submitted_count"),
                 func.cast(func.max(FormSubmission.submitted_at), SADate).label("last_submission_at"),
+            )
+            .join(
+                FormDeployment,
+                and_(
+                    FormDeployment.group_id == FormSubmission.group_id,
+                    FormDeployment.form_id == FormSubmission.form_id,
+                    FormDeployment.revoked_at == None,
+                ),
             )
             .where(FormSubmission.participant_id.in_(caretaker_participants_sq))
         )
@@ -1268,7 +1456,10 @@ class CaretakersQuery:
             submissions_stmt = submissions_stmt.where(FormSubmission.submitted_at >= datetime.combine(submission_date_from, time.min).replace(tzinfo=timezone.utc))
         if submission_date_to:
             submissions_stmt = submissions_stmt.where(FormSubmission.submitted_at < datetime.combine(submission_date_to + timedelta(days=1), time.min).replace(tzinfo=timezone.utc))
-        submissions_sq = submissions_stmt.group_by(FormSubmission.participant_id).subquery()
+        submissions_sq = submissions_stmt.group_by(
+            FormSubmission.participant_id,
+            FormSubmission.group_id,
+        ).subquery()
 
         age_expr = func.date_part("year", func.age(ParticipantProfile.dob))
 
@@ -1292,11 +1483,17 @@ class CaretakersQuery:
                 ParticipantProfile.participant_id,
                 User.first_name,
                 User.last_name,
+                User.email,
+                User.phone,
+                ParticipantProfile.dob,
                 ParticipantProfile.gender,
                 age_expr.label("age"),
                 status_expr.label("status"),
                 GroupMember.group_id,
+                GroupMember.joined_at.label("enrolled_at"),
                 survey_progress_expr.label("survey_progress"),
+                func.coalesce(submissions_sq.c.submitted_count, 0).label("survey_submitted_count"),
+                func.coalesce(deployed_sq.c.deployed_count, 0).label("survey_deployed_count"),
                 User.last_login_at,
                 submissions_sq.c.last_submission_at,
             )
@@ -1304,63 +1501,131 @@ class CaretakersQuery:
             .join(Group, Group.group_id == GroupMember.group_id)
             .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
             .join(User, User.user_id == ParticipantProfile.user_id)
+            .join(UserRole, UserRole.user_id == User.user_id)
+            .join(Role, Role.role_id == UserRole.role_id)
             .outerjoin(deployed_sq, deployed_sq.c.group_id == GroupMember.group_id)
-            .outerjoin(submissions_sq, submissions_sq.c.participant_id == ParticipantProfile.participant_id)
+            .outerjoin(
+                submissions_sq,
+                and_(
+                    submissions_sq.c.participant_id == ParticipantProfile.participant_id,
+                    submissions_sq.c.group_id == GroupMember.group_id,
+                ),
+            )
             .where(CaretakerProfile.user_id == user_id)
+            .where(GroupMember.left_at == None)
+            .where(User.status.is_(True))
+            .where(func.lower(Role.role_name) == "participant")
         )
 
         # ── Filters ───────────────────────────────────────────────────────────
         if group_id:
             stmt = stmt.where(GroupMember.group_id == group_id)
-        if status in ("highly_active", "moderately_active", "low_active", "inactive"):
+        if q:
+            needle = f"%{q.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    User.first_name.ilike(needle),
+                    User.last_name.ilike(needle),
+                    User.email.ilike(needle),
+                )
+            )
+        if status == "active":
+            stmt = stmt.where(status_expr != "inactive")
+        elif status in ("highly_active", "moderately_active", "low_active", "inactive"):
             stmt = stmt.where(status_expr == status)
         if gender:
-            stmt = stmt.where(ParticipantProfile.gender == gender)
+            stmt = stmt.where(func.lower(ParticipantProfile.gender) == gender.lower())
         if age_min is not None:
             stmt = stmt.where(age_expr >= age_min)
         if age_max is not None:
             stmt = stmt.where(age_expr <= age_max)
         if has_alerts is True:
             stmt = stmt.where(submissions_sq.c.submitted_count < deployed_sq.c.deployed_count)
-        if survey_progress:
+        elif has_alerts is False:
+            stmt = stmt.where(
+                or_(
+                    submissions_sq.c.submitted_count >= deployed_sq.c.deployed_count,
+                    deployed_sq.c.deployed_count == None,
+                    deployed_sq.c.deployed_count == 0,
+                )
+            )
+        if survey_progress in {"not_started", "in_progress", "completed"}:
             stmt = stmt.where(survey_progress_expr == survey_progress)
+        elif survey_progress == "below_50":
+            stmt = stmt.where(
+                and_(
+                    func.coalesce(deployed_sq.c.deployed_count, 0) > 0,
+                    func.coalesce(submissions_sq.c.submitted_count, 0) > 0,
+                    func.coalesce(submissions_sq.c.submitted_count, 0)
+                    < (func.coalesce(deployed_sq.c.deployed_count, 0) * 0.5),
+                )
+            )
+        elif survey_progress == "above_50":
+            stmt = stmt.where(
+                and_(
+                    func.coalesce(deployed_sq.c.deployed_count, 0) > 0,
+                    func.coalesce(submissions_sq.c.submitted_count, 0)
+                    >= (func.coalesce(deployed_sq.c.deployed_count, 0) * 0.5),
+                    func.coalesce(submissions_sq.c.submitted_count, 0)
+                    < func.coalesce(deployed_sq.c.deployed_count, 0),
+                )
+            )
 
         # ── Sorting ───────────────────────────────────────────────────────────
+        is_desc = sort_dir == "desc"
         if sort_by == "name":
-            stmt = stmt.order_by(User.first_name, User.last_name)
+            stmt = stmt.order_by(
+                desc(User.first_name) if is_desc else User.first_name,
+                desc(User.last_name) if is_desc else User.last_name,
+            )
         elif sort_by == "age":
-            stmt = stmt.order_by(age_expr)
+            stmt = stmt.order_by(desc(age_expr) if is_desc else age_expr)
         elif sort_by == "status":
-            stmt = stmt.order_by(status_expr)
+            stmt = stmt.order_by(desc(status_expr) if is_desc else status_expr)
         elif sort_by == "gender":
-            stmt = stmt.order_by(ParticipantProfile.gender)
+            stmt = stmt.order_by(desc(ParticipantProfile.gender) if is_desc else ParticipantProfile.gender)
         elif sort_by == "surveys":
-            stmt = stmt.order_by(survey_progress_expr)
+            stmt = stmt.order_by(desc(survey_progress_expr) if is_desc else survey_progress_expr)
         elif sort_by == "last_active":
-            stmt = stmt.order_by(User.last_login_at.desc())
+            stmt = stmt.order_by(desc(User.last_login_at) if is_desc else User.last_login_at)
         elif sort_by == "enrolled":
-            stmt = stmt.order_by(GroupMember.joined_at.desc())
+            stmt = stmt.order_by(desc(GroupMember.joined_at) if is_desc else GroupMember.joined_at)
         elif sort_by == "submission_date":
-            stmt = stmt.order_by(submissions_sq.c.last_submission_at.desc())
+            stmt = stmt.order_by(desc(submissions_sq.c.last_submission_at) if is_desc else submissions_sq.c.last_submission_at)
+
+        if limit is not None:
+            stmt = stmt.limit(limit).offset(max(0, offset))
 
         result = await self.db.execute(stmt)
         rows = result.all()
 
         participant_ids = [row.participant_id for row in rows]
-        progress_map = await self._compute_goal_progress_map(participant_ids)
+        goal_stats_map = await self._compute_goal_stats_map(participant_ids)
         output_rows = []
         for row in rows:
+            goal_stats = goal_stats_map.get(
+                row.participant_id,
+                {"progress": "not_started", "completed_count": 0, "total_count": 0},
+            )
             output_rows.append(
                 SimpleNamespace(
                     participant_id=row.participant_id,
                     first_name=row.first_name,
                     last_name=row.last_name,
+                    email=row.email,
+                    phone=row.phone,
+                    dob=row.dob,
                     gender=row.gender,
                     age=row.age,
                     status=row.status,
                     group_id=row.group_id,
+                    enrolled_at=row.enrolled_at,
                     survey_progress=row.survey_progress,
-                    goal_progress=progress_map.get(row.participant_id, "not_started"),
+                    goal_progress=goal_stats.get("progress", "not_started"),
+                    survey_submitted_count=int(row.survey_submitted_count or 0),
+                    survey_deployed_count=int(row.survey_deployed_count or 0),
+                    goals_completed_count=int(goal_stats.get("completed_count", 0) or 0),
+                    goals_total_count=int(goal_stats.get("total_count", 0) or 0),
                     last_login_at=row.last_login_at,
                     last_submission_at=row.last_submission_at,
                 )
@@ -1368,9 +1633,116 @@ class CaretakersQuery:
 
         if sort_by == "goals":
             order = {"not_started": 0, "in_progress": 1, "completed": 2}
-            output_rows.sort(key=lambda r: order.get(r.goal_progress, 0))
+            output_rows.sort(key=lambda r: order.get(r.goal_progress, 0), reverse=is_desc)
+
+        if goal_progress in {"not_started", "in_progress", "completed"}:
+            output_rows = [row for row in output_rows if row.goal_progress == goal_progress]
+        elif goal_progress == "no_goals":
+            output_rows = [row for row in output_rows if int(getattr(row, "goals_total_count", 0) or 0) == 0]
 
         return output_rows
+
+    async def get_participant_summary(
+        self,
+        user_id: uuid.UUID,
+        group_id: uuid.UUID | None = None,
+    ) -> dict:
+        deployed_sq = (
+            select(
+                FormDeployment.group_id,
+                func.count(FormDeployment.deployment_id).label("deployed_count"),
+            )
+            .where(FormDeployment.revoked_at == None)
+            .group_by(FormDeployment.group_id)
+            .subquery()
+        )
+
+        submissions_sq = (
+            select(
+                FormSubmission.participant_id,
+                func.count(distinct(FormSubmission.form_id)).label("submitted_count"),
+                func.cast(func.max(FormSubmission.submitted_at), SADate).label("last_submission_at"),
+            )
+            .group_by(FormSubmission.participant_id)
+            .subquery()
+        )
+
+        today = _utc_today()
+        status_expr = case(
+            (func.cast(submissions_sq.c.last_submission_at, SADate) >= today - timedelta(days=7), "highly_active"),
+            (func.cast(submissions_sq.c.last_submission_at, SADate) >= today - timedelta(days=14), "moderately_active"),
+            (func.cast(submissions_sq.c.last_submission_at, SADate) >= today - timedelta(days=30), "low_active"),
+            else_="inactive",
+        )
+        flagged_expr = case(
+            (
+                and_(
+                    func.coalesce(submissions_sq.c.submitted_count, 0)
+                    < func.coalesce(deployed_sq.c.deployed_count, 0),
+                    func.coalesce(deployed_sq.c.deployed_count, 0) > 0,
+                ),
+                1,
+            ),
+            else_=0,
+        )
+
+        stmt = (
+            select(
+                func.count(distinct(ParticipantProfile.participant_id)).label("total"),
+                func.sum(case((status_expr == "inactive", 1), else_=0)).label("inactive"),
+                func.sum(case((status_expr != "inactive", 1), else_=0)).label("active"),
+                func.sum(flagged_expr).label("flagged"),
+            )
+            .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+            .join(Group, Group.group_id == GroupMember.group_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .join(User, User.user_id == ParticipantProfile.user_id)
+            .join(UserRole, UserRole.user_id == User.user_id)
+            .join(Role, Role.role_id == UserRole.role_id)
+            .outerjoin(deployed_sq, deployed_sq.c.group_id == GroupMember.group_id)
+            .outerjoin(submissions_sq, submissions_sq.c.participant_id == ParticipantProfile.participant_id)
+            .where(CaretakerProfile.user_id == user_id)
+            .where(GroupMember.left_at == None)
+            .where(User.status.is_(True))
+            .where(func.lower(Role.role_name) == "participant")
+        )
+        if group_id:
+            stmt = stmt.where(GroupMember.group_id == group_id)
+
+        row = (await self.db.execute(stmt)).one()
+        return {
+            "total": int(row.total or 0),
+            "active": int(row.active or 0),
+            "inactive": int(row.inactive or 0),
+            "flagged": int(row.flagged or 0),
+        }
+
+    async def get_group_forms_summary(
+        self,
+        caretaker_user_id: uuid.UUID,
+        group_id: uuid.UUID | None = None,
+    ) -> dict:
+        stmt = (
+            select(
+                func.count(FormDeployment.deployment_id).label("total"),
+                func.sum(case((FormDeployment.revoked_at.is_(None), 1), else_=0)).label("active"),
+                func.sum(case((FormDeployment.revoked_at.is_not(None), 1), else_=0)).label("revoked"),
+            )
+            .join(Group, Group.group_id == FormDeployment.group_id)
+            .join(SurveyForm, SurveyForm.form_id == FormDeployment.form_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(CaretakerProfile.user_id == caretaker_user_id)
+            .where(SurveyForm.status != "DELETED")
+        )
+        if group_id:
+            stmt = stmt.where(FormDeployment.group_id == group_id)
+
+        row = (await self.db.execute(stmt)).one()
+        return {
+            "total": int(row.total or 0),
+            "active": int(row.active or 0),
+            "revoked": int(row.revoked or 0),
+        }
 
     async def get_participant_submissions(
         self,
@@ -1417,6 +1789,91 @@ class CaretakersQuery:
             .distinct()
         )
         return result.all()
+
+    async def get_group_forms(
+        self,
+        caretaker_user_id: uuid.UUID,
+        group_id: uuid.UUID | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ):
+        participant_counts_sq = (
+            select(
+                GroupMember.group_id.label("group_id"),
+                func.count(distinct(GroupMember.participant_id)).label("participant_count"),
+            )
+            .join(ParticipantProfile, ParticipantProfile.participant_id == GroupMember.participant_id)
+            .join(User, User.user_id == ParticipantProfile.user_id)
+            .where(GroupMember.left_at == None)
+            .where(User.status.is_(True))
+            .group_by(GroupMember.group_id)
+            .subquery()
+        )
+
+        submitted_counts_sq = (
+            select(
+                FormSubmission.form_id.label("form_id"),
+                FormSubmission.group_id.label("group_id"),
+                func.count(distinct(FormSubmission.participant_id)).label("submitted_count"),
+            )
+            .where(FormSubmission.submitted_at.is_not(None))
+            .group_by(FormSubmission.form_id, FormSubmission.group_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                FormDeployment.deployment_id,
+                FormDeployment.form_id,
+                FormDeployment.group_id,
+                Group.name.label("group_name"),
+                SurveyForm.title.label("form_title"),
+                SurveyForm.description.label("form_description"),
+                SurveyForm.status.label("form_status"),
+                FormDeployment.deployed_at,
+                FormDeployment.revoked_at,
+                func.coalesce(participant_counts_sq.c.participant_count, 0).label("participant_count"),
+                func.coalesce(submitted_counts_sq.c.submitted_count, 0).label("submitted_count"),
+            )
+            .join(Group, Group.group_id == FormDeployment.group_id)
+            .join(SurveyForm, SurveyForm.form_id == FormDeployment.form_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .outerjoin(participant_counts_sq, participant_counts_sq.c.group_id == FormDeployment.group_id)
+            .outerjoin(
+                submitted_counts_sq,
+                and_(
+                    submitted_counts_sq.c.form_id == FormDeployment.form_id,
+                    submitted_counts_sq.c.group_id == FormDeployment.group_id,
+                ),
+            )
+            .where(CaretakerProfile.user_id == caretaker_user_id)
+            .where(SurveyForm.status != "DELETED")
+            .order_by(FormDeployment.revoked_at.is_not(None), FormDeployment.deployed_at.desc())
+        )
+        if group_id:
+            stmt = stmt.where(FormDeployment.group_id == group_id)
+        if limit is not None:
+            stmt = stmt.limit(limit).offset(max(0, offset))
+
+        return (await self.db.execute(stmt)).all()
+
+    async def get_caretaker_form_group_ids(
+        self,
+        form_id: uuid.UUID,
+        caretaker_user_id: uuid.UUID,
+        group_id: uuid.UUID | None = None,
+    ) -> list[uuid.UUID]:
+        stmt = (
+            select(FormDeployment.group_id)
+            .join(Group, Group.group_id == FormDeployment.group_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(CaretakerProfile.user_id == caretaker_user_id)
+            .where(FormDeployment.form_id == form_id)
+        )
+        if group_id:
+            stmt = stmt.where(FormDeployment.group_id == group_id)
+        result = await self.db.execute(stmt)
+        return [row[0] for row in result.all() if row[0] is not None]
 
     async def generate_group_report(
         self,

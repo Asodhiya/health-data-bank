@@ -258,31 +258,17 @@ export default function CaretakerDashboard() {
   const [participants, setParticipants] = useState([]);
   const [activityCounts, setActivityCounts] = useState({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 });
   const [loading, setLoading] = useState(true);
+  const selectedGroupQuery = selectedGroupId === "all" ? null : selectedGroupId;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [groupData, participantData] = await Promise.all([
-        api.caretakerGetGroups().catch(() => []),
-        api.caretakerListParticipants().catch(() => []),
-      ]);
+      const groupData = await api.caretakerGetGroups().catch(() => []);
 
       const transformedGroups = Array.isArray(groupData)
         ? groupData.map(g => ({ id: g.group_id, name: g.name, description: g.description || "" }))
         : [];
       setGroups(transformedGroups);
-
-      const pList = Array.isArray(participantData) ? participantData : [];
-      setParticipants(pList);
-
-      try {
-        const counts = await api.caretakerGetActivityCounts();
-        setActivityCounts(counts);
-      } catch {
-        const counts = { highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 };
-        pList.forEach(p => { if (counts[p.status] !== undefined) counts[p.status]++; });
-        setActivityCounts(counts);
-      }
     } catch (err) {
       console.error("Failed to load dashboard data:", err);
     } finally {
@@ -292,10 +278,31 @@ export default function CaretakerDashboard() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const filteredParticipants = useMemo(() => {
-    if (selectedGroupId === "all") return participants;
-    return participants.filter(p => p.group_id === selectedGroupId);
-  }, [participants, selectedGroupId]);
+  useEffect(() => {
+    api.caretakerGetActivityCounts(selectedGroupQuery)
+      .then((counts) => {
+        setActivityCounts({
+          highly_active: Number(counts?.highly_active || 0),
+          moderately_active: Number(counts?.moderately_active || 0),
+          low_active: Number(counts?.low_active || 0),
+          inactive: Number(counts?.inactive || 0),
+        });
+      })
+      .catch(() => setActivityCounts({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 }));
+  }, [selectedGroupQuery]);
+
+  useEffect(() => {
+    api.caretakerListParticipants({
+      limit: 50,
+      offset: 0,
+      sort_by: "name",
+      ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
+    })
+      .then((pList) => setParticipants(Array.isArray(pList) ? pList : []))
+      .catch(() => setParticipants([]));
+  }, [selectedGroupQuery]);
+
+  const filteredParticipants = useMemo(() => participants, [participants]);
 
   const statusFilteredParticipants = useMemo(() => {
     if (selectedStatusFilter === "all") return filteredParticipants;
@@ -305,12 +312,7 @@ export default function CaretakerDashboard() {
     return filteredParticipants.filter((p) => p.status === selectedStatusFilter);
   }, [filteredParticipants, selectedStatusFilter]);
 
-  const filteredCounts = useMemo(() => {
-    if (selectedGroupId === "all") return activityCounts;
-    const counts = { highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 };
-    filteredParticipants.forEach(p => { if (counts[p.status] !== undefined) counts[p.status]++; });
-    return counts;
-  }, [filteredParticipants, activityCounts, selectedGroupId]);
+  const filteredCounts = useMemo(() => activityCounts, [activityCounts]);
 
   const totalMembers = filteredCounts.highly_active + filteredCounts.moderately_active + filteredCounts.low_active + filteredCounts.inactive;
   const activeCount = filteredCounts.highly_active + filteredCounts.moderately_active;
@@ -447,7 +449,7 @@ export default function CaretakerDashboard() {
       </div>
 
       {groups.length > 0 && (
-        <GroupSelector groups={groups} selectedGroupId={selectedGroupId} onChange={setSelectedGroupId} totalParticipants={participants.length} />
+        <GroupSelector groups={groups} selectedGroupId={selectedGroupId} onChange={setSelectedGroupId} totalParticipants={totalMembers} />
       )}
 
       <QuickActions groups={groups} navigate={navigate} />

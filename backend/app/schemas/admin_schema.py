@@ -90,6 +90,26 @@ class AdminProfileOut(BaseModel):
         from_attributes = True
 
 
+class MaintenanceSettingsPayload(BaseModel):
+    enabled: bool
+    message: str
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Maintenance message cannot be empty.")
+        if len(normalized) > 500:
+            raise ValueError("Maintenance message must be 500 characters or fewer.")
+        return normalized
+
+
+class MaintenanceSettingsOut(MaintenanceSettingsPayload):
+    updated_at: Optional[datetime] = None
+    updated_by: Optional[UUID] = None
+
+
 # ── User Management schemas ──────────────────────────────────────────────────
 
 class UserListItem(BaseModel):
@@ -98,6 +118,7 @@ class UserListItem(BaseModel):
     last_name: Optional[str] = None
     email: str
     phone: Optional[str] = None
+    address: Optional[str] = None
     role: Optional[str] = None
     status: bool
     locked_until: Optional[datetime] = None
@@ -108,6 +129,27 @@ class UserListItem(BaseModel):
     caretaker: Optional[str] = None
     dob: Optional[date] = None
     gender: Optional[str] = None
+    pronouns: Optional[str] = None
+    primary_language: Optional[str] = None
+    country_of_origin: Optional[str] = None
+    occupation_status: Optional[str] = None
+    living_arrangement: Optional[str] = None
+    highest_education_level: Optional[str] = None
+    dependents: Optional[int] = None
+    marital_status: Optional[str] = None
+    onboarding_status: Optional[str] = None
+    program_enrolled_at: Optional[datetime] = None
+    title: Optional[str] = None
+    credentials: Optional[str] = None
+    organization: Optional[str] = None
+    department: Optional[str] = None
+    specialty: Optional[str] = None
+    bio: Optional[str] = None
+    working_hours_start: Optional[str] = None
+    working_hours_end: Optional[str] = None
+    contact_preference: Optional[str] = None
+    available_days: Optional[List[str]] = None
+    role_title: Optional[str] = None
     anonymized_from: Optional[str] = None
     self_deactivated_at: Optional[datetime] = None
 
@@ -115,11 +157,19 @@ class UserListItem(BaseModel):
         from_attributes = True
 
 
+class UserListPage(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    items: list[UserListItem]
+
+
 class AdminUserUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    role: Optional[str] = None
 
 
 class UserStatusUpdate(BaseModel):
