@@ -1334,6 +1334,14 @@ class CaretakersQuery:
                 FormSubmission.participant_id,
                 func.max(func.cast(FormSubmission.submitted_at, SADate)).label("last_submission_at"),
             )
+            .join(
+                FormDeployment,
+                and_(
+                    FormDeployment.group_id == FormSubmission.group_id,
+                    FormDeployment.form_id == FormSubmission.form_id,
+                    FormDeployment.revoked_at == None,
+                ),
+            )
             .where(FormSubmission.participant_id.in_(caretaker_participants_sq))
             .group_by(FormSubmission.participant_id)
             .subquery()
@@ -1459,6 +1467,7 @@ class CaretakersQuery:
             .where(CaretakerProfile.user_id == user_id)
             .where(GroupMember.left_at == None)
         )
+
         submissions_stmt = (
             select(
                 FormSubmission.participant_id,
@@ -1595,6 +1604,14 @@ class CaretakersQuery:
                 )
             )
 
+        # B8: Compute total_count BEFORE applying ORDER BY / LIMIT / OFFSET so
+        # the frontend gets the real filtered total. Note: this count reflects
+        # SQL-level filters only — goal_progress is post-filtered in Python
+        # below, so when goal_progress is set this is an upper bound. That
+        # limitation is tracked as B22.
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        sql_total = (await self.db.execute(count_stmt)).scalar() or 0
+
         # ── Sorting ───────────────────────────────────────────────────────────
         is_desc = sort_dir == "desc"
         if sort_by == "name":
@@ -1664,7 +1681,7 @@ class CaretakersQuery:
         elif goal_progress == "no_goals":
             output_rows = [row for row in output_rows if int(getattr(row, "goals_total_count", 0) or 0) == 0]
 
-        return output_rows
+        return output_rows, int(sql_total)
 
     async def get_participant_summary(
         self,
@@ -1686,6 +1703,14 @@ class CaretakersQuery:
                 FormSubmission.participant_id,
                 func.count(distinct(FormSubmission.form_id)).label("submitted_count"),
                 func.cast(func.max(FormSubmission.submitted_at), SADate).label("last_submission_at"),
+            )
+            .join(
+                FormDeployment,
+                and_(
+                    FormDeployment.group_id == FormSubmission.group_id,
+                    FormDeployment.form_id == FormSubmission.form_id,
+                    FormDeployment.revoked_at == None,
+                ),
             )
             .group_by(FormSubmission.participant_id)
             .subquery()

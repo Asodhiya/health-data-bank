@@ -312,6 +312,10 @@ class CaretakerProfileUpdate(BaseModel):
     working_hours_end: Optional[str] = None
     contact_preference: Optional[str] = None
     available_days: Optional[List[str]] = None
+    # B19: explicit signal from the onboarding page that the caretaker has
+    # finished initial setup. Other profile-edit clients (e.g. ProfilePage)
+    # should leave this unset so it preserves whatever value is in the DB.
+    onboarding_completed: Optional[bool] = None
 
 
 class CaretakerProfileOut(BaseModel):

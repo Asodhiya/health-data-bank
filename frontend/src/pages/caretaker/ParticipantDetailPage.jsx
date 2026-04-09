@@ -977,10 +977,12 @@ export default function ParticipantDetailPage() {
       }
 
       // Find this participant in the caretaker's roster — see TODO(B12) above
-      const allParticipants = await api.caretakerListParticipants();
-      const thisParticipant = Array.isArray(allParticipants)
-        ? allParticipants.find(p => p.participant_id === participantId)
-        : null;
+      // B8: caretakerListParticipants now returns { items, total_count } instead of a bare array.
+      const allParticipantsResponse = await api.caretakerListParticipants();
+      const allParticipants = Array.isArray(allParticipantsResponse?.items)
+        ? allParticipantsResponse.items
+        : [];
+      const thisParticipant = allParticipants.find(p => p.participant_id === participantId) || null;
 
       if (!thisParticipant) {
         setError("Participant not found.");

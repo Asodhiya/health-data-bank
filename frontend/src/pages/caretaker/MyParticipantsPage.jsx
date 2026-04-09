@@ -1193,6 +1193,7 @@ export default function MyParticipantsPage() {
   const hasBootstrappedRef = useRef(false);
   const groupsMapRef = useRef({});
   const [participantSummary, setParticipantSummary] = useState({ total: 0, active: 0, inactive: 0, flagged: 0 });
+  const [activityCounts, setActivityCounts] = useState({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 });
   const [formsSummary, setFormsSummary] = useState({ total: 0, active: 0, revoked: 0 });
 
   function showToastMsg(msg) { setToast(msg); setTimeout(() => setToast(null), 3000); }
@@ -1274,9 +1275,10 @@ export default function MyParticipantsPage() {
   const selectedGroupQuery = selectedGroupId !== "all" ? selectedGroupId : null;
 
   const loadSummaries = useCallback(async () => {
-    const [pSummary, fSummary] = await Promise.all([
+    const [pSummary, fSummary, aCounts] = await Promise.all([
       api.caretakerGetParticipantsSummary(selectedGroupQuery).catch(() => ({ total: 0, active: 0, inactive: 0, flagged: 0 })),
       api.caretakerGetFormsSummary(selectedGroupQuery).catch(() => ({ total: 0, active: 0, revoked: 0 })),
+      api.caretakerGetActivityCounts(selectedGroupQuery).catch(() => ({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 })),
     ]);
     setParticipantSummary({
       total: Number(pSummary?.total || 0),
@@ -1288,6 +1290,12 @@ export default function MyParticipantsPage() {
       total: Number(fSummary?.total || 0),
       active: Number(fSummary?.active || 0),
       revoked: Number(fSummary?.revoked || 0),
+    });
+    setActivityCounts({
+      highly_active: Number(aCounts?.highly_active || 0),
+      moderately_active: Number(aCounts?.moderately_active || 0),
+      low_active: Number(aCounts?.low_active || 0),
+      inactive: Number(aCounts?.inactive || 0),
     });
   }, [selectedGroupQuery]);
 
@@ -1611,12 +1619,64 @@ export default function MyParticipantsPage() {
       {/* Participants view */}
       {view === "participants" && (<>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-slate-800">{counts.total}</p><p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Total</p></div>
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-emerald-600">{counts.active}</p><p className="text-xs font-semibold text-emerald-500 uppercase tracking-wider mt-1">Active</p></div>
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-slate-400">{counts.inactive}</p><p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Inactive</p></div>
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-rose-600">{counts.flagged}</p><p className="text-xs font-semibold text-rose-500 uppercase tracking-wider mt-1">Flagged</p></div>
+      {/* Stat cards — clickable filter chips. Each card toggles its filter on/off,
+          with a colored ring when that filter is currently active. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <button
+          type="button"
+          onClick={() => { setFilters(DEFAULT_FILTERS); setSearch(""); setSelectedGroupId("all"); }}
+          className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4 text-left transition-all hover:shadow-md hover:border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-300"
+          title="Clear all filters"
+        >
+          <p className="text-2xl font-extrabold text-slate-800">{counts.total}</p>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Total</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilters(f => ({ ...f, status: f.status === "active" ? "all" : "active" }))}
+          className={`bg-white rounded-2xl shadow-sm border px-4 py-4 text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-300 ${filters.status === "active" ? "border-emerald-400 ring-2 ring-emerald-200" : "border-slate-100 hover:border-emerald-200"}`}
+          title={filters.status === "active" ? "Click to clear filter" : "Click to filter by Active"}
+        >
+          <p className="text-2xl font-extrabold text-emerald-600">{activityCounts.highly_active + activityCounts.moderately_active}</p>
+          <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wider mt-1">Active</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilters(f => ({ ...f, status: f.status === "low_active" ? "all" : "low_active" }))}
+          className={`bg-white rounded-2xl shadow-sm border px-4 py-4 text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-amber-300 ${filters.status === "low_active" ? "border-amber-400 ring-2 ring-amber-200" : "border-slate-100 hover:border-amber-200"}`}
+          title={filters.status === "low_active" ? "Click to clear filter" : "Click to filter by Low Activity"}
+        >
+          <p className="text-2xl font-extrabold text-amber-600">{activityCounts.low_active}</p>
+          <p className="text-xs font-semibold text-amber-500 uppercase tracking-wider mt-1">Low Activity</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilters(f => ({ ...f, status: f.status === "inactive" ? "all" : "inactive" }))}
+          className={`bg-white rounded-2xl shadow-sm border px-4 py-4 text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-slate-300 ${filters.status === "inactive" ? "border-slate-400 ring-2 ring-slate-200" : "border-slate-100 hover:border-slate-300"}`}
+          title={filters.status === "inactive" ? "Click to clear filter" : "Click to filter by Inactive"}
+        >
+          <p className="text-2xl font-extrabold text-slate-400">{activityCounts.inactive}</p>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Inactive</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilters(f => ({ ...f, flagged: f.flagged === "flagged" ? "all" : "flagged" }))}
+          className={`bg-white rounded-2xl shadow-sm border px-4 py-4 text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-rose-300 ${filters.flagged === "flagged" ? "border-rose-400 ring-2 ring-rose-200" : "border-slate-100 hover:border-rose-200"}`}
+          title={filters.flagged === "flagged" ? "Click to clear filter" : "Click to filter by Flagged"}
+        >
+          <p className="text-2xl font-extrabold text-rose-600">{counts.flagged}</p>
+          <p className="text-xs font-semibold text-rose-500 uppercase tracking-wider mt-1">Flagged</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectedGroupId("all")}
+          disabled={selectedGroupId === "all"}
+          className={`bg-white rounded-2xl shadow-sm border px-4 py-4 text-left transition-all focus:outline-none focus:ring-2 focus:ring-blue-300 ${selectedGroupId !== "all" ? "border-blue-400 ring-2 ring-blue-200 hover:shadow-md cursor-pointer" : "border-slate-100 cursor-default"}`}
+          title={selectedGroupId !== "all" ? "Click to show all groups" : `${groups.length} group${groups.length === 1 ? "" : "s"} assigned`}
+        >
+          <p className="text-2xl font-extrabold text-blue-600">{groups.length}</p>
+          <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider mt-1">Groups</p>
+        </button>
       </div>
 
       {/* Search + sort + filter toggle */}

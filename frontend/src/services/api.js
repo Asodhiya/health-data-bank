@@ -692,9 +692,22 @@ export const api = {
 
   // Health Trends
   caretakerGetHealthTrends: (participantId, params = {}) => {
-    const qs = new URLSearchParams(params).toString();
+    // Build the query string manually so array params (like element_ids) become
+    // repeated keys (?element_ids=uuid1&element_ids=uuid2) instead of being
+    // joined with commas (?element_ids=uuid1,uuid2). FastAPI's Query(list[UUID])
+    // expects the repeated-key form and 422s on the comma-joined form.
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null || value === "") continue;
+      if (Array.isArray(value)) {
+        value.forEach(v => qs.append(key, String(v)));
+      } else {
+        qs.append(key, String(value));
+      }
+    }
+    const queryString = qs.toString();
     return request(
-      `/caretaker/participants/${participantId}/health-trends${qs ? `?${qs}` : ""}`,
+      `/caretaker/participants/${participantId}/health-trends${queryString ? `?${queryString}` : ""}`,
     );
   },
 
