@@ -710,6 +710,7 @@ function HistoryTab() {
   const [scopeFilter, setScopeFilter] = useState("all");
   const [viewing, setViewing] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(null);
 
   useEffect(() => {
     api.caretakerListReports()
@@ -732,11 +733,13 @@ function HistoryTab() {
 
   async function handleViewReport(r) {
     setDetailLoading(true);
+    setDetailError(null);
+    setViewing({ ...r, payload: null });
     try {
       const detail = await api.caretakerGetReport(r.id);
       setViewing({ ...r, payload: detail.payload || {} });
     } catch (err) {
-      console.warn("Failed to load report detail:", err);
+      setDetailError(err.message || "Couldn't load this report. Please try again.");
       setViewing({ ...r, payload: {} });
     } finally {
       setDetailLoading(false);
@@ -757,7 +760,7 @@ function HistoryTab() {
 
     return (
       <div className="space-y-5">
-        <button onClick={() => setViewing(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+        <button onClick={() => { setViewing(null); setDetailError(null); }} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           Back to History
         </button>
@@ -772,6 +775,18 @@ function HistoryTab() {
             <div className="animate-pulse space-y-4">
               {[...Array(4)].map((_, i) => <div key={i} className="h-10 bg-slate-200 rounded-xl" />)}
             </div>
+          </div>
+        ) : detailError ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-rose-200 px-6 py-10 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center mx-auto mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            </div>
+            <p className="text-sm font-semibold text-rose-700">Couldn't load this report</p>
+            <p className="text-xs text-rose-500 mt-1.5 max-w-sm mx-auto">{detailError}</p>
+            <button onClick={() => handleViewReport(viewing)}
+              className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-rose-600 rounded-lg hover:bg-rose-700 transition-colors">
+              Retry
+            </button>
           </div>
         ) : elems.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
@@ -951,9 +966,11 @@ export default function ReportsPage() {
   const [elements, setElements] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [pSummary, gData] = await Promise.all([
         api.caretakerGetParticipantsSummary().catch(() => ({ total: 0 })),
@@ -979,7 +996,7 @@ export default function ReportsPage() {
         } catch { setElements([]); }
       }
     } catch (err) {
-      console.warn("Failed to load reports data:", err.message);
+      setLoadError(err.message || "Couldn't load reports data. Please refresh the page.");
     } finally {
       setLoading(false);
     }
@@ -1040,6 +1057,24 @@ export default function ReportsPage() {
           <div className="h-8 bg-slate-200 rounded w-32" />
           <div className="h-12 bg-slate-200 rounded-2xl" />
           <div className="h-64 bg-slate-200 rounded-2xl" />
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="max-w-6xl mx-auto p-2 md:p-0">
+        <div className="bg-white rounded-2xl shadow-sm border border-rose-200 px-6 py-12 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center mx-auto mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+          </div>
+          <h2 className="text-base font-bold text-rose-700">Couldn't load Reports</h2>
+          <p className="text-xs text-rose-500 mt-1.5 max-w-md mx-auto">{loadError}</p>
+          <button onClick={fetchData}
+            className="mt-5 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-colors">
+            Retry
+          </button>
         </div>
       </div>
     );
