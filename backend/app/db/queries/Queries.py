@@ -1216,6 +1216,23 @@ class CaretakersQuery:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def _assert_group_owned(self, group_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        """B2: ownership guard for any group-scoped query.
+
+        Raises 404 ('Group not found or not assigned to you') if the group
+        either doesn't exist or isn't owned by the caretaker. Same wording as
+        get_group() so callers don't accidentally leak the difference between
+        'no such group' and 'not yours'.
+        """
+        owns_group = await self.db.scalar(
+            select(Group.group_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(Group.group_id == group_id)
+            .where(CaretakerProfile.user_id == user_id)
+        )
+        if not owns_group:
+            raise HTTPException(status_code=404, detail="Group not found or not assigned to you")
+
     async def get_groups(self, user_id: uuid.UUID) -> list:
         # Subquery: number of currently-active members per group.
         member_count_sq = (
@@ -1262,6 +1279,9 @@ class CaretakersQuery:
         return row
 
     async def get_group_participants(self, group_id: uuid.UUID, user_id: uuid.UUID):
+        # B2: was previously accepting user_id but never using it — group_id
+        # alone was enough to read any group's participants. Now guarded.
+        await self._assert_group_owned(group_id, user_id)
         result = await self.db.execute(
             select(ParticipantProfile, User.first_name, User.last_name, GroupMember.joined_at)
             .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
@@ -1820,7 +1840,10 @@ class CaretakersQuery:
         result = await self.db.execute(stmt)
         return result.all()
 
-    async def get_group_elements(self, group_id: uuid.UUID):
+    async def get_group_elements(self, group_id: uuid.UUID, user_id: uuid.UUID):
+        # B2: was previously taking only group_id with no caretaker filter,
+        # which let any caretaker read the deployed elements of any group.
+        await self._assert_group_owned(group_id, user_id)
         result = await self.db.execute(
             select(
                 DataElement.element_id,

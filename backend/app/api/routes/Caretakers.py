@@ -10,6 +10,7 @@ from app.core.dependency import require_permissions
 from app.core.permissions import (
     GROUP_READ,
     CARETAKER_READ,
+    CARETAKER_WRITE,
     SEND_INVITE,
 )
 from app.schemas.caretaker_response_schema import (
@@ -58,15 +59,17 @@ async def get_caretaker_profile(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
+    # B20: previously this handler created and committed a new profile row as
+    # a side effect if one didn't exist. That violated REST idempotency, opened
+    # a race between concurrent GETs, and muddied the semantics of "who has a
+    # profile?" Profile creation now happens exclusively via PATCH /profile
+    # (the onboarding page is the sole caller that does this on first completion).
     result = await db.execute(
         select(CaretakerProfile).where(CaretakerProfile.user_id == current_user.user_id)
     )
     profile = result.scalar_one_or_none()
     if not profile:
-        profile = CaretakerProfile(user_id=current_user.user_id)
-        db.add(profile)
-        await db.commit()
-        await db.refresh(profile)
+        raise HTTPException(status_code=404, detail="Caretaker profile not found")
     return profile
 
 
@@ -74,7 +77,7 @@ async def get_caretaker_profile(
 async def update_caretaker_profile(
     payload: CaretakerProfileUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     result = await db.execute(
         select(CaretakerProfile).where(CaretakerProfile.user_id == current_user.user_id)
@@ -153,7 +156,7 @@ async def list_group_elements(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(GROUP_READ)),
 ):
-    rows = await CaretakersQuery(db).get_group_elements(group_id)
+    rows = await CaretakersQuery(db).get_group_elements(group_id, current_user.user_id)
     return [
         GroupDataElementItem(
             element_id=row.element_id,
@@ -356,7 +359,7 @@ async def create_feedback(
     submission_id: UUID,
     body: FeedbackCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     feedback = await CaretakersQuery(db).create_feedback(
         caretaker_user_id=current_user.user_id,
@@ -396,7 +399,7 @@ async def create_general_feedback(
     participant_id: UUID,
     body: FeedbackCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     feedback = await CaretakersQuery(db).create_feedback(
         caretaker_user_id=current_user.user_id,
@@ -487,7 +490,7 @@ async def create_note(
     participant_id: UUID,
     body: NoteCreateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
     participant_exists = await db.scalar(
@@ -519,7 +522,7 @@ async def update_note(
     note_id: UUID,
     body: NoteUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
     note = await db.scalar(
@@ -556,7 +559,7 @@ async def update_note(
 async def delete_note(
     note_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
     result = await db.execute(
@@ -602,7 +605,7 @@ async def generate_comparison_report(
     group_id: Optional[UUID] = Query(default=None),
     body: ReportGenerateRequest = ...,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     if compare_with == "participant" and not compare_participant_id:
         raise HTTPException(status_code=422, detail="compare_participant_id is required when compare_with is 'participant'")
@@ -742,7 +745,7 @@ async def list_notifications(
 async def mark_notification_read(
     notification_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     n = await mark_notification_read_for_user(db, notification_id, current_user.user_id)
     return NotificationItem(

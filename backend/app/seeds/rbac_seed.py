@@ -33,6 +33,12 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
     "caretaker": [
         P.GOAL_VIEW_ALL,
         P.STATS_VIEW,
+        # B21: caretaker self-action permissions. Without these the seed is
+        # out of sync with what every route in routes/Caretakers.py actually
+        # checks for. Existing databases that worked before this fix already
+        # had these granted manually — the seed is now catching up.
+        P.CARETAKER_READ,
+        P.CARETAKER_WRITE,
     ],
 }
 
