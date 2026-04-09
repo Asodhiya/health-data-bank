@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { sanitizeText } from "../../utils/sanitize";
+import { COUNTRIES } from "../../utils/formOptions";
 
 const EMPTY_ANSWERS = {};
 
@@ -38,6 +39,69 @@ function renderFieldError(error) {
   return <p className="mt-1.5 text-xs font-medium text-rose-600">{error}</p>;
 }
 
+function SearchableSelect({ value, onChange, options, placeholder = "Search..." }) {
+  const [query, setQuery] = useState(value || "");
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    setQuery(value || "");
+  }, [value]);
+
+  const filtered = options.filter((option) =>
+    option.toLowerCase().includes(query.toLowerCase()),
+  );
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={query}
+        onFocus={() => setOpen(true)}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+          if (!event.target.value.trim()) onChange("");
+        }}
+        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 transition-shadow focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200"
+        placeholder={placeholder}
+      />
+      {open && (
+        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+          {filtered.length === 0 ? (
+            <p className="px-4 py-2 text-sm text-slate-400">No countries found.</p>
+          ) : (
+            filtered.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onChange(option);
+                  setQuery(option);
+                  setOpen(false);
+                }}
+                className={`block w-full px-4 py-2 text-left text-sm transition-colors ${
+                  value === option ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {option}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+      {open && (
+        <button
+          type="button"
+          aria-label="Close country list"
+          className="fixed inset-0 z-10 cursor-default"
+          onClick={() => setOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 function QuestionCard({ index, field, value, onChange, error, maxDob }) {
   const inputClass =
     "w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 transition-shadow focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200";
@@ -66,12 +130,21 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
       )}
 
       {field.field_type === "text" && (
-        <input
-          type="text"
-          value={value}
-          onChange={(event) => onChange(field, sanitizeText(event.target.value, 200))}
-          className={inputClass}
-        />
+        field.profile_field === "country_of_origin" ? (
+          <SearchableSelect
+            value={value}
+            onChange={(nextValue) => onChange(field, nextValue)}
+            options={COUNTRIES}
+            placeholder="Search and choose a country"
+          />
+        ) : (
+          <input
+            type="text"
+            value={value}
+            onChange={(event) => onChange(field, sanitizeText(event.target.value, 200))}
+            className={inputClass}
+          />
+        )
       )}
 
       {field.field_type === "number" && (
