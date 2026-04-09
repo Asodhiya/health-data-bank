@@ -732,11 +732,11 @@ export const api = {
     });
   },
 
-  caretakerGenerateParticipantReport: (participantId, payload) =>
-    request(`/caretaker/reports/participant?participant_id=${participantId}`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+//  caretakerGenerateParticipantReport: (participantId, payload) =>
+//    request(`/caretaker/reports/participant?participant_id=${participantId}`, {
+//      method: "POST",
+//      body: JSON.stringify(payload),
+//    }),
 
   caretakerGetReport: (reportId) => request(`/caretaker/reports/${reportId}`),
 

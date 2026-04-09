@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useOutletContext, useSearchParams } from "react-router-dom";
 import { api } from "../../services/api";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Legend } from "recharts";
 
@@ -330,8 +330,9 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
 
 // ─── Tab: Comparison Report (with MetricPicker) ─────────────────────────────────
 
-function ComparisonTab({ participants, groups, selectedGroupId, elements }) {
+function ComparisonTab({ participants, groups, selectedGroupId, elements, initialParticipantId }) {
   const [selectedParticipant, setSelectedParticipant] = useState("");
+  const appliedInitialRef = useRef(false);
   const [compareWith, setCompareWith] = useState("group");
   const [compareParticipantId, setCompareParticipantId] = useState("");
   const [metrics, setMetrics] = useState([]);
@@ -342,6 +343,20 @@ function ComparisonTab({ participants, groups, selectedGroupId, elements }) {
   const [error, setError] = useState(null);
 
   const groupName = selectedGroupId === "all" ? "All Groups" : groups.find(g => g.id === selectedGroupId)?.name || "Group";
+
+  // One-shot: when participants load and we have an initialParticipantId from
+  // the URL (e.g. navigating from MyParticipantsPage "Generate report"),
+  // pre-select that participant. The ref makes sure we only do this once —
+  // so if the caretaker later picks a different participant, we don't
+  // override their choice.
+  useEffect(() => {
+    if (appliedInitialRef.current) return;
+    if (!initialParticipantId) return;
+    if (participants.some(p => p.participant_id === initialParticipantId)) {
+      setSelectedParticipant(initialParticipantId);
+      appliedInitialRef.current = true;
+    }
+  }, [initialParticipantId, participants]);
 
   // Auto-select first 4 elements
   useEffect(() => {
@@ -918,7 +933,17 @@ const TABS = [
 
 export default function ReportsPage() {
   const { user } = useOutletContext();
-  const [activeTab, setActiveTab] = useState("group");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Capture URL params exactly once on first render.
+  // We don't want these to re-read after we clear the URL below.
+  const [initialTab] = useState(() => {
+    const t = searchParams.get("tab");
+    return ["group", "comparison", "trends", "history"].includes(t) ? t : null;
+  });
+  const [initialParticipantId] = useState(() => searchParams.get("participant"));
+
+  const [activeTab, setActiveTab] = useState(initialTab || "group");
   const [participants, setParticipants] = useState([]);
   const [participantsLoadedFor, setParticipantsLoadedFor] = useState("none");
   const [participantTotal, setParticipantTotal] = useState(0);
@@ -975,6 +1000,14 @@ export default function ReportsPage() {
   }, [selectedGroupId, groups]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Clear URL params after applying them so refresh doesn't re-trigger.
+  useEffect(() => {
+    if (initialTab || initialParticipantId) {
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (activeTab !== "comparison" && activeTab !== "trends") return;
@@ -1036,7 +1069,7 @@ export default function ReportsPage() {
       </div>
 
       {activeTab === "group" && <GroupReportTab groups={groups} selectedGroupId={selectedGroupId} elements={elements} />}
-      {activeTab === "comparison" && <ComparisonTab participants={filteredParticipants} groups={groups} selectedGroupId={selectedGroupId} elements={elements} />}
+      {activeTab === "comparison" && <ComparisonTab participants={filteredParticipants} groups={groups} selectedGroupId={selectedGroupId} elements={elements} initialParticipantId={initialParticipantId} />}
       {activeTab === "trends" && <TrendsTab participants={filteredParticipants} elements={elements} />}
       {activeTab === "history" && <HistoryTab />}
     </div>

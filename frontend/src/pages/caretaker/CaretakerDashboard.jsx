@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useOutletContext, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import NotificationsPanel from "../../components/NotificationsPanel";
@@ -249,7 +249,6 @@ function StatCards({
 // ─── Main Dashboard ─────────────────────────────────────────────────────────────
 
 export default function CaretakerDashboard() {
-  useOutletContext();
   const navigate = useNavigate();
   const [groups, setGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("all");
@@ -260,47 +259,54 @@ export default function CaretakerDashboard() {
   const [loading, setLoading] = useState(true);
   const selectedGroupQuery = selectedGroupId === "all" ? null : selectedGroupId;
 
-  const fetchData = useCallback(async () => {
+  // Unified loader: runs groups + activity counts + participants in parallel
+  // and only clears `loading` after all three complete. Called on mount and
+  // whenever the selected group changes. Groups only fetch once on mount.
+  const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const groupData = await api.caretakerGetGroups().catch(() => []);
+      // Groups only need to load once on mount; the other two refresh per group.
+      const groupsPromise = groups.length === 0
+        ? api.caretakerGetGroups().catch(() => [])
+        : Promise.resolve(null);
 
-      const transformedGroups = Array.isArray(groupData)
-        ? groupData.map(g => ({ id: g.group_id, name: g.name, description: g.description || "" }))
-        : [];
-      setGroups(transformedGroups);
+      const [groupData, countsData, participantsData] = await Promise.all([
+        groupsPromise,
+        api.caretakerGetActivityCounts(selectedGroupQuery).catch(() => ({
+          highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0,
+        })),
+        api.caretakerListParticipants({
+          limit: 50,
+          offset: 0,
+          sort_by: "name",
+          ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
+        }).catch(() => []),
+      ]);
+
+      if (groupData !== null) {
+        const transformedGroups = Array.isArray(groupData)
+          ? groupData.map(g => ({ id: g.group_id, name: g.name, description: g.description || "" }))
+          : [];
+        setGroups(transformedGroups);
+      }
+
+      setActivityCounts({
+        highly_active: Number(countsData?.highly_active || 0),
+        moderately_active: Number(countsData?.moderately_active || 0),
+        low_active: Number(countsData?.low_active || 0),
+        inactive: Number(countsData?.inactive || 0),
+      });
+
+      setParticipants(Array.isArray(participantsData) ? participantsData : []);
     } catch (err) {
       console.error("Failed to load dashboard data:", err);
     } finally {
       setLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroupQuery, groups.length]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  useEffect(() => {
-    api.caretakerGetActivityCounts(selectedGroupQuery)
-      .then((counts) => {
-        setActivityCounts({
-          highly_active: Number(counts?.highly_active || 0),
-          moderately_active: Number(counts?.moderately_active || 0),
-          low_active: Number(counts?.low_active || 0),
-          inactive: Number(counts?.inactive || 0),
-        });
-      })
-      .catch(() => setActivityCounts({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 }));
-  }, [selectedGroupQuery]);
-
-  useEffect(() => {
-    api.caretakerListParticipants({
-      limit: 50,
-      offset: 0,
-      sort_by: "name",
-      ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
-    })
-      .then((pList) => setParticipants(Array.isArray(pList) ? pList : []))
-      .catch(() => setParticipants([]));
-  }, [selectedGroupQuery]);
+  useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
   const filteredParticipants = useMemo(() => participants, [participants]);
 
