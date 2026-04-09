@@ -77,6 +77,19 @@ class ParticipantListItem(BaseModel):
     last_submission_at: Optional[date] = None
 
 
+class PaginatedParticipants(BaseModel):
+    """Response wrapper for /caretaker/participants.
+
+    `total_count` is the total number of rows matching the SQL-level filters
+    (q, status, gender, age, has_alerts, survey_progress, group_id), ignoring
+    the goal_progress filter — that one is applied in Python after the SQL
+    fetch (a known limitation tracked as B22). When goal_progress is set,
+    `total_count` is therefore an upper bound on the real total.
+    """
+    items: List[ParticipantListItem]
+    total_count: int = 0
+
+
 class ParticipantActivityCounts(BaseModel):
     highly_active: int = 0
     moderately_active: int = 0

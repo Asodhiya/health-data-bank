@@ -2,6 +2,84 @@ import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useOutletContext, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../services/api";
 
+// ─── Status helpers (4-bucket activity model — matches CaretakerDashboard) ─────
+
+const STATUS_LABELS = {
+  highly_active: "Highly Active",
+  moderately_active: "Moderately Active",
+  low_active: "Low Activity",
+  inactive: "Inactive",
+};
+
+const STATUS_DOT_COLOR = {
+  highly_active: "bg-emerald-400",
+  moderately_active: "bg-blue-400",
+  low_active: "bg-amber-400",
+  inactive: "bg-slate-300",
+};
+
+function getStatusLabel(status) {
+  return STATUS_LABELS[status] || "Unknown";
+}
+
+// ─── Backend query param builder (B6 + B7) ────────────────────────────────────
+//
+// Translates the frontend filter/search/sort UI state into the query parameters
+// the backend's GET /caretaker/participants route expects. Centralizing this
+// here keeps callers (initial fetch, filter-change refetch, "load more") in
+// sync, and pins the value mapping (B7) to one place — e.g. the UI uses
+// "complete" but the backend expects "completed".
+
+function buildParticipantsQueryParams(filters, search, sort) {
+  const params = {};
+
+  // Free-text search
+  const trimmedSearch = (search || "").trim();
+  if (trimmedSearch) params.q = trimmedSearch;
+
+  // Status — backend accepts the same 5 values plus "active" as "any non-inactive"
+  if (filters.status && filters.status !== "all") {
+    params.status = filters.status;
+  }
+
+  // Gender — passed through (backend lower-cases for comparison)
+  if (filters.gender && filters.gender !== "all") {
+    params.gender = filters.gender;
+  }
+
+  // Alerts → has_alerts boolean
+  if (filters.flagged === "flagged") params.has_alerts = true;
+  else if (filters.flagged === "clear") params.has_alerts = false;
+
+  // Age range — only send if a real number was typed
+  const ageMin = Number(filters.ageMin);
+  const ageMax = Number(filters.ageMax);
+  if (filters.ageMin !== "" && Number.isFinite(ageMin)) params.age_min = ageMin;
+  if (filters.ageMax !== "" && Number.isFinite(ageMax)) params.age_max = ageMax;
+
+  // Survey progress — B7: rename frontend "complete" → backend "completed"
+  if (filters.surveyProgress && filters.surveyProgress !== "all") {
+    params.survey_progress = filters.surveyProgress === "complete"
+      ? "completed"
+      : filters.surveyProgress;
+  }
+
+  // Goal progress — same B7 rename
+  if (filters.goalProgress && filters.goalProgress !== "all") {
+    params.goal_progress = filters.goalProgress === "complete"
+      ? "completed"
+      : filters.goalProgress;
+  }
+
+  // Sort — B7: rename frontend "lastActive" → backend "last_active"
+  if (sort && sort.field) {
+    params.sort_by = sort.field === "lastActive" ? "last_active" : sort.field;
+    params.sort_dir = sort.dir === "desc" ? "desc" : "asc";
+  }
+
+  return params;
+}
+
 // ─── Transform: Backend → Frontend shape ─────────────────────────────────────
 
 function transformParticipant(p, groupsMap) {
@@ -31,7 +109,8 @@ function transformParticipant(p, groupsMap) {
     dob: p.dob || null,
     gender: p.gender || "—",
     age: p.age != null ? Math.round(p.age) : null,
-    status: isActive ? "active" : "inactive",
+    status: p.status || "inactive",
+    isActive,
     enrolledAt: p.enrolled_at || null,
     lastActive: p.last_login_at || p.last_submission_at || null,
     healthGoals: goalsDone,
@@ -129,7 +208,7 @@ function Avatar({ fullName, size = "md" }) {
 }
 
 function StatusDot({ status }) {
-  return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${status === "active" ? "bg-emerald-400" : "bg-slate-300"}`} />;
+  return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${STATUS_DOT_COLOR[status] || "bg-slate-300"}`} />;
 }
 
 function InfoRow({ label, value }) {
@@ -447,11 +526,14 @@ function FilterPanel({ filters, setFilters, onReset }) {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Status</label>
-            <div className="flex gap-1">
-              {[{ value: "all", label: "All" }, { value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }].map(s => (
-                <button key={s.value} onClick={() => setFilters(f => ({...f, status: s.value}))} className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all ${filters.status === s.value ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{s.label}</button>
-              ))}
-            </div>
+            <select value={filters.status} onChange={e => setFilters(f => ({...f, status: e.target.value}))} className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 bg-white">
+              <option value="all">All</option>
+              <option value="active">Any Active</option>
+              <option value="highly_active">Highly Active</option>
+              <option value="moderately_active">Moderately Active</option>
+              <option value="low_active">Low Activity</option>
+              <option value="inactive">Inactive</option>
+            </select>
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Gender</label>
@@ -886,7 +968,7 @@ function ParticipantDetailPanel({ participant: p, groups, onClose, onViewFull })
               <p className="text-lg font-bold text-slate-800">{p.fullName}</p>
               <p className="text-xs text-slate-400 truncate">{p.email || "—"}</p>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                <div className="flex items-center gap-1.5"><StatusDot status={p.status} /><span className="text-xs text-slate-400 capitalize">{p.status}</span></div>
+                <div className="flex items-center gap-1.5"><StatusDot status={p.status} /><span className="text-xs text-slate-400">{getStatusLabel(p.status)}</span></div>
                 {p.age != null && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-slate-400">Age {p.age}</span></>}
                 {getAge(p.dob) !== null && !p.age && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-slate-400">Age {getAge(p.dob)}</span></>}
                 <span className="text-xs text-slate-300">·</span>
@@ -1082,6 +1164,7 @@ export default function MyParticipantsPage() {
   const [forms, setForms] = useState([]);
   const [participantsHasMore, setParticipantsHasMore] = useState(false);
   const [participantsOffset, setParticipantsOffset] = useState(0);
+  const [participantsTotal, setParticipantsTotal] = useState(0);
   const [participantsLoadingMore, setParticipantsLoadingMore] = useState(false);
   const [invitesHasMore, setInvitesHasMore] = useState(false);
   const [invitesOffset, setInvitesOffset] = useState(0);
@@ -1094,7 +1177,9 @@ export default function MyParticipantsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [participantsRefreshing, setParticipantsRefreshing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [sort, setSort] = useState({ field: "name", dir: "asc" });
   const [detailParticipant, setDetailParticipant] = useState(null);
@@ -1165,6 +1250,7 @@ export default function MyParticipantsPage() {
     await loadParticipantsPage({
       reset: false,
       offsetValue: participantsOffset,
+      queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
     });
     setParticipantsLoadingMore(false);
   }
@@ -1213,13 +1299,21 @@ export default function MyParticipantsPage() {
       ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
       ...queryParamsOverride,
     };
-    const participantData = await api.caretakerListParticipants(params).catch(() => []);
-    const page = Array.isArray(participantData) ? participantData : [];
+    // B8: response is now { items, total_count } instead of a bare array.
+    const participantData = await api.caretakerListParticipants(params).catch(() => null);
+    const page = Array.isArray(participantData?.items) ? participantData.items : [];
+    const total = Number(participantData?.total_count ?? 0);
     const groupsMap = groupsMapOverride || groupsMapRef.current || {};
     const transformed = page.map((p) => transformParticipant(p, groupsMap));
     setParticipants((prev) => (reset ? transformed : [...prev, ...transformed]));
-    setParticipantsOffset(nextOffset + transformed.length);
-    setParticipantsHasMore(transformed.length === PAGE_SIZE);
+    const newOffset = nextOffset + transformed.length;
+    setParticipantsOffset(newOffset);
+    setParticipantsTotal(total);
+    // Trust total_count for hasMore. Falls back to length heuristic if the
+    // backend ever returns a malformed response.
+    setParticipantsHasMore(participantData?.total_count != null
+      ? newOffset < total
+      : transformed.length === PAGE_SIZE);
   }, [selectedGroupQuery]);
 
   const loadFormsPage = useCallback(async ({ reset = false, offsetValue = 0 } = {}) => {
@@ -1262,7 +1356,12 @@ export default function MyParticipantsPage() {
       groupsMapRef.current = initialGroupMap;
       setParticipants([]);
       setParticipantsOffset(0);
-      await loadParticipantsPage({ reset: true, groupsMapOverride: initialGroupMap, offsetValue: 0 });
+      await loadParticipantsPage({
+        reset: true,
+        groupsMapOverride: initialGroupMap,
+        offsetValue: 0,
+        queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
+      });
       await loadSummaries();
       // Lazy tabs: do not load invites/forms until user opens those tabs.
       setInvites([]);
@@ -1320,17 +1419,43 @@ export default function MyParticipantsPage() {
 
   useEffect(() => {
     if (!hasBootstrappedRef.current) return;
-    // when group changes, reset paged datasets
+    // when group or view changes, reset paged datasets and refetch with current filters
     setForms([]);
     setFormsOffset(0);
     setFormsHasMore(false);
     setFormsLoading(view === "forms");
-    loadParticipantsPage({ reset: true, offsetValue: 0 });
+    setParticipantsRefreshing(true);
+    loadParticipantsPage({
+      reset: true,
+      offsetValue: 0,
+      queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
+    }).finally(() => setParticipantsRefreshing(false));
     loadSummaries();
     if (view === "forms") {
       loadFormsPage({ reset: true, offsetValue: 0 });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGroupQuery, view, loadParticipantsPage, loadSummaries, loadFormsPage]);
+
+  // Debounce the search input so we don't fire one request per keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // B6: Refetch participants whenever filters/search/sort change.
+  // Server-side filtering replaces the old client-side `processed` memo.
+  // Skipped on initial mount — fetchData() handles the first load.
+  useEffect(() => {
+    if (!hasBootstrappedRef.current) return;
+    setParticipantsRefreshing(true);
+    loadParticipantsPage({
+      reset: true,
+      offsetValue: 0,
+      queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
+    }).finally(() => setParticipantsRefreshing(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, debouncedSearch, sort]);
 
   // ── Sort handler ────────────────────────────────────────────────────────────
 
@@ -1338,64 +1463,12 @@ export default function MyParticipantsPage() {
     setSort(prev => prev.field === field ? { field, dir: prev.dir === "asc" ? "desc" : "asc" } : { field, dir: "asc" });
   }
 
-  // ── Group pre-filter ───────────────────────────────────────────────────────
-
-  const groupFiltered = useMemo(() => participants, [participants]);
-
-  // ── Filter + Sort logic (client-side, instant UX) ─────────────────────────
-  const processed = useMemo(() => {
-    let rows = [...groupFiltered];
-    const q = search.trim().toLowerCase();
-    rows = rows.filter((p) => {
-      if (q && !`${p.fullName} ${p.email || ""}`.toLowerCase().includes(q)) return false;
-      if (filters.status !== "all" && p.status !== filters.status) return false;
-      if (filters.gender !== "all" && (p.gender || "").toLowerCase() !== filters.gender.toLowerCase()) return false;
-      if (filters.flagged === "flagged" && p.flags.length === 0) return false;
-      if (filters.flagged === "clear" && p.flags.length > 0) return false;
-      const age = p.age ?? getAge(p.dob);
-      if (filters.ageMin && (age === null || age < Number(filters.ageMin))) return false;
-      if (filters.ageMax && (age === null || age > Number(filters.ageMax))) return false;
-      const surveyRatio = p.surveysTotal > 0 ? (p.surveysDone / p.surveysTotal) * 100 : 0;
-      if (filters.surveyProgress === "complete" && surveyRatio < 100) return false;
-      if (filters.surveyProgress === "in_progress" && (surveyRatio <= 0 || surveyRatio >= 100)) return false;
-      if (filters.surveyProgress === "not_started" && surveyRatio > 0) return false;
-      if (filters.surveyProgress === "below_50" && surveyRatio >= 50) return false;
-      if (filters.surveyProgress === "above_50" && surveyRatio < 50) return false;
-      const hasGoals = (p.healthGoalsTotal || 0) > 0;
-      const goalRatio = hasGoals ? (p.healthGoals / p.healthGoalsTotal) * 100 : 0;
-      if (filters.goalProgress === "complete" && (!hasGoals || goalRatio < 100)) return false;
-      if (filters.goalProgress === "in_progress" && (!hasGoals || goalRatio <= 0 || goalRatio >= 100)) return false;
-      if (filters.goalProgress === "no_goals" && hasGoals) return false;
-      return true;
-    });
-
-    const statusOrder = { active: 0, inactive: 1 };
-    rows.sort((a, b) => {
-      const dir = sort.dir === "desc" ? -1 : 1;
-      switch (sort.field) {
-        case "name":
-          return dir * (a.fullName || "").localeCompare(b.fullName || "");
-        case "age":
-          return dir * ((a.age ?? -1) - (b.age ?? -1));
-        case "status":
-          return dir * ((statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99));
-        case "gender":
-          return dir * (a.gender || "").localeCompare(b.gender || "");
-        case "surveys":
-          return dir * ((a.surveysTotal ? a.surveysDone / a.surveysTotal : 0) - (b.surveysTotal ? b.surveysDone / b.surveysTotal : 0));
-        case "goals":
-          return dir * ((a.healthGoalsTotal ? a.healthGoals / a.healthGoalsTotal : 0) - (b.healthGoalsTotal ? b.healthGoals / b.healthGoalsTotal : 0));
-        case "lastActive":
-          return dir * ((new Date(a.lastActive || 0).getTime()) - (new Date(b.lastActive || 0).getTime()));
-        case "enrolled":
-          return dir * ((new Date(a.enrolledAt || 0).getTime()) - (new Date(b.enrolledAt || 0).getTime()));
-        default:
-          return 0;
-      }
-    });
-
-    return rows;
-  }, [groupFiltered, sort, search, filters]);
+  // B6: Filter and sort now happen on the server. `processed` is just an alias
+  // for `participants` so the JSX consumers below don't need to be rewritten.
+  // The previous client-side filter/sort logic was removed when this page moved
+  // to server-side filtering — see buildParticipantsQueryParams() at the top of
+  // this file and the refetch effects above.
+  const processed = participants;
 
   const counts = useMemo(() => ({
     total: participantSummary.total,
@@ -1571,7 +1644,18 @@ export default function MyParticipantsPage() {
       {showFilters && <FilterPanel filters={filters} setFilters={setFilters} onReset={() => setFilters(DEFAULT_FILTERS)} />}
 
       <div className="flex items-center justify-between px-1">
-        <p className="text-xs text-slate-400">Showing <span className="font-semibold text-slate-600">{processed.length}</span> of {counts.total} participants{selectedGroupName && <span> in <span className="font-semibold text-slate-600">{selectedGroupName}</span></span>}</p>
+        <p className="text-xs text-slate-400">
+          {participantsRefreshing ? (
+            <span className="inline-flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+              Updating results…
+            </span>
+          ) : (activeFilterCount > 0 || debouncedSearch) ? (
+            <>Showing <span className="font-semibold text-slate-600">{processed.length}</span> of <span className="font-semibold text-slate-600">{participantsTotal}</span> participant{participantsTotal === 1 ? "" : "s"} matching filters{selectedGroupName && <> in <span className="font-semibold text-slate-600">{selectedGroupName}</span></>}</>
+          ) : (
+            <>Showing <span className="font-semibold text-slate-600">{processed.length}</span> of <span className="font-semibold text-slate-600">{participantsTotal}</span> participant{participantsTotal === 1 ? "" : "s"}{selectedGroupName && <> in <span className="font-semibold text-slate-600">{selectedGroupName}</span></>}</>
+          )}
+        </p>
       </div>
 
       {/* List */}

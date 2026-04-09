@@ -1216,26 +1216,50 @@ class CaretakersQuery:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_groups(self, user_id: uuid.UUID) -> list[Group]:
+    async def get_groups(self, user_id: uuid.UUID) -> list:
+        # Subquery: number of currently-active members per group.
+        member_count_sq = (
+            select(
+                GroupMember.group_id.label("gm_group_id"),
+                func.count(GroupMember.participant_id).label("member_count"),
+            )
+            .where(GroupMember.left_at == None)
+            .group_by(GroupMember.group_id)
+            .subquery()
+        )
+
         result = await self.db.execute(
-            select(Group)
+            select(Group, func.coalesce(member_count_sq.c.member_count, 0).label("member_count"))
             .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .outerjoin(member_count_sq, member_count_sq.c.gm_group_id == Group.group_id)
             .where(CaretakerProfile.user_id == user_id)
         )
-        return result.scalars().all()
-    
+        return result.all()
 
 
-    async def get_group(self, group_id: uuid.UUID, user_id: uuid.UUID) -> Group:
+
+    async def get_group(self, group_id: uuid.UUID, user_id: uuid.UUID):
+        member_count_sq = (
+            select(
+                GroupMember.group_id.label("gm_group_id"),
+                func.count(GroupMember.participant_id).label("member_count"),
+            )
+            .where(GroupMember.left_at == None)
+            .where(GroupMember.group_id == group_id)
+            .group_by(GroupMember.group_id)
+            .subquery()
+        )
+
         result = await self.db.execute(
-            select(Group)
+            select(Group, func.coalesce(member_count_sq.c.member_count, 0).label("member_count"))
             .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .outerjoin(member_count_sq, member_count_sq.c.gm_group_id == Group.group_id)
             .where(Group.group_id == group_id, CaretakerProfile.user_id == user_id)
         )
-        group = result.scalar_one_or_none()
-        if not group:
+        row = result.one_or_none()
+        if not row:
             raise HTTPException(status_code=404, detail="Group not found or not assigned to you")
-        return group
+        return row
 
     async def get_group_participants(self, group_id: uuid.UUID, user_id: uuid.UUID):
         result = await self.db.execute(
@@ -1250,7 +1274,7 @@ class CaretakersQuery:
 
     async def get_group_participant(self, group_id: uuid.UUID, participant_id: uuid.UUID):
         result = await self.db.execute(
-            select(ParticipantProfile, User.first_name, User.last_name, GroupMember.joined_at)
+            select(ParticipantProfile, User.first_name, User.last_name, User.status, GroupMember.joined_at)
             .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
             .join(User, User.user_id == ParticipantProfile.user_id)
             .where(GroupMember.group_id == group_id)

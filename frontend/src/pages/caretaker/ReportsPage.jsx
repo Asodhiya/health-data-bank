@@ -1037,7 +1037,9 @@ export default function ReportsPage() {
       sort_by: "name",
     })
       .then((data) => {
-        setParticipants(Array.isArray(data) ? data : []);
+        // B8: response is { items, total_count }; we only need items here.
+        const items = Array.isArray(data?.items) ? data.items : [];
+        setParticipants(items);
         setParticipantsLoadedFor(scope);
       })
       .catch(() => {

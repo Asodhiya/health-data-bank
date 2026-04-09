@@ -17,6 +17,7 @@ from app.schemas.caretaker_response_schema import (
     GroupMemberAddRequest, GroupMemberItem,
     GroupDataElementItem,
     ParticipantListItem, ParticipantDetail, ParticipantActivityCounts,
+    PaginatedParticipants,
     FeedbackCreate, FeedbackItem,
     NoteCreateRequest, NoteItem, NoteUpdateRequest,
     ReportGenerateRequest, ReportResponse, ReportListItem,
@@ -83,7 +84,7 @@ async def update_caretaker_profile(
         profile = CaretakerProfile(user_id=current_user.user_id)
         db.add(profile)
 
-    for field, value in payload.model_dump(exclude_none=True).items():
+    for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(profile, field, value)
 
     if not profile.onboarding_completed:
@@ -101,15 +102,16 @@ async def list_groups(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(GROUP_READ)),
 ):
-    groups = await CaretakersQuery(db).get_groups(current_user.user_id)
+    rows = await CaretakersQuery(db).get_groups(current_user.user_id)
     return [
         GroupItem(
             group_id=g.group_id,
             name=g.name,
             description=g.description,
             caretaker_id=g.caretaker_id,
+            member_count=int(member_count or 0),
         )
-        for g in groups
+        for g, member_count in rows
     ]
 
 
@@ -119,12 +121,14 @@ async def get_group(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(GROUP_READ)),
 ):
-    group = await CaretakersQuery(db).get_group(group_id, current_user.user_id)
+    row = await CaretakersQuery(db).get_group(group_id, current_user.user_id)
+    group, member_count = row
     return GroupItem(
         group_id=group.group_id,
         name=group.name,
         description=group.description,
         caretaker_id=group.caretaker_id,
+        member_count=int(member_count or 0),
     )
 
 
@@ -232,7 +236,7 @@ async def get_group_form_detail(
 
 # ── Participants ──────────────────────────────────────────────────────────────
 
-@router.get("/participants", response_model=list[ParticipantListItem])
+@router.get("/participants", response_model=PaginatedParticipants)
 async def list_participants(
     group_id: Optional[UUID] = Query(default=None),
     q: Optional[str] = Query(default=None),
@@ -252,7 +256,7 @@ async def list_participants(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    rows = await CaretakersQuery(db).get_participants(
+    rows, total_count = await CaretakersQuery(db).get_participants(
         user_id=current_user.user_id,
         group_id=group_id,
         q=q,
@@ -270,7 +274,7 @@ async def list_participants(
         limit=limit,
         offset=offset,
     )
-    return [
+    items = [
         ParticipantListItem(
             participant_id=row.participant_id,
             name=f"{row.first_name or ''} {row.last_name or ''}".strip(),
@@ -293,6 +297,7 @@ async def list_participants(
         )
         for row in rows
     ]
+    return PaginatedParticipants(items=items, total_count=total_count)
 
 
 @router.get("/participants/activity-counts", response_model=ParticipantActivityCounts)
@@ -312,7 +317,7 @@ async def get_participant(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    participant, first_name, last_name, _ = await CaretakersQuery(db).get_group_participant(group_id, participant_id)
+    participant, first_name, last_name, user_status, _ = await CaretakersQuery(db).get_group_participant(group_id, participant_id)
     groups = await CaretakersQuery(db).get_participant_group_memberships(
         participant_id,
         current_user.user_id,
@@ -320,7 +325,7 @@ async def get_participant(
     return ParticipantDetail(
         participant_id=participant.participant_id,
         name=f"{first_name or ''} {last_name or ''}".strip(),
-        status="active",
+        status="active" if user_status else "inactive",
         groups=groups,
     )
 

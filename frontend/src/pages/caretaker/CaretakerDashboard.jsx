@@ -280,7 +280,7 @@ export default function CaretakerDashboard() {
           offset: 0,
           sort_by: "name",
           ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
-        }).catch(() => []),
+        }).catch(() => null),
       ]);
 
       if (groupData !== null) {
@@ -297,7 +297,8 @@ export default function CaretakerDashboard() {
         inactive: Number(countsData?.inactive || 0),
       });
 
-      setParticipants(Array.isArray(participantsData) ? participantsData : []);
+      // B8: response is { items, total_count }; dashboard only needs items.
+      setParticipants(Array.isArray(participantsData?.items) ? participantsData.items : []);
     } catch (err) {
       console.error("Failed to load dashboard data:", err);
     } finally {
