@@ -149,25 +149,20 @@ function StatusModal({ open, onClose, user, onConfirm }) {
 
 // ── Delete Confirmation ──────────────────────────────────────────────────────
 function DeleteModal({ open, onClose, user, groups, onConfirm }) {
-  const [mode, setMode] = useState("anonymize");
   const [loading, setLoading] = useState(false);
   if (!open || !user) return null;
   const affectedGroups = user.role === "caretaker" ? (groups || []).filter(g => String(g.caretaker_user_id || g.caretaker_id) === String(user.id)) : [];
   const handle = async () => {
     setLoading(true);
-    try { await api.adminDeleteUser(user.id, mode); onConfirm(mode); }
+    try { await api.adminDeleteUser(user.id, "anonymize"); onConfirm("anonymize"); }
     catch (err) { console.error("Delete failed:", err); }
     finally { setLoading(false); }
   };
   return <Modal open={open} onClose={() => !loading && onClose()}>
-    <div className="flex items-center gap-3 mb-4"><div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center shrink-0"><Ic d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></div><div><h3 className="text-lg font-bold text-slate-800">Delete User</h3><p className="text-sm text-slate-500">{user.firstName} {user.lastName}</p></div></div>
+    <div className="flex items-center gap-3 mb-4"><div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center shrink-0"><Ic d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></div><div><h3 className="text-lg font-bold text-slate-800">Delete & Anonymize</h3><p className="text-sm text-slate-500">{user.firstName} {user.lastName}</p></div></div>
     {affectedGroups.length > 0 && <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-sm text-amber-700 mb-4"><p className="font-semibold mb-1">This caretaker is assigned to {affectedGroups.length} group{affectedGroups.length > 1 ? "s" : ""}:</p><ul className="list-disc list-inside text-xs space-y-0.5">{affectedGroups.map(g => <li key={g.group_id}>{g.name}</li>)}</ul><p className="mt-2 text-xs">They will be automatically unassigned.</p></div>}
-    <div className="space-y-2">
-      <button onClick={() => setMode("anonymize")} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${mode === "anonymize" ? "border-blue-500 bg-blue-50 ring-1 ring-blue-200" : "border-slate-200 hover:bg-slate-50"}`}><p className="text-sm font-semibold text-slate-700">Delete & Anonymize</p><p className="text-xs text-slate-400 mt-0.5">Replace name/email — submissions and health data kept.</p></button>
-      <button onClick={() => setMode("permanent")} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${mode === "permanent" ? "border-rose-500 bg-rose-50 ring-1 ring-rose-200" : "border-slate-200 hover:bg-slate-50"}`}><p className="text-sm font-semibold text-slate-700">Delete Permanently</p><p className="text-xs text-slate-400 mt-0.5">Remove account and ALL data. Cannot be undone.</p></button>
-    </div>
-    {mode === "permanent" && <div className="mt-3 bg-rose-50 border border-rose-100 rounded-xl p-3 text-xs text-rose-700"><span className="font-semibold">Warning:</span> All data will be erased.</div>}
-    <div className="flex gap-3 mt-4"><button onClick={onClose} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-70">{loading ? <><Spinner /> Deleting…</> : mode === "anonymize" ? "Anonymize" : "Delete"}</button></div>
+    <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm text-blue-700"><span className="font-semibold">This will:</span> remove identifying account details and keep retained submissions and health data in anonymized form.</div>
+    <div className="flex gap-3 mt-4"><button onClick={onClose} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-70">{loading ? <><Spinner /> Deleting…</> : "Delete & Anonymize"}</button></div>
   </Modal>;
 }
 
@@ -351,9 +346,9 @@ export default function UserDetailPage() {
     }
   };
 
-  const handleDeleted = () => {
+  const handleDeleted = (mode) => {
     setShowDeleteModal(false);
-    msg("User deleted.");
+    msg(mode === "anonymize" ? "User anonymized." : "User account deleted. Retained data was anonymized.");
     navigate("/users");
   };
 

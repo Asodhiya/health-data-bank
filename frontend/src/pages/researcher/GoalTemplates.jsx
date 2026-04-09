@@ -965,12 +965,6 @@ export default function GoalTemplates() {
                     {formData.progress_mode || "incremental"} · {formData.direction || "at_least"}
                   </span>
                 </p>
-                <p className="text-[10px] font-black uppercase text-slate-400 mt-2">
-                  Behavior:{" "}
-                  <span className="text-slate-600">
-                    {t.progress_mode || "incremental"} · {t.direction || "at_least"}
-                  </span>
-                </p>
               </div>
             </div>
 

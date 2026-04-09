@@ -10,8 +10,10 @@ from zipfile import ZipFile
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
 
 from app.db.models import User
+from app.schemas.filter_data_schema import ParticipantFilter
 from app.schemas.schemas import UserSignup
 from app.services import admin_service, filter_data_service
 
@@ -212,3 +214,85 @@ async def test_export_excel_excludes_identifier_columns(monkeypatch):
     assert "Female" in shared_strings
     assert "Participant ID" not in shared_strings
     assert "hidden@example.com" not in shared_strings
+
+
+@pytest.mark.anyio
+async def test_pivot_returns_elements_for_known_survey():
+    survey_id = str(uuid4())
+    participant_id = uuid4()
+    element_id = uuid4()
+    captured = {}
+
+    class _DataResult:
+        def all(self):
+            return [
+                SimpleNamespace(
+                    participant_id=participant_id,
+                    gender="Female",
+                    pronouns="she/her",
+                    primary_language="English",
+                    occupation_status="Employed",
+                    living_arrangement="Apartment",
+                    highest_education_level="College",
+                    dependents=1,
+                    marital_status="Single",
+                    dob=None,
+                    element_id=element_id,
+                    element_label="Blood Pressure",
+                    unit="mmHg",
+                    value_text=None,
+                    value_number=118.0,
+                    value_date=None,
+                    value_json=None,
+                    source_type="survey",
+                    source_submission_id=uuid4(),
+                    observed_at=None,
+                )
+            ]
+
+    db = AsyncMock()
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        filter_data_service,
+        "resolve_participant_ids",
+        AsyncMock(return_value=[participant_id]),
+    )
+    call_count = {"value": 0}
+
+    async def fake_execute(stmt):
+        captured["stmt"] = stmt
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            class _CountResult:
+                def scalar_one(self):
+                    return 1
+
+            return _CountResult()
+        if call_count["value"] == 2:
+            class _ParticipantIdsResult:
+                def scalars(self):
+                    return self
+
+                def all(self):
+                    return [participant_id]
+
+            return _ParticipantIdsResult()
+        return _DataResult()
+
+    db.execute.side_effect = fake_execute
+
+    result = await filter_data_service.get_survey_results_pivoted(
+        db,
+        survey_id=survey_id,
+        filters=ParticipantFilter(source_types=["survey", "goal"]),
+    )
+
+    compiled = str(captured["stmt"].compile(dialect=postgresql.dialect()))
+
+    assert "field_element_map" in compiled
+    assert "form_fields" in compiled
+    assert "row_number() OVER (PARTITION BY health_data_points.participant_id, health_data_points.element_id ORDER BY health_data_points.observed_at DESC)" in compiled
+    assert "health_data_points.source_submission_id = form_submissions.submission_id" not in compiled
+    assert any(col["id"] == str(element_id) for col in result["columns"])
+    assert len(result["data"]) == 1
+    monkeypatch.undo()

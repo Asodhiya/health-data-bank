@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 from datetime import datetime, date, timezone
+from typing import Any
 
 from app.db.session import get_db
 from app.core.dependency import check_current_user, require_permissions
@@ -37,6 +38,18 @@ from app.services.notification_service import create_notifications_bulk
 router = APIRouter()
 
 INTAKE_FORM_TITLE = "Intake Form"
+PROFILE_FIELD_NAMES = {
+    "dob",
+    "gender",
+    "pronouns",
+    "primary_language",
+    "country_of_origin",
+    "marital_status",
+    "highest_education_level",
+    "living_arrangement",
+    "dependents",
+    "occupation_status",
+}
 
 
 async def _get_intake_form(db: AsyncSession) -> SurveyForm:
@@ -51,6 +64,117 @@ async def _get_intake_form(db: AsyncSession) -> SurveyForm:
     return form
 
 
+async def _find_intake_form(db: AsyncSession) -> SurveyForm | None:
+    result = await db.execute(
+        select(SurveyForm)
+        .where(SurveyForm.title == INTAKE_FORM_TITLE)
+        .options(selectinload(SurveyForm.fields).selectinload(FormField.options))
+    )
+    return result.scalar_one_or_none()
+
+
+async def _get_or_create_intake_form(db: AsyncSession, created_by) -> SurveyForm:
+    form = await _find_intake_form(db)
+    if form:
+        return form
+
+    form = SurveyForm(
+        title=INTAKE_FORM_TITLE,
+        description="Participant onboarding intake form",
+        status="DRAFT",
+        version=1,
+        created_by=created_by,
+    )
+    db.add(form)
+    await db.flush()
+    await db.refresh(form)
+    return await _find_intake_form(db)
+
+
+def _serialize_intake_field(field: FormField) -> dict[str, Any]:
+    return {
+        "field_id": str(field.field_id),
+        "label": field.label,
+        "field_type": field.field_type,
+        "is_required": field.is_required,
+        "display_order": field.display_order,
+        "profile_field": field.profile_field,
+        "options": [
+            {
+                "label": o.label,
+                "value": o.value,
+                "display_order": o.display_order,
+            }
+            for o in sorted(field.options, key=lambda x: x.display_order)
+        ],
+    }
+
+
+def _minimum_adult_dob(today: date | None = None) -> date:
+    today = today or date.today()
+    try:
+        return date(today.year - 18, today.month, today.day)
+    except ValueError:
+        return date(today.year - 18, today.month, today.day - 1)
+
+
+def _normalize_profile_field_value(profile_field: str, value: Any) -> Any:
+    if value is None:
+        return None
+
+    if profile_field == "dob":
+        if isinstance(value, str):
+            try:
+                parsed = date.fromisoformat(value)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Date of birth must be a valid date.") from exc
+        elif isinstance(value, date):
+            parsed = value
+        else:
+            raise HTTPException(status_code=400, detail="Date of birth must be a valid date.")
+        if parsed > date.today():
+            raise HTTPException(status_code=400, detail="Date of birth cannot be in the future.")
+        if parsed > _minimum_adult_dob():
+            raise HTTPException(status_code=400, detail="Participant must be at least 18 years old.")
+        return parsed
+
+    if profile_field == "dependents":
+        if value == "":
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Dependents must be a whole number.") from exc
+        if parsed < 0:
+            raise HTTPException(status_code=400, detail="Dependents cannot be negative.")
+        return parsed
+
+    if isinstance(value, list):
+        return ", ".join(str(v).strip() for v in value if str(v).strip())
+
+    if isinstance(value, dict):
+        raise HTTPException(status_code=400, detail=f"{profile_field} cannot store a structured object.")
+
+    text = str(value).strip()
+    return text or None
+
+
+def _resolve_profile_field_raw_value(field: FormField, raw_value: Any) -> Any:
+    if not field.options:
+        return raw_value
+
+    option_map = {
+        option.value: option.label
+        for option in field.options
+        if option.label is not None
+    }
+
+    if isinstance(raw_value, list):
+        return [option_map.get(value, value) for value in raw_value]
+
+    return option_map.get(raw_value, raw_value)
+
+
 @router.get("/form")
 async def get_intake_form(
     db: AsyncSession = Depends(get_db),
@@ -63,22 +187,7 @@ async def get_intake_form(
         "title": form.title,
         "description": form.description,
         "fields": [
-            {
-                "field_id": f.field_id,
-                "label": f.label,
-                "field_type": f.field_type,
-                "is_required": f.is_required,
-                "display_order": f.display_order,
-                "options": [
-                    {
-                        "option_id": o.option_id,
-                        "label": o.label,
-                        "value": o.value,
-                        "display_order": o.display_order,
-                    }
-                    for o in sorted(f.options, key=lambda x: x.display_order)
-                ],
-            }
+            _serialize_intake_field(f)
             for f in sorted(form.fields, key=lambda x: x.display_order)
         ],
     }
@@ -99,22 +208,11 @@ async def submit_intake(
     if not participant:
         raise HTTPException(status_code=404, detail="Participant profile not found.")
 
-    # 1. Update participant_profiles with profile fields
-    profile_data = payload.profile.model_dump(exclude_none=True)
-    if "dob" in profile_data and isinstance(profile_data["dob"], str):
-        profile_data["dob"] = date.fromisoformat(profile_data["dob"])
-    profile_data["program_enrolled_at"] = datetime.now(timezone.utc)
-    if profile_data:
-        await db.execute(
-            update(ParticipantProfile)
-            .where(ParticipantProfile.participant_id == participant.participant_id)
-            .values(**profile_data)
-        )
-
-    # 2. Find the intake form
+    # 1. Find the intake form
     form = await _get_intake_form(db)
+    form_fields = {field.field_id: field for field in form.fields}
 
-    # 3. Check for existing intake submission — if already submitted, return success
+    # 2. Check for existing intake submission — if already submitted, return success
     #    so the frontend can proceed to call /complete (handles crash-recovery gracefully)
     existing = await db.execute(
         select(FormSubmission).where(
@@ -127,7 +225,7 @@ async def submit_intake(
     if existing_sub:
         return {"message": "Intake already submitted.", "submission_id": str(existing_sub.submission_id)}
 
-    # 4. Create the form submission (no deployment check — intake is open to all participants)
+    # 3. Create the form submission (no deployment check — intake is open to all participants)
     submission = FormSubmission(
         form_id=form.form_id,
         participant_id=participant.participant_id,
@@ -137,12 +235,33 @@ async def submit_intake(
     db.add(submission)
     await db.flush()
 
-    # 5. Save answers
-    answer_records = _build_answer_records(payload.answers, submission.submission_id)
+    # 4. Save answers and collect mapped profile updates
+    answer_records = _build_answer_records([answer.model_dump() for answer in payload.answers], submission.submission_id)
+    profile_updates: dict[str, Any] = {
+        "program_enrolled_at": datetime.now(timezone.utc),
+    }
     for record, *_ in answer_records:
         db.add(record)
 
-    # 6. Project mapped fields into HealthDataPoint (if any field has an element_id mapping)
+    for _, field_uuid, val_text, val_num, val_json in answer_records:
+        field = form_fields.get(field_uuid)
+        if not field or not field.profile_field:
+            continue
+        if field.profile_field not in PROFILE_FIELD_NAMES:
+            continue
+
+        raw_value = val_json if val_json is not None else val_num if val_num is not None else val_text
+        raw_value = _resolve_profile_field_raw_value(field, raw_value)
+        profile_updates[field.profile_field] = _normalize_profile_field_value(field.profile_field, raw_value)
+
+    if profile_updates:
+        await db.execute(
+            update(ParticipantProfile)
+            .where(ParticipantProfile.participant_id == participant.participant_id)
+            .values(**profile_updates)
+        )
+
+    # 5. Project mapped fields into HealthDataPoint (if any field has an element_id mapping)
     field_ids = [field_uuid for _, field_uuid, *_ in answer_records]
     if field_ids:
         map_result = await db.execute(
@@ -341,22 +460,18 @@ async def get_admin_intake_form(
     current_user: User = Depends(check_current_user),
 ):
     """Return the intake form with all fields and options (admin view)."""
-    form = await _get_intake_form(db)
+    form = await _find_intake_form(db)
+    if not form:
+        return {
+            "form_id": None,
+            "title": INTAKE_FORM_TITLE,
+            "fields": [],
+        }
     return {
         "form_id": str(form.form_id),
         "title": form.title,
         "fields": [
-            {
-                "field_id": str(f.field_id),
-                "label": f.label,
-                "field_type": f.field_type,
-                "is_required": f.is_required,
-                "display_order": f.display_order,
-                "options": [
-                    {"label": o.label, "value": o.value, "display_order": o.display_order}
-                    for o in sorted(f.options, key=lambda x: x.display_order)
-                ],
-            }
+            _serialize_intake_field(f)
             for f in sorted(form.fields, key=lambda x: x.display_order)
         ],
     }
@@ -369,7 +484,7 @@ async def update_intake_form_route(
     current_user: User = Depends(check_current_user),
 ):
     """Update the intake form fields in-place (replaces all fields)."""
-    form = await _get_intake_form(db)
+    form = await _get_or_create_intake_form(db, current_user.user_id)
 
     # Delete existing fields (cascades to options via FK)
     existing_fields = (await db.execute(
@@ -381,10 +496,14 @@ async def update_intake_form_route(
 
     # Create new fields and options
     for i, field_data in enumerate(payload.fields):
+        profile_field = field_data.get("profile_field") or None
+        if profile_field is not None and profile_field not in PROFILE_FIELD_NAMES:
+            raise HTTPException(status_code=400, detail=f"Unsupported profile field mapping: {profile_field}")
         new_field = FormField(
             form_id=form.form_id,
             label=field_data["label"],
             field_type=field_data["field_type"],
+            profile_field=profile_field,
             is_required=field_data.get("is_required", False),
             display_order=field_data.get("display_order", i + 1),
         )

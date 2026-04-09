@@ -607,6 +607,9 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  researcherGetSubmissionDetail: (participantId, submissionId) =>
+    request(`/researcher/participants/${participantId}/submissions/${submissionId}`),
+
   // Groups
   caretakerGetGroups: () => request("/caretaker/groups"),
 
@@ -772,29 +775,34 @@ export const api = {
   // ── Researcher Analytics ──
 
   getAvailableSurveys: () => request("/researcher/query/available-surveys"),
+  getResearcherQueryConfig: () => request("/researcher/query/config"),
 
-  getResearcherResults: (params = {}) => {
-    const sp = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        value.forEach((v) => sp.append(key, v));
-      } else {
-        sp.append(key, value);
-      }
-    });
-    const qs = sp.toString();
-    return request(`/researcher/query/results${qs ? `?${qs}` : ""}`);
-  },
+  getResearcherResults: (payload = {}) =>
+    request("/researcher/query/results", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getResearcherResultsGrouped: (payload = {}) =>
+    request("/researcher/query/results/grouped", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   // 3. Generate the CSV file download URL
   // We don't use the standard request() here because we need to handle a file Blob, not JSON!
-  downloadResearcherResults: async (params = {}, excludeColumns = []) => {
-    const allParams = { ...params };
-    if (excludeColumns.length > 0) allParams.exclude_columns = excludeColumns.join(",");
-    const qs = new URLSearchParams(allParams).toString();
+  downloadResearcherResults: async (payload = {}, excludeColumns = [], filename = null) => {
     const res = await fetch(
-      `${API_BASE}/researcher/query/results/download${qs ? `?${qs}` : ""}`,
-      { credentials: "include" },
+      `${API_BASE}/researcher/query/results/download`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          exclude_columns: excludeColumns,
+        }),
+      },
     );
 
     if (!res.ok) throw new Error("Failed to download CSV");
@@ -803,12 +811,99 @@ export const api = {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `research_export_${new Date().toISOString().split("T")[0]}.csv`;
+    a.download = filename || `research_export_${new Date().toISOString().split("T")[0]}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     window.URL.revokeObjectURL(url);
   },
+
+  downloadResearcherResultsExcel: async (payload = {}, excludeColumns = [], filename = null) => {
+    const res = await fetch(
+      `${API_BASE}/researcher/query/results/download.xlsx`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          exclude_columns: excludeColumns,
+        }),
+      },
+    );
+
+    if (!res.ok) throw new Error("Failed to download Excel file");
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename || `research_export_${new Date().toISOString().split("T")[0]}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  downloadResearcherResultsGrouped: async (payload = {}, excludeColumns = [], filename = null) => {
+    const res = await fetch(
+      `${API_BASE}/researcher/query/results/grouped/download`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          exclude_columns: excludeColumns,
+        }),
+      },
+    );
+
+    if (!res.ok) throw new Error("Failed to download grouped CSV");
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename || `research_grouped_export_${new Date().toISOString().split("T")[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  downloadResearcherResultsGroupedExcel: async (payload = {}, excludeColumns = [], filename = null) => {
+    const res = await fetch(
+      `${API_BASE}/researcher/query/results/grouped/download.xlsx`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          exclude_columns: excludeColumns,
+        }),
+      },
+    );
+
+    if (!res.ok) throw new Error("Failed to download grouped Excel file");
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename || `research_grouped_export_${new Date().toISOString().split("T")[0]}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  getResearcherTimeseries: (payload) =>
+    request("/researcher/query/timeseries", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   // ── Goal Templates (Researcher) ──
   listGoalTemplates: () => request("/goal-templates"),

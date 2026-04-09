@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -127,6 +127,86 @@ async def test_delete_user_anonymize_writes_audit_in_same_transaction(monkeypatc
     assert user.phone is None
     assert mock_audit.await_args.kwargs["action"] == "USER_ANONYMIZED"
     assert mock_audit.await_args.kwargs["commit"] is False
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_delete_user_permanent_cleans_dependencies_before_deleting_user(monkeypatch):
+    user_id = uuid4()
+    actor_id = uuid4()
+    user = SimpleNamespace(
+        user_id=user_id,
+        email="inactive@example.com",
+        username="inactive_user",
+        status=False,
+        first_name="Inactive",
+        last_name="User",
+        password_hash="hash",
+        phone="1112223333",
+        Address="123 Main",
+        last_login_at=datetime.now(timezone.utc),
+        reset_token_hash="reset",
+        reset_token_expires_at=datetime.now(timezone.utc),
+        failed_login_attempts=4,
+        locked_until=datetime.now(timezone.utc) + timedelta(minutes=5),
+    )
+    participant_profile = SimpleNamespace(
+        user_id=user_id,
+        dob=date(2000, 1, 1),
+        gender="Male",
+        pronouns="He/Him",
+        primary_language="English",
+        occupation_status="Student",
+        living_arrangement="With Family",
+        highest_education_level="College",
+        dependents=1,
+        marital_status="Single",
+        country_of_origin="Canada",
+        address="123 Main",
+    )
+    caretaker_profile = SimpleNamespace(
+        user_id=user_id,
+        title="Dr.",
+        organization="Org",
+        credentials="RN",
+        department="Dept",
+        specialty="Care",
+        bio="Bio",
+        working_hours_start="09:00",
+        working_hours_end="17:00",
+        contact_preference="email",
+        available_days=["Mon"],
+    )
+    db = AsyncMock()
+    db.delete = AsyncMock()
+    db.scalar = AsyncMock(
+        side_effect=[
+            user,          # load user
+            0,             # owned forms
+            participant_profile,
+            caretaker_profile,
+            None,          # researcher profile
+            None,          # admin profile
+        ]
+    )
+
+    mock_audit = AsyncMock()
+    monkeypatch.setattr(audit_service, "write_audit_log", mock_audit)
+    monkeypatch.setattr(admin_service, "_deactivate_participant_group_memberships", AsyncMock(return_value=1))
+    monkeypatch.setattr(admin_service, "_unassign_groups_for_caretaker_user", AsyncMock(return_value=1))
+
+    result = await admin_service.delete_user(user_id, "permanent", actor_id, db)
+
+    assert result["detail"] == "User account deleted and retained data anonymized successfully"
+    db.delete.assert_not_called()
+    assert db.execute.await_count > 5
+    assert mock_audit.await_args.kwargs["action"] == "USER_DELETED"
+    assert user.first_name == "Deleted"
+    assert user.phone is None
+    assert user.status is False
+    assert participant_profile.dob is None
+    assert participant_profile.gender is None
+    assert caretaker_profile.title is None
     db.commit.assert_awaited_once()
 
 

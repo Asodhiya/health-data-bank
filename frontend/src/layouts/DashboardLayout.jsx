@@ -45,7 +45,7 @@ export default function DashboardLayout({ role }) {
         <div className="flex items-center gap-4">
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="md:hidden text-slate-500 hover:text-slate-800"
+            className="text-slate-500 hover:text-slate-800"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -148,10 +148,10 @@ export default function DashboardLayout({ role }) {
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Mobile Backdrop */}
+        {/* Sidebar Backdrop */}
         {isSidebarOpen && (
           <div
-            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            className="fixed inset-0 bg-black/50 z-40"
             onClick={() => setIsSidebarOpen(false)}
           ></div>
         )}
@@ -160,7 +160,7 @@ export default function DashboardLayout({ role }) {
         <aside
           className={`${
             isSidebarOpen ? "translate-x-0" : "-translate-x-full"
-          } fixed top-0 left-0 z-50 h-screen w-64 shadow-xl transition-transform duration-300 ease-in-out md:translate-x-0 md:relative md:z-auto md:shadow-none bg-white border-r border-gray-200 md:flex md:flex-col md:w-64`}
+          } fixed top-0 left-0 z-50 h-screen w-64 shadow-xl transition-transform duration-300 ease-in-out bg-white border-r border-gray-200 flex flex-col`}
         >
           <nav className="flex-1 p-6 flex flex-col gap-2">
             {/* USER PROFILE CARD */}

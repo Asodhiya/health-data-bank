@@ -2009,18 +2009,139 @@ async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession
                 status_code=400,
                 detail="This user still owns forms. Use anonymize instead of permanent delete.",
             )
-        await db.delete(user)
+
+        memberships_closed = await _deactivate_participant_group_memberships(db, user_id)
+        if memberships_closed:
+            _invalidate_groups_cache()
+
+        groups_unassigned = await _unassign_groups_for_caretaker_user(db, user_id)
+        if groups_unassigned:
+            _invalidate_groups_cache()
+        _invalidate_caretakers_cache()
+
+        await db.execute(
+            sa_delete(SignupInvite).where(SignupInvite.invited_by == user_id)
+        )
+        await db.execute(
+            sa_delete(Notification).where(Notification.user_id == user_id)
+        )
+        await db.execute(
+            sa_delete(Reminder).where(Reminder.user_id == user_id)
+        )
+        await db.execute(
+            sa_delete(Session).where(Session.user_id == user_id)
+        )
+        await db.execute(
+            sa_delete(Device).where(Device.user_id == user_id)
+        )
+        await db.execute(
+            sa_delete(MFAMethod).where(MFAMethod.user_id == user_id)
+        )
+
+        nullable_user_fk_updates = (
+            (Group, Group.created_by),
+            (SurveyForm, SurveyForm.created_by),
+            (FormDeployment, FormDeployment.deployed_by),
+            (GoalTemplate, GoalTemplate.created_by),
+            (Report, Report.requested_by),
+            (Backup, Backup.created_by),
+            (RestoreEvent, RestoreEvent.restored_by),
+            (AuditLog, AuditLog.actor_user_id),
+            (Notification, Notification.user_id),
+            (Reminder, Reminder.user_id),
+            (SystemFeedback, SystemFeedback.user_id),
+            (SystemFeedback, SystemFeedback.reviewed_by),
+            (ConsentFormTemplate, ConsentFormTemplate.created_by),
+            (BackgroundInfoTemplate, BackgroundInfoTemplate.created_by),
+            (BackupScheduleSettings, BackupScheduleSettings.updated_by),
+            (SystemMaintenanceSettings, SystemMaintenanceSettings.updated_by),
+        )
+        for model, column in nullable_user_fk_updates:
+            await db.execute(
+                update(model).where(column == user_id).values({column.key: None})
+            )
+
+        await db.execute(
+            sa_delete(UserRole).where(UserRole.user_id == user_id)
+        )
+
+        participant_profile = await db.scalar(
+            select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
+        )
+        if participant_profile:
+            participant_profile.dob = None
+            participant_profile.gender = None
+            participant_profile.pronouns = None
+            participant_profile.primary_language = None
+            participant_profile.occupation_status = None
+            participant_profile.living_arrangement = None
+            participant_profile.highest_education_level = None
+            participant_profile.dependents = None
+            participant_profile.marital_status = None
+            participant_profile.country_of_origin = None
+            participant_profile.address = None
+
+        caretaker_profile = await db.scalar(
+            select(CaretakerProfile).where(CaretakerProfile.user_id == user_id)
+        )
+        if caretaker_profile:
+            caretaker_profile.title = None
+            caretaker_profile.organization = None
+            caretaker_profile.credentials = None
+            caretaker_profile.department = None
+            caretaker_profile.specialty = None
+            caretaker_profile.bio = None
+            caretaker_profile.working_hours_start = None
+            caretaker_profile.working_hours_end = None
+            caretaker_profile.contact_preference = None
+            caretaker_profile.available_days = None
+
+        researcher_profile = await db.scalar(
+            select(ResearcherProfile).where(ResearcherProfile.user_id == user_id)
+        )
+        if researcher_profile:
+            researcher_profile.title = None
+            researcher_profile.credentials = None
+            researcher_profile.organization = None
+            researcher_profile.department = None
+            researcher_profile.specialty = None
+            researcher_profile.bio = None
+
+        admin_profile = await db.scalar(
+            select(AdminProfile).where(AdminProfile.user_id == user_id)
+        )
+        if admin_profile:
+            admin_profile.title = None
+            admin_profile.role_title = None
+            admin_profile.department = None
+            admin_profile.organization = None
+            admin_profile.bio = None
+
+        user.username = f"deleted_{str(user_id).replace('-', '')[:20]}"
+        user.first_name = "Deleted"
+        user.last_name = f"User #{str(user_id)[:8]}"
+        user.email = f"deleted_{user_id}@deleted.local"
+        user.password_hash = hashlib.sha256(f"deleted:{user_id}".encode("utf-8")).hexdigest()
+        user.phone = None
+        user.Address = None
+        user.status = False
+        user.last_login_at = None
+        user.reset_token_hash = None
+        user.reset_token_expires_at = None
+        user.failed_login_attempts = 0
+        user.locked_until = None
+
         await write_audit_log(
             db,
             action="USER_DELETED",
             actor_user_id=actor_id,
             entity_type="user",
             entity_id=user_id,
-            details={"mode": "delete"},
+            details={"mode": "delete", "retained_data": True, "identity_scrubbed": True},
             commit=False,
         )
         await db.commit()
-        return {"detail": "User deleted successfully"}
+        return {"detail": "User account deleted and retained data anonymized successfully"}
 
     else:
         raise HTTPException(status_code=400, detail="mode must be 'anonymize' or 'delete'")

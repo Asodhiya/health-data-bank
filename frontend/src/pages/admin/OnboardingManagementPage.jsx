@@ -41,6 +41,20 @@ const FIELD_TYPES = [
   { value: "textarea", label: "Text area" },
 ];
 
+const PROFILE_FIELD_OPTIONS = [
+  { value: "", label: "None" },
+  { value: "dob", label: "Date of birth" },
+  { value: "gender", label: "Gender" },
+  { value: "pronouns", label: "Pronouns" },
+  { value: "primary_language", label: "Primary language" },
+  { value: "country_of_origin", label: "Country of origin" },
+  { value: "marital_status", label: "Marital status" },
+  { value: "highest_education_level", label: "Highest education level" },
+  { value: "living_arrangement", label: "Living arrangement" },
+  { value: "dependents", label: "Dependents" },
+  { value: "occupation_status", label: "Occupation / status" },
+];
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function moveItem(arr, from, to) {
   const copy = [...arr];
@@ -343,6 +357,11 @@ function BackgroundEditor({ background, setBackground }) {
 // ═════════════════════════════════════════════════════════════════════════════
 function IntakeEditor({ intakeFields, setIntakeFields }) {
   const hasSelectOptions = (type) => ["single_select", "multi_select", "dropdown"].includes(type);
+  const mappedCounts = intakeFields.reduce((acc, field) => {
+    if (!field.profile_field) return acc;
+    acc[field.profile_field] = (acc[field.profile_field] || 0) + 1;
+    return acc;
+  }, {});
 
   const updateField = (idx, key, value) => {
     const next = [...intakeFields];
@@ -356,7 +375,7 @@ function IntakeEditor({ intakeFields, setIntakeFields }) {
   const addField = () => {
     setIntakeFields([
       ...intakeFields,
-      { label: "", field_type: "text", is_required: true, display_order: intakeFields.length + 1, options: [] },
+      { label: "", field_type: "text", is_required: true, display_order: intakeFields.length + 1, profile_field: "", options: [] },
     ]);
   };
 
@@ -390,13 +409,20 @@ function IntakeEditor({ intakeFields, setIntakeFields }) {
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
         <h3 className="text-sm font-bold text-slate-700 mb-1">Intake form fields</h3>
         <p className="text-xs text-slate-400 mb-2">
-          These are the survey-style questions on the intake page
+          These are the intake questions shown to participants during onboarding
         </p>
         <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 mb-5">
           <p className="text-xs text-blue-600">
-            The intake page always includes fixed demographics (Name, DOB, Sex, Pronouns, Language, Marital Status, Education, Living Arrangement, Dependents, Occupation). The fields below appear in the Lifestyle &amp; Wellness section after demographics.
+            Map a field to a participant profile column when its answer should also update the participant record.
           </p>
         </div>
+        {Object.values(mappedCounts).some((count) => count > 1) && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5">
+            <p className="text-xs text-amber-700">
+              Warning: two or more intake fields map to the same profile field. The last answered field will win on submit.
+            </p>
+          </div>
+        )}
 
         <div className="space-y-4">
           {intakeFields.map((field, idx) => (
@@ -432,6 +458,27 @@ function IntakeEditor({ intakeFields, setIntakeFields }) {
                       />
                       <span className="text-xs font-medium text-slate-500">Required</span>
                     </label>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                      Profile field mapping
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <select
+                        value={field.profile_field || ""}
+                        onChange={(e) => updateField(idx, "profile_field", e.target.value)}
+                        className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                      >
+                        {PROFILE_FIELD_OPTIONS.map((opt) => (
+                          <option key={opt.value || "none"} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                      {field.profile_field && mappedCounts[field.profile_field] > 1 && (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700">
+                          Duplicate mapping
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {hasSelectOptions(field.field_type) && (
                     <div className="pl-2 border-l-2 border-violet-200 space-y-2">
@@ -617,7 +664,7 @@ function IntakePreview({ intakeFields }) {
         <p className="text-sm text-slate-400">Preview of intake form fields</p>
       </div>
       <p className="text-xs text-slate-400 italic mb-4">
-        Demographics section (DOB, Sex, Pronouns, etc.) appears above these fields.
+        Fields mapped to profile columns update participant profile data as well as the intake submission.
       </p>
       <div className="space-y-3">
         {intakeFields.map((field, idx) => (
@@ -627,6 +674,11 @@ function IntakePreview({ intakeFields }) {
               {field.label || "(empty)"}
               {field.is_required && <span className="text-rose-500 ml-0.5">*</span>}
             </p>
+            {field.profile_field && (
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-blue-600">
+                Maps to {PROFILE_FIELD_OPTIONS.find((opt) => opt.value === field.profile_field)?.label || field.profile_field}
+              </p>
+            )}
             {["single_select", "multi_select", "dropdown"].includes(field.field_type) ? (
               <div className="flex flex-wrap gap-2">
                 {(field.options || []).map((opt, oi) => (
@@ -702,6 +754,7 @@ export default function OnboardingManagementPage() {
               field_type: f.field_type,
               is_required: f.is_required,
               display_order: f.display_order,
+              profile_field: f.profile_field || "",
               options: (f.options || []).map((o) => ({
                 label: o.label || "",
                 value: o.value,

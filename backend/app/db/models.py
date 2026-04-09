@@ -340,6 +340,7 @@ class FormField(Base):
     form_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id", ondelete="CASCADE"))
     label: Mapped[str] = mapped_column(Text, nullable=False)
     field_type: Mapped[str] = mapped_column(Text, nullable=False)
+    profile_field: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_required: Mapped[bool | None] = mapped_column(Boolean, server_default=text("FALSE"))
     display_order: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
     parent_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("form_fields.field_id"))
