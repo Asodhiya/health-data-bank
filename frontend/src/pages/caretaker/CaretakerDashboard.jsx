@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useOutletContext, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import NotificationsPanel from "../../components/NotificationsPanel";
@@ -249,7 +249,6 @@ function StatCards({
 // ─── Main Dashboard ─────────────────────────────────────────────────────────────
 
 export default function CaretakerDashboard() {
-  useOutletContext();
   const navigate = useNavigate();
   const [groups, setGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("all");
@@ -260,47 +259,61 @@ export default function CaretakerDashboard() {
   const [loading, setLoading] = useState(true);
   const selectedGroupQuery = selectedGroupId === "all" ? null : selectedGroupId;
 
-  const fetchData = useCallback(async () => {
+  // B23: previously this loader was a single useCallback whose dep array
+  // included both `selectedGroupQuery` AND `groups.length`. On initial mount
+  // groups.length was 0, the callback ran, fetched groups, set them — which
+  // changed groups.length and recreated the callback, which the useEffect
+  // then re-fired. Net result: every page load fired
+  // caretakerListParticipants and caretakerGetActivityCounts twice. Splitting
+  // the groups-once fetch into its own effect breaks the cycle.
+  useEffect(() => {
+    let cancelled = false;
+    api.caretakerGetGroups()
+      .then(data => {
+        if (cancelled) return;
+        const transformed = Array.isArray(data)
+          ? data.map(g => ({ id: g.group_id, name: g.name, description: g.description || "" }))
+          : [];
+        setGroups(transformed);
+      })
+      .catch(() => { if (!cancelled) setGroups([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Activity counts + participants — refetched whenever the selected group
+  // changes, but not when groups.length flips from 0 to N.
+  const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const groupData = await api.caretakerGetGroups().catch(() => []);
+      const [countsData, participantsData] = await Promise.all([
+        api.caretakerGetActivityCounts(selectedGroupQuery).catch(() => ({
+          highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0,
+        })),
+        api.caretakerListParticipants({
+          limit: 50,
+          offset: 0,
+          sort_by: "name",
+          ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
+        }).catch(() => null),
+      ]);
 
-      const transformedGroups = Array.isArray(groupData)
-        ? groupData.map(g => ({ id: g.group_id, name: g.name, description: g.description || "" }))
-        : [];
-      setGroups(transformedGroups);
+      setActivityCounts({
+        highly_active: Number(countsData?.highly_active || 0),
+        moderately_active: Number(countsData?.moderately_active || 0),
+        low_active: Number(countsData?.low_active || 0),
+        inactive: Number(countsData?.inactive || 0),
+      });
+
+      // B8: response is { items, total_count }; dashboard only needs items.
+      setParticipants(Array.isArray(participantsData?.items) ? participantsData.items : []);
     } catch (err) {
       console.error("Failed to load dashboard data:", err);
     } finally {
       setLoading(false);
     }
-  }, []);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  useEffect(() => {
-    api.caretakerGetActivityCounts(selectedGroupQuery)
-      .then((counts) => {
-        setActivityCounts({
-          highly_active: Number(counts?.highly_active || 0),
-          moderately_active: Number(counts?.moderately_active || 0),
-          low_active: Number(counts?.low_active || 0),
-          inactive: Number(counts?.inactive || 0),
-        });
-      })
-      .catch(() => setActivityCounts({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 }));
   }, [selectedGroupQuery]);
 
-  useEffect(() => {
-    api.caretakerListParticipants({
-      limit: 50,
-      offset: 0,
-      sort_by: "name",
-      ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
-    })
-      .then((pList) => setParticipants(Array.isArray(pList) ? pList : []))
-      .catch(() => setParticipants([]));
-  }, [selectedGroupQuery]);
+  useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
   const filteredParticipants = useMemo(() => participants, [participants]);
 

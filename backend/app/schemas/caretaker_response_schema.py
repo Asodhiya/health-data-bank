@@ -77,6 +77,19 @@ class ParticipantListItem(BaseModel):
     last_submission_at: Optional[date] = None
 
 
+class PaginatedParticipants(BaseModel):
+    """Response wrapper for /caretaker/participants.
+
+    `total_count` is the total number of rows matching the SQL-level filters
+    (q, status, gender, age, has_alerts, survey_progress, group_id), ignoring
+    the goal_progress filter — that one is applied in Python after the SQL
+    fetch (a known limitation tracked as B22). When goal_progress is set,
+    `total_count` is therefore an upper bound on the real total.
+    """
+    items: List[ParticipantListItem]
+    total_count: int = 0
+
+
 class ParticipantActivityCounts(BaseModel):
     highly_active: int = 0
     moderately_active: int = 0
@@ -193,6 +206,10 @@ class ReportGenerateRequest(BaseModel):
     date_to: Optional[date] = None
     element_ids: list[UUID] = Field(default_factory=list)  # filter by data elements
     report_type: Literal["numeric", "graph"] = "numeric"
+    # Reports v2: filter the underlying participant set by activity status.
+    # "all" includes everyone, "active" only highly_active+moderately_active,
+    # "inactive" only inactive (matches the dashboard's bucket definitions).
+    participant_status: Literal["all", "active", "inactive"] = "all"
 
 
 class ComparisonReportRequest(BaseModel):
@@ -225,6 +242,28 @@ class GroupDataElementItem(BaseModel):
     label: Optional[str] = None
     unit: Optional[str] = None
     datatype: Optional[str] = None
+    # Reports v2: richer metadata for the metric picker.
+    description: Optional[str] = None
+    form_names: List[str] = Field(default_factory=list)
+    data_point_count: int = 0
+
+
+class ParticipantDataElementItem(BaseModel):
+    """Reports v2: data elements relevant to a single participant.
+
+    Returned by GET /caretaker/participants/{id}/data-elements. Includes any
+    element either currently deployed to one of the participant's groups OR
+    with at least one HealthDataPoint for the participant — whichever applies.
+    """
+    element_id: UUID
+    code: Optional[str] = None
+    label: Optional[str] = None
+    unit: Optional[str] = None
+    datatype: Optional[str] = None
+    description: Optional[str] = None
+    form_names: List[str] = Field(default_factory=list)
+    data_point_count: int = 0
+    is_currently_deployed: bool = False
 
 
 class GroupCreateRequest(BaseModel):
@@ -299,6 +338,10 @@ class CaretakerProfileUpdate(BaseModel):
     working_hours_end: Optional[str] = None
     contact_preference: Optional[str] = None
     available_days: Optional[List[str]] = None
+    # B19: explicit signal from the onboarding page that the caretaker has
+    # finished initial setup. Other profile-edit clients (e.g. ProfilePage)
+    # should leave this unset so it preserves whatever value is in the DB.
+    onboarding_completed: Optional[bool] = None
 
 
 class CaretakerProfileOut(BaseModel):

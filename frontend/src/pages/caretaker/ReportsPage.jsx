@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useOutletContext, useSearchParams } from "react-router-dom";
 import { api } from "../../services/api";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Legend } from "recharts";
 
@@ -28,26 +28,63 @@ function ScopeBadge({ scope }) {
 
 // ─── Shared: MetricPicker (driven by real elements) ─────────────────────────────
 
-function MetricPicker({ elements, selected, onChange, label = "Select Metrics" }) {
+// ─── Shared: MetricPicker (Reports v2 — grouped by form, with metadata) ────────
+//
+// Replaces the old hardcoded inferCategory hack. Each metric is grouped by the
+// FIRST form_name that surfaces it (or "Other / Unmapped" if none). Each row
+// also shows the datatype badge and the data point count so caretakers know
+// what they're picking and how much data exists for it. The description (if
+// any) shows on hover.
+function MetricPicker({ elements, selected, onChange, label = "Select Metrics", emptyMessage = "No metrics available." }) {
   const [expanded, setExpanded] = useState(false);
 
-  const categories = useMemo(() => {
-    const cats = {};
+  // Group by primary form. Multi-form elements appear under their first form
+  // alphabetically — keeps the grouping deterministic without duplicating rows.
+  const groups = useMemo(() => {
+    const out = {};
     elements.forEach(e => {
-      const cat = e.category || "Other";
-      if (!cats[cat]) cats[cat] = [];
-      cats[cat].push(e);
+      const forms = Array.isArray(e.form_names) && e.form_names.length > 0
+        ? [...e.form_names].sort()
+        : [];
+      const key = forms[0] || "Other / Unmapped";
+      if (!out[key]) out[key] = [];
+      out[key].push(e);
     });
-    return cats;
+    // Sort each group by label for stable display
+    Object.values(out).forEach(arr => arr.sort((a, b) => (a.label || "").localeCompare(b.label || "")));
+    return out;
   }, [elements]);
 
   const toggleMetric = (id) => onChange(selected.includes(id) ? selected.filter(k => k !== id) : [...selected, id]);
-  const toggleCategory = (cat) => {
-    const ids = categories[cat].map(e => e.element_id);
+  const toggleGroup = (groupKey) => {
+    const ids = groups[groupKey].map(e => e.element_id);
     const allSelected = ids.every(id => selected.includes(id));
     if (allSelected) onChange(selected.filter(id => !ids.includes(id)));
     else onChange([...new Set([...selected, ...ids])]);
   };
+
+  // Datatype → short badge label. Falls through to raw datatype if unknown.
+  const datatypeBadge = (dt) => {
+    if (!dt) return null;
+    const lower = String(dt).toLowerCase();
+    if (lower.includes("int") || lower.includes("number") || lower.includes("float") || lower.includes("decimal")) return { text: "number", className: "bg-blue-50 text-blue-600 border-blue-100" };
+    if (lower.includes("bool")) return { text: "yes/no", className: "bg-violet-50 text-violet-600 border-violet-100" };
+    if (lower.includes("scale") || lower.includes("rating")) return { text: "scale", className: "bg-amber-50 text-amber-600 border-amber-100" };
+    if (lower.includes("date") || lower.includes("time")) return { text: "date", className: "bg-emerald-50 text-emerald-600 border-emerald-100" };
+    if (lower.includes("text") || lower.includes("string")) return { text: "text", className: "bg-slate-50 text-slate-500 border-slate-100" };
+    return { text: lower, className: "bg-slate-50 text-slate-500 border-slate-100" };
+  };
+
+  if (elements.length === 0) {
+    return (
+      <div className="space-y-2">
+        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">{label}</label>
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
+          <p className="text-xs text-slate-400">{emptyMessage}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
@@ -74,32 +111,49 @@ function MetricPicker({ elements, selected, onChange, label = "Select Metrics" }
           })}
         </div>
       ) : (
-        <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 space-y-3 max-h-60 overflow-y-auto">
-          {Object.entries(categories).map(([cat, catElements]) => {
-            const allSelected = catElements.every(e => selected.includes(e.element_id));
-            const someSelected = catElements.some(e => selected.includes(e.element_id));
+        <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 space-y-3 max-h-72 overflow-y-auto">
+          {Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([groupKey, groupElements]) => {
+            const allSelected = groupElements.every(e => selected.includes(e.element_id));
+            const someSelected = groupElements.some(e => selected.includes(e.element_id));
             return (
-              <div key={cat}>
-                <button onClick={() => toggleCategory(cat)} className="flex items-center gap-2 mb-1.5 group">
-                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${allSelected ? "bg-blue-600 border-blue-600" : someSelected ? "bg-blue-200 border-blue-400" : "border-slate-300 group-hover:border-slate-400"}`}>
+              <div key={groupKey}>
+                <button onClick={() => toggleGroup(groupKey)} className="flex items-center gap-2 mb-1.5 group w-full text-left">
+                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${allSelected ? "bg-blue-600 border-blue-600" : someSelected ? "bg-blue-200 border-blue-400" : "border-slate-300 group-hover:border-slate-400"}`}>
                     {(allSelected || someSelected) && <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d={allSelected ? "M5 13l4 4L19 7" : "M20 12H4"} /></svg>}
                   </div>
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">{cat}</span>
+                  <span className="text-xs font-bold text-slate-600 truncate">{groupKey}</span>
+                  <span className="text-[10px] text-slate-400 ml-auto">{groupElements.length} metric{groupElements.length === 1 ? "" : "s"}</span>
                 </button>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 ml-6">
-                  {catElements.map(e => (
-                    <label key={e.element_id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white cursor-pointer transition-colors">
-                      <input type="checkbox" checked={selected.includes(e.element_id)} onChange={() => toggleMetric(e.element_id)} className="w-3.5 h-3.5 rounded accent-blue-600" />
-                      <span className="text-xs text-slate-700">{e.label}</span>
-                      <span className="text-xs text-slate-300 ml-auto">{e.unit}</span>
-                    </label>
-                  ))}
+                <div className="grid grid-cols-1 gap-1 ml-6">
+                  {groupElements.map(e => {
+                    const badge = datatypeBadge(e.datatype);
+                    const dpCount = Number(e.data_point_count || 0);
+                    const isDeployed = e.is_currently_deployed !== false; // group elements don't have this field; treat as deployed
+                    return (
+                      <label key={e.element_id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white cursor-pointer transition-colors group/row" title={e.description || ""}>
+                        <input type="checkbox" checked={selected.includes(e.element_id)} onChange={() => toggleMetric(e.element_id)} className="w-3.5 h-3.5 rounded accent-blue-600 shrink-0" />
+                        <span className="text-xs text-slate-700 truncate flex-1">{e.label}</span>
+                        {badge && (
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${badge.className} shrink-0`}>{badge.text}</span>
+                        )}
+                        {e.unit && <span className="text-[10px] text-slate-400 shrink-0">{e.unit}</span>}
+                        <span className={`text-[10px] font-semibold shrink-0 ${dpCount > 0 ? "text-slate-500" : "text-slate-300"}`} title={dpCount === 0 ? "No data points yet" : `${dpCount} data points`}>
+                          {dpCount}
+                        </span>
+                        {!isDeployed && (
+                          <span className="text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-100 px-1 py-0.5 rounded shrink-0" title="No longer collected via current forms — historical data only">historical</span>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             );
           })}
           <div className="flex gap-2 pt-2 border-t border-slate-200">
             <button onClick={() => onChange(elements.map(e => e.element_id))} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Select All</button>
+            <span className="text-xs text-slate-300">·</span>
+            <button onClick={() => onChange(elements.filter(e => Number(e.data_point_count || 0) > 0).map(e => e.element_id))} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Select With Data</button>
             <span className="text-xs text-slate-300">·</span>
             <button onClick={() => onChange([])} className="text-xs font-semibold text-slate-500 hover:text-slate-700">Clear All</button>
           </div>
@@ -151,27 +205,43 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
   const [chartMetric, setChartMetric] = useState(null);
   const [error, setError] = useState(null);
 
+  // Reports v2: when the elements pool changes (group switch or initial load)
+  // reset the metric selection to the first 4 from the new pool. Previously
+  // the metric list persisted across group switches, leading to invalid
+  // element_ids being submitted to the backend.
   useEffect(() => {
-    if (elements.length > 0 && metrics.length === 0) {
+    if (elements.length === 0) {
+      setMetrics([]);
+    } else {
       setMetrics(elements.slice(0, 4).map(e => e.element_id));
     }
   }, [elements]);
 
   const groupName = selectedGroupId === "all" ? "All Groups" : groups.find(g => g.id === selectedGroupId)?.name || "Group";
+  // Reports v2: explicit group required. Previously this silently fell back
+  // to groups[0] when "All Groups" was selected, generating a report for the
+  // wrong group without telling the user.
+  const requiresSpecificGroup = selectedGroupId === "all";
 
   async function handleGenerate() {
+    if (requiresSpecificGroup) {
+      setError("Please select a specific group from the dropdown above. Group reports cannot aggregate across all groups.");
+      return;
+    }
     setGenerating(true);
     setError(null);
     try {
-      const groupId = selectedGroupId !== "all" ? selectedGroupId : groups[0]?.id;
-      if (!groupId) { setError("No group selected."); setGenerating(false); return; }
       const payload = {
         element_ids: metrics,
         date_from: dateFrom || null,
         date_to: dateTo || null,
         report_type: reportType,
+        // Reports v2: participant_status is now wired to the backend filter.
+        // Previously this state existed but was never sent — the buttons
+        // were entirely cosmetic.
+        participant_status: statusFilter,
       };
-      const data = await api.caretakerGenerateGroupReport(groupId, payload);
+      const data = await api.caretakerGenerateGroupReport(selectedGroupId, payload);
       setReport(data.payload || data);
       const elems = data.payload?.elements || data.elements || [];
       if (elems.length > 0) setChartMetric(elems[0].element_id);
@@ -199,14 +269,19 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
             </div>
           </div>
 
-          {elements.length === 0 ? (
+          {requiresSpecificGroup ? (
+            <div className="rounded-xl border border-dashed border-amber-200 bg-amber-50 px-4 py-8 text-center">
+              <p className="text-sm font-semibold text-amber-700">Select a specific group to continue</p>
+              <p className="text-xs text-amber-600 mt-1">Group reports aggregate data within one group at a time. Pick one from the dropdown above.</p>
+            </div>
+          ) : elements.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
               <p className="text-sm text-slate-400">No data elements configured for this group yet.</p>
               <p className="text-xs text-slate-300 mt-1">Ask a researcher to set up data element mappings for the surveys deployed to this group.</p>
             </div>
           ) : (
             <>
-              <MetricPicker elements={elements} selected={metrics} onChange={setMetrics} />
+              <MetricPicker elements={elements} selected={metrics} onChange={setMetrics} emptyMessage="No metrics configured for this group." />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <DateRangeRow from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
                 <ReportTypeRow value={reportType} onChange={setReportType} />
@@ -218,6 +293,7 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
                     <button key={s.v} onClick={() => setStatusFilter(s.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${statusFilter === s.v ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{s.l}</button>
                   ))}
                 </div>
+                <p className="text-[10px] text-slate-400 mt-1.5">Active = submitted to a current form within the last 14 days. Inactive = no submission in 30+ days.</p>
               </div>
               {error && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2.5 rounded-xl">{error}</p>}
               <button onClick={handleGenerate} disabled={metrics.length === 0 || generating}
@@ -330,8 +406,9 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
 
 // ─── Tab: Comparison Report (with MetricPicker) ─────────────────────────────────
 
-function ComparisonTab({ participants, groups, selectedGroupId, elements }) {
+function ComparisonTab({ participants, groups, selectedGroupId, initialParticipantId }) {
   const [selectedParticipant, setSelectedParticipant] = useState("");
+  const appliedInitialRef = useRef(false);
   const [compareWith, setCompareWith] = useState("group");
   const [compareParticipantId, setCompareParticipantId] = useState("");
   const [metrics, setMetrics] = useState([]);
@@ -340,15 +417,67 @@ function ComparisonTab({ participants, groups, selectedGroupId, elements }) {
   const [generating, setGenerating] = useState(false);
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
+  // Reports v2: participant-aware metric pool. Replaces the previous
+  // group-level elements prop, which showed metrics that may not exist
+  // for the chosen participant.
+  const [participantElements, setParticipantElements] = useState([]);
+  const [elementsLoading, setElementsLoading] = useState(false);
 
-  const groupName = selectedGroupId === "all" ? "All Groups" : groups.find(g => g.id === selectedGroupId)?.name || "Group";
+  // Reports v2: derive the effective comparison group from the SELECTED
+  // PARTICIPANT (not from groups[0]). This fixes the bug where comparing
+  // a participant from group B against "the group" silently used group A.
+  const subjectParticipant = participants.find(p => p.participant_id === selectedParticipant);
+  const effectiveGroupId = selectedGroupId !== "all"
+    ? selectedGroupId
+    : subjectParticipant?.group_id || null;
+  const effectiveGroupName = effectiveGroupId
+    ? groups.find(g => g.id === effectiveGroupId)?.name || "Their Group"
+    : "Their Group";
 
-  // Auto-select first 4 elements
+  // One-shot URL pre-select (carried over from before)
   useEffect(() => {
-    if (elements.length > 0 && metrics.length === 0) {
-      setMetrics(elements.slice(0, 4).map(e => e.element_id));
+    if (appliedInitialRef.current) return;
+    if (!initialParticipantId) return;
+    if (participants.some(p => p.participant_id === initialParticipantId)) {
+      setSelectedParticipant(initialParticipantId);
+      appliedInitialRef.current = true;
     }
-  }, [elements]);
+  }, [initialParticipantId, participants]);
+
+  // Reports v2: load participant-relevant elements when selection changes.
+  useEffect(() => {
+    if (!selectedParticipant) {
+      setParticipantElements([]);
+      setMetrics([]);
+      return;
+    }
+    setElementsLoading(true);
+    api.caretakerGetParticipantDataElements(selectedParticipant)
+      .then(data => {
+        const items = Array.isArray(data) ? data.map(e => ({
+          element_id: e.element_id,
+          code: e.code,
+          label: e.label || e.code || "Unknown",
+          unit: e.unit || "",
+          datatype: e.datatype || null,
+          description: e.description || null,
+          form_names: Array.isArray(e.form_names) ? e.form_names : [],
+          data_point_count: Number(e.data_point_count || 0),
+          is_currently_deployed: e.is_currently_deployed !== false,
+        })) : [];
+        setParticipantElements(items);
+        // Auto-select the first 4 elements that actually have data points,
+        // falling back to the first 4 of any kind if none have data.
+        const withData = items.filter(e => e.data_point_count > 0).slice(0, 4);
+        const fallback = items.slice(0, 4);
+        setMetrics((withData.length > 0 ? withData : fallback).map(e => e.element_id));
+      })
+      .catch(() => {
+        setParticipantElements([]);
+        setMetrics([]);
+      })
+      .finally(() => setElementsLoading(false));
+  }, [selectedParticipant]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -359,7 +488,14 @@ function ComparisonTab({ participants, groups, selectedGroupId, elements }) {
         queryParams.compare_participant_id = compareParticipantId;
       }
       if (compareWith === "group") {
-        queryParams.group_id = selectedGroupId !== "all" ? selectedGroupId : groups[0]?.id;
+        // Reports v2: use the participant's own group when "All Groups" is
+        // selected, instead of silently falling back to groups[0].
+        if (!effectiveGroupId) {
+          setError("Cannot determine which group to compare against. Pick a specific group from the dropdown above, or choose a different comparison.");
+          setGenerating(false);
+          return;
+        }
+        queryParams.group_id = effectiveGroupId;
       }
       const payload = {
         date_from: dateFrom || null,
@@ -401,7 +537,7 @@ function ComparisonTab({ participants, groups, selectedGroupId, elements }) {
         <div>
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Compare Against</p>
           <div className="flex gap-1.5 flex-wrap">
-            {[{ v: "group", l: `Group Avg (${groupName})` }, { v: "participant", l: "Another Participant" }, { v: "all", l: "All Participants" }].map(opt => (
+            {[{ v: "group", l: `Group Avg (${effectiveGroupName})` }, { v: "participant", l: "Another Participant" }, { v: "all", l: "All Participants" }].map(opt => (
               <button key={opt.v} onClick={() => setCompareWith(opt.v)}
                 className={`flex-1 px-3 py-2 rounded-xl text-xs font-semibold transition-all border min-w-0 ${compareWith === opt.v ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>
                 {opt.l}
@@ -423,7 +559,25 @@ function ComparisonTab({ participants, groups, selectedGroupId, elements }) {
           </div>
         )}
 
-        <MetricPicker elements={elements} selected={metrics} onChange={setMetrics} label="Metrics to Compare" />
+        {/* Reports v2: metric picker is now participant-aware. Empty state
+            depends on whether a participant is selected at all. */}
+        {!selectedParticipant ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
+            <p className="text-xs text-slate-400">Select a participant above to see the metrics tracked for them.</p>
+          </div>
+        ) : elementsLoading ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
+            <p className="text-xs text-slate-400 animate-pulse">Loading metrics for this participant…</p>
+          </div>
+        ) : (
+          <MetricPicker
+            elements={participantElements}
+            selected={metrics}
+            onChange={setMetrics}
+            label="Metrics to Compare"
+            emptyMessage="This participant has no tracked metrics yet."
+          />
+        )}
 
         <DateRangeRow from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
 
@@ -444,7 +598,7 @@ function ComparisonTab({ participants, groups, selectedGroupId, elements }) {
 
   const elems = report.elements || [];
   const subjectName = participants.find(p => p.participant_id === selectedParticipant)?.name || "Participant";
-  const compLabel = compareWith === "group" ? groupName : compareWith === "all" ? "All Participants" : participants.find(p => p.participant_id === compareParticipantId)?.name || "Comparison";
+  const compLabel = compareWith === "group" ? effectiveGroupName : compareWith === "all" ? "All Participants" : participants.find(p => p.participant_id === compareParticipantId)?.name || "Comparison";
   const barData = elems.map(e => ({ label: e.label, unit: e.unit, [subjectName]: e.subject?.avg, [compLabel]: e.comparison?.avg }));
 
   return (
@@ -520,7 +674,7 @@ function ComparisonTab({ participants, groups, selectedGroupId, elements }) {
 
 // ─── Tab: Health Trends (with metric visibility toggles in results) ─────────────
 
-function TrendsTab({ participants, elements }) {
+function TrendsTab({ participants }) {
   const [selectedId, setSelectedId] = useState("");
   const [metrics, setMetrics] = useState([]);
   const [dateFrom, setDateFrom] = useState("2025-09-01");
@@ -529,16 +683,48 @@ function TrendsTab({ participants, elements }) {
   const [trends, setTrends] = useState(null);
   const [error, setError] = useState(null);
   const [visibleMetrics, setVisibleMetrics] = useState([]);
+  // Reports v2: participant-aware metric pool, replaces the previous
+  // group-level elements prop.
+  const [participantElements, setParticipantElements] = useState([]);
+  const [elementsLoading, setElementsLoading] = useState(false);
 
   const toggleVisible = (id) => {
     setVisibleMetrics(prev => prev.includes(id) ? prev.filter(e => e !== id) : [...prev, id]);
   };
 
+  // Reports v2: load participant-relevant data elements when selection changes.
   useEffect(() => {
-    if (elements.length > 0 && metrics.length === 0) {
-      setMetrics(elements.slice(0, 3).map(e => e.element_id));
+    if (!selectedId) {
+      setParticipantElements([]);
+      setMetrics([]);
+      return;
     }
-  }, [elements]);
+    setElementsLoading(true);
+    api.caretakerGetParticipantDataElements(selectedId)
+      .then(data => {
+        const items = Array.isArray(data) ? data.map(e => ({
+          element_id: e.element_id,
+          code: e.code,
+          label: e.label || e.code || "Unknown",
+          unit: e.unit || "",
+          datatype: e.datatype || null,
+          description: e.description || null,
+          form_names: Array.isArray(e.form_names) ? e.form_names : [],
+          data_point_count: Number(e.data_point_count || 0),
+          is_currently_deployed: e.is_currently_deployed !== false,
+        })) : [];
+        setParticipantElements(items);
+        // For Trends, prefer metrics that have data — picking metrics with
+        // 0 data points just produces an empty chart.
+        const withData = items.filter(e => e.data_point_count > 0).slice(0, 3);
+        setMetrics(withData.map(e => e.element_id));
+      })
+      .catch(() => {
+        setParticipantElements([]);
+        setMetrics([]);
+      })
+      .finally(() => setElementsLoading(false));
+  }, [selectedId]);
 
   async function handleGenerate() {
     if (!selectedId) return;
@@ -586,8 +772,23 @@ function TrendsTab({ participants, elements }) {
           </select>
         </div>
 
-        {elements.length > 0 && (
-          <MetricPicker elements={elements} selected={metrics} onChange={setMetrics} label="Metrics to Track" />
+        {/* Reports v2: metric picker is participant-aware. */}
+        {!selectedId ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
+            <p className="text-xs text-slate-400">Select a participant above to see the metrics tracked for them.</p>
+          </div>
+        ) : elementsLoading ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
+            <p className="text-xs text-slate-400 animate-pulse">Loading metrics for this participant…</p>
+          </div>
+        ) : (
+          <MetricPicker
+            elements={participantElements}
+            selected={metrics}
+            onChange={setMetrics}
+            label="Metrics to Track"
+            emptyMessage="This participant has no tracked metrics yet."
+          />
         )}
 
         <DateRangeRow from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
@@ -695,6 +896,7 @@ function HistoryTab() {
   const [scopeFilter, setScopeFilter] = useState("all");
   const [viewing, setViewing] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(null);
 
   useEffect(() => {
     api.caretakerListReports()
@@ -717,11 +919,13 @@ function HistoryTab() {
 
   async function handleViewReport(r) {
     setDetailLoading(true);
+    setDetailError(null);
+    setViewing({ ...r, payload: null });
     try {
       const detail = await api.caretakerGetReport(r.id);
       setViewing({ ...r, payload: detail.payload || {} });
     } catch (err) {
-      console.warn("Failed to load report detail:", err);
+      setDetailError(err.message || "Couldn't load this report. Please try again.");
       setViewing({ ...r, payload: {} });
     } finally {
       setDetailLoading(false);
@@ -742,7 +946,7 @@ function HistoryTab() {
 
     return (
       <div className="space-y-5">
-        <button onClick={() => setViewing(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+        <button onClick={() => { setViewing(null); setDetailError(null); }} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           Back to History
         </button>
@@ -757,6 +961,18 @@ function HistoryTab() {
             <div className="animate-pulse space-y-4">
               {[...Array(4)].map((_, i) => <div key={i} className="h-10 bg-slate-200 rounded-xl" />)}
             </div>
+          </div>
+        ) : detailError ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-rose-200 px-6 py-10 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center mx-auto mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            </div>
+            <p className="text-sm font-semibold text-rose-700">Couldn't load this report</p>
+            <p className="text-xs text-rose-500 mt-1.5 max-w-sm mx-auto">{detailError}</p>
+            <button onClick={() => handleViewReport(viewing)}
+              className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-rose-600 rounded-lg hover:bg-rose-700 transition-colors">
+              Retry
+            </button>
           </div>
         ) : elems.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
@@ -918,7 +1134,17 @@ const TABS = [
 
 export default function ReportsPage() {
   const { user } = useOutletContext();
-  const [activeTab, setActiveTab] = useState("group");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Capture URL params exactly once on first render.
+  // We don't want these to re-read after we clear the URL below.
+  const [initialTab] = useState(() => {
+    const t = searchParams.get("tab");
+    return ["group", "comparison", "trends", "history"].includes(t) ? t : null;
+  });
+  const [initialParticipantId] = useState(() => searchParams.get("participant"));
+
+  const [activeTab, setActiveTab] = useState(initialTab || "group");
   const [participants, setParticipants] = useState([]);
   const [participantsLoadedFor, setParticipantsLoadedFor] = useState("none");
   const [participantTotal, setParticipantTotal] = useState(0);
@@ -926,10 +1152,18 @@ export default function ReportsPage() {
   const [elements, setElements] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
+      // Reports v2: only fetch group summary + groups at page level. Element
+      // pools are now per-tab and per-context (the GroupReport tab loads
+      // elements for the selected group; ComparisonTab and TrendsTab load
+      // elements for the selected participant). Fixes the previous bug where
+      // the page would load gData[0]'s elements and use them for everything,
+      // including reports about other groups.
       const [pSummary, gData] = await Promise.all([
         api.caretakerGetParticipantsSummary().catch(() => ({ total: 0 })),
         api.caretakerGetGroups().catch(() => []),
@@ -941,40 +1175,50 @@ export default function ReportsPage() {
         ? gData.map(g => ({ id: g.group_id, name: g.name }))
         : [];
       setGroups(transformedGroups);
-      if (Array.isArray(gData) && gData.length > 0) {
-        try {
-          const elemData = await api.caretakerGetGroupElements(gData[0].group_id);
-          const elems = Array.isArray(elemData) ? elemData.map(e => ({
-            ...e, element_id: e.element_id,
-            label: e.label || e.code || "Unknown",
-            unit: e.unit || "",
-            category: e.category || inferCategory(e.label || e.code || ""),
-          })) : [];
-          setElements(elems);
-        } catch { setElements([]); }
-      }
+      setElements([]);
     } catch (err) {
-      console.warn("Failed to load reports data:", err.message);
+      setLoadError(err.message || "Couldn't load reports data. Please refresh the page.");
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Reports v2: when a SPECIFIC group is selected, load that group's
+  // elements (used by GroupReportTab). When "All Groups" is selected, clear
+  // them — there is no meaningful "all groups elements pool" because the
+  // group report endpoint only operates on one group at a time. The
+  // GroupReportTab will show a "select a specific group" message in that case.
   useEffect(() => {
-    if (selectedGroupId === "all" || groups.length === 0) return;
+    if (groups.length === 0) return;
+    if (selectedGroupId === "all") {
+      setElements([]);
+      return;
+    }
     api.caretakerGetGroupElements(selectedGroupId)
       .then(data => {
         setElements(Array.isArray(data) ? data.map(e => ({
-          ...e, element_id: e.element_id,
+          element_id: e.element_id,
+          code: e.code,
           label: e.label || e.code || "Unknown",
           unit: e.unit || "",
-          category: e.category || inferCategory(e.label || e.code || ""),
+          datatype: e.datatype || null,
+          description: e.description || null,
+          form_names: Array.isArray(e.form_names) ? e.form_names : [],
+          data_point_count: Number(e.data_point_count || 0),
         })) : []);
       })
       .catch(() => setElements([]));
   }, [selectedGroupId, groups]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Clear URL params after applying them so refresh doesn't re-trigger.
+  useEffect(() => {
+    if (initialTab || initialParticipantId) {
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (activeTab !== "comparison" && activeTab !== "trends") return;
@@ -987,7 +1231,9 @@ export default function ReportsPage() {
       sort_by: "name",
     })
       .then((data) => {
-        setParticipants(Array.isArray(data) ? data : []);
+        // B8: response is { items, total_count }; we only need items here.
+        const items = Array.isArray(data?.items) ? data.items : [];
+        setParticipants(items);
         setParticipantsLoadedFor(scope);
       })
       .catch(() => {
@@ -1007,6 +1253,24 @@ export default function ReportsPage() {
           <div className="h-8 bg-slate-200 rounded w-32" />
           <div className="h-12 bg-slate-200 rounded-2xl" />
           <div className="h-64 bg-slate-200 rounded-2xl" />
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="max-w-6xl mx-auto p-2 md:p-0">
+        <div className="bg-white rounded-2xl shadow-sm border border-rose-200 px-6 py-12 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center mx-auto mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+          </div>
+          <h2 className="text-base font-bold text-rose-700">Couldn't load Reports</h2>
+          <p className="text-xs text-rose-500 mt-1.5 max-w-md mx-auto">{loadError}</p>
+          <button onClick={fetchData}
+            className="mt-5 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-colors">
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -1036,8 +1300,8 @@ export default function ReportsPage() {
       </div>
 
       {activeTab === "group" && <GroupReportTab groups={groups} selectedGroupId={selectedGroupId} elements={elements} />}
-      {activeTab === "comparison" && <ComparisonTab participants={filteredParticipants} groups={groups} selectedGroupId={selectedGroupId} elements={elements} />}
-      {activeTab === "trends" && <TrendsTab participants={filteredParticipants} elements={elements} />}
+      {activeTab === "comparison" && <ComparisonTab participants={filteredParticipants} groups={groups} selectedGroupId={selectedGroupId} initialParticipantId={initialParticipantId} />}
+      {activeTab === "trends" && <TrendsTab participants={filteredParticipants} />}
       {activeTab === "history" && <HistoryTab />}
     </div>
   );
@@ -1045,12 +1309,6 @@ export default function ReportsPage() {
 
 // ─── Category inference helper ──────────────────────────────────────────────────
 
-function inferCategory(label) {
-  const l = label.toLowerCase();
-  if (l.includes("bp") || l.includes("blood") || l.includes("weight") || l.includes("pain") || l.includes("heart") || l.includes("bmi")) return "Vitals";
-  if (l.includes("stress") || l.includes("anxiety") || l.includes("depress") || l.includes("mental") || l.includes("mood")) return "Mental Health";
-  if (l.includes("lonely") || l.includes("social") || l.includes("connect")) return "Social Wellness";
-  if (l.includes("sleep") || l.includes("exercise") || l.includes("water") || l.includes("diet") || l.includes("alcohol") || l.includes("screen")) return "Lifestyle";
-  if (l.includes("survey") || l.includes("goal") || l.includes("complet")) return "Engagement";
-  return "Other";
-}
+// Reports v2: inferCategory was deleted — replaced by real form-based grouping
+// in MetricPicker. The hardcoded English-substring categories were both
+// inaccurate and unrelated to actual data structure.

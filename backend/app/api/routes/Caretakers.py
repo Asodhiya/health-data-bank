@@ -10,13 +10,16 @@ from app.core.dependency import require_permissions
 from app.core.permissions import (
     GROUP_READ,
     CARETAKER_READ,
+    CARETAKER_WRITE,
     SEND_INVITE,
 )
 from app.schemas.caretaker_response_schema import (
     GroupItem,
     GroupMemberAddRequest, GroupMemberItem,
     GroupDataElementItem,
+    ParticipantDataElementItem,
     ParticipantListItem, ParticipantDetail, ParticipantActivityCounts,
+    PaginatedParticipants,
     FeedbackCreate, FeedbackItem,
     NoteCreateRequest, NoteItem, NoteUpdateRequest,
     ReportGenerateRequest, ReportResponse, ReportListItem,
@@ -57,15 +60,17 @@ async def get_caretaker_profile(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
+    # B20: previously this handler created and committed a new profile row as
+    # a side effect if one didn't exist. That violated REST idempotency, opened
+    # a race between concurrent GETs, and muddied the semantics of "who has a
+    # profile?" Profile creation now happens exclusively via PATCH /profile
+    # (the onboarding page is the sole caller that does this on first completion).
     result = await db.execute(
         select(CaretakerProfile).where(CaretakerProfile.user_id == current_user.user_id)
     )
     profile = result.scalar_one_or_none()
     if not profile:
-        profile = CaretakerProfile(user_id=current_user.user_id)
-        db.add(profile)
-        await db.commit()
-        await db.refresh(profile)
+        raise HTTPException(status_code=404, detail="Caretaker profile not found")
     return profile
 
 
@@ -73,7 +78,7 @@ async def get_caretaker_profile(
 async def update_caretaker_profile(
     payload: CaretakerProfileUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     result = await db.execute(
         select(CaretakerProfile).where(CaretakerProfile.user_id == current_user.user_id)
@@ -83,11 +88,8 @@ async def update_caretaker_profile(
         profile = CaretakerProfile(user_id=current_user.user_id)
         db.add(profile)
 
-    for field, value in payload.model_dump(exclude_none=True).items():
+    for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(profile, field, value)
-
-    if not profile.onboarding_completed:
-        profile.onboarding_completed = True
 
     await db.commit()
     await db.refresh(profile)
@@ -101,15 +103,16 @@ async def list_groups(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(GROUP_READ)),
 ):
-    groups = await CaretakersQuery(db).get_groups(current_user.user_id)
+    rows = await CaretakersQuery(db).get_groups(current_user.user_id)
     return [
         GroupItem(
             group_id=g.group_id,
             name=g.name,
             description=g.description,
             caretaker_id=g.caretaker_id,
+            member_count=int(member_count or 0),
         )
-        for g in groups
+        for g, member_count in rows
     ]
 
 
@@ -119,12 +122,14 @@ async def get_group(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(GROUP_READ)),
 ):
-    group = await CaretakersQuery(db).get_group(group_id, current_user.user_id)
+    row = await CaretakersQuery(db).get_group(group_id, current_user.user_id)
+    group, member_count = row
     return GroupItem(
         group_id=group.group_id,
         name=group.name,
         description=group.description,
         caretaker_id=group.caretaker_id,
+        member_count=int(member_count or 0),
     )
 
 
@@ -152,7 +157,7 @@ async def list_group_elements(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(GROUP_READ)),
 ):
-    rows = await CaretakersQuery(db).get_group_elements(group_id)
+    rows = await CaretakersQuery(db).get_group_elements(group_id, current_user.user_id)
     return [
         GroupDataElementItem(
             element_id=row.element_id,
@@ -160,6 +165,13 @@ async def list_group_elements(
             label=row.label,
             unit=row.unit,
             datatype=row.datatype,
+            description=row.description,
+            # form_names comes back as None when there are no matches; coerce
+            # to [] so the response shape is consistent. The query also
+            # filters out None entries from the array_agg in case any join
+            # produced a NULL row.
+            form_names=[n for n in (row.form_names or []) if n],
+            data_point_count=int(row.data_point_count or 0),
         )
         for row in rows
     ]
@@ -232,7 +244,7 @@ async def get_group_form_detail(
 
 # ── Participants ──────────────────────────────────────────────────────────────
 
-@router.get("/participants", response_model=list[ParticipantListItem])
+@router.get("/participants", response_model=PaginatedParticipants)
 async def list_participants(
     group_id: Optional[UUID] = Query(default=None),
     q: Optional[str] = Query(default=None),
@@ -252,7 +264,7 @@ async def list_participants(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    rows = await CaretakersQuery(db).get_participants(
+    rows, total_count = await CaretakersQuery(db).get_participants(
         user_id=current_user.user_id,
         group_id=group_id,
         q=q,
@@ -270,7 +282,7 @@ async def list_participants(
         limit=limit,
         offset=offset,
     )
-    return [
+    items = [
         ParticipantListItem(
             participant_id=row.participant_id,
             name=f"{row.first_name or ''} {row.last_name or ''}".strip(),
@@ -293,6 +305,7 @@ async def list_participants(
         )
         for row in rows
     ]
+    return PaginatedParticipants(items=items, total_count=total_count)
 
 
 @router.get("/participants/activity-counts", response_model=ParticipantActivityCounts)
@@ -312,7 +325,7 @@ async def get_participant(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    participant, first_name, last_name, _ = await CaretakersQuery(db).get_group_participant(group_id, participant_id)
+    participant, first_name, last_name, user_status, _ = await CaretakersQuery(db).get_group_participant(group_id, participant_id, current_user.user_id)
     groups = await CaretakersQuery(db).get_participant_group_memberships(
         participant_id,
         current_user.user_id,
@@ -320,7 +333,7 @@ async def get_participant(
     return ParticipantDetail(
         participant_id=participant.participant_id,
         name=f"{first_name or ''} {last_name or ''}".strip(),
-        status="active",
+        status="active" if user_status else "inactive",
         groups=groups,
     )
 
@@ -333,7 +346,7 @@ async def list_participant_submissions(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    rows = await CaretakersQuery(db).get_participant_submissions(participant_id, date_from, date_to)
+    rows = await CaretakersQuery(db).get_participant_submissions(participant_id, date_from, date_to, caretaker_user_id=current_user.user_id)
     return [
         SubmissionListItem(
             submission_id=row.submission_id,
@@ -354,7 +367,7 @@ async def create_feedback(
     submission_id: UUID,
     body: FeedbackCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     feedback = await CaretakersQuery(db).create_feedback(
         caretaker_user_id=current_user.user_id,
@@ -373,7 +386,7 @@ async def create_feedback(
             notification_type="flag",
             title="New caretaker feedback",
             message="Your caretaker left feedback on a recent submission.",
-            link="/participant/messages",
+            link="/participant/feedback",
             role_target="participant",
             source_type="feedback",
             source_id=feedback.feedback_id,
@@ -394,7 +407,7 @@ async def create_general_feedback(
     participant_id: UUID,
     body: FeedbackCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     feedback = await CaretakersQuery(db).create_feedback(
         caretaker_user_id=current_user.user_id,
@@ -413,7 +426,7 @@ async def create_general_feedback(
             notification_type="flag",
             title="New caretaker feedback",
             message="Your caretaker sent you feedback.",
-            link="/participant/messages",
+            link="/participant/feedback",
             role_target="participant",
             source_type="feedback",
             source_id=feedback.feedback_id,
@@ -435,7 +448,7 @@ async def list_feedback(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    rows = await CaretakersQuery(db).list_feedback(participant_id)
+    rows = await CaretakersQuery(db).list_feedback(participant_id, caretaker_user_id=current_user.user_id)
     return [
         FeedbackItem(
             feedback_id=row.feedback_id,
@@ -457,6 +470,10 @@ async def list_notes(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
+    # B1: ownership guard before reading. Without this, the route's existing
+    # caretaker_id filter would silently return [] for unauthorized lookups,
+    # which is information leakage rather than an explicit denial.
+    await CaretakersQuery(db)._assert_participant_in_owned_group(participant_id, current_user.user_id)
     caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
     rows = (
         await db.execute(
@@ -485,14 +502,14 @@ async def create_note(
     participant_id: UUID,
     body: NoteCreateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
+    # B1: ownership guard before writing. This subsumes the previous
+    # "participant_exists" check — a participant in a group I own definitely
+    # exists, and one I don't own should look the same as one that doesn't
+    # exist (same 404 wording, no enumeration).
+    await CaretakersQuery(db)._assert_participant_in_owned_group(participant_id, current_user.user_id)
     caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
-    participant_exists = await db.scalar(
-        select(ParticipantProfile.participant_id).where(ParticipantProfile.participant_id == participant_id)
-    )
-    if not participant_exists:
-        raise HTTPException(status_code=404, detail="Participant not found")
 
     note = CaretakerNote(
         caretaker_id=caretaker_id,
@@ -517,7 +534,7 @@ async def update_note(
     note_id: UUID,
     body: NoteUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
     note = await db.scalar(
@@ -554,7 +571,7 @@ async def update_note(
 async def delete_note(
     note_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
     result = await db.execute(
@@ -583,6 +600,7 @@ async def generate_group_report(
         element_ids=body.element_ids or None,
         date_from=body.date_from,
         date_to=body.date_to,
+        participant_status=body.participant_status,
     )
     return ReportResponse(
         report_id=report.report_id,
@@ -600,7 +618,7 @@ async def generate_comparison_report(
     group_id: Optional[UUID] = Query(default=None),
     body: ReportGenerateRequest = ...,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     if compare_with == "participant" and not compare_participant_id:
         raise HTTPException(status_code=422, detail="compare_participant_id is required when compare_with is 'participant'")
@@ -663,9 +681,9 @@ async def get_submission_detail(
     participant_id: UUID,
     submission_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    row, answers = await CaretakersQuery(db).get_submission_detail(participant_id, submission_id)
+    row, answers = await CaretakersQuery(db).get_submission_detail(participant_id, submission_id, current_user.user_id)
     return SubmissionDetailItem(
         submission_id=row.submission_id,
         participant_id=row.participant_id,
@@ -692,9 +710,9 @@ async def get_submission_detail(
 async def get_participant_goals(
     participant_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    return await CaretakersQuery(db).get_participant_goals(participant_id)
+    return await CaretakersQuery(db).get_participant_goals(participant_id, current_user.user_id)
 
 
 # ── Health Trends ──────────────────────────────────────────────────────────────
@@ -706,11 +724,48 @@ async def get_health_trends(
     date_from: Optional[date] = Query(default=None),
     date_to: Optional[date] = Query(default=None),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
     return await CaretakersQuery(db).get_health_trends(
-        participant_id, element_ids, date_from, date_to
+        participant_id, element_ids, date_from, date_to, user_id=current_user.user_id
     )
+
+
+# ── Participant Data Elements (Reports v2) ─────────────────────────────────────
+
+@router.get(
+    "/participants/{participant_id}/data-elements",
+    response_model=list[ParticipantDataElementItem],
+)
+async def list_participant_data_elements(
+    participant_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    """Reports v2: returns data elements relevant to this participant.
+
+    Backs the metric pickers in the Comparison and Trends tabs of the Reports
+    page so caretakers only see metrics that will actually return data for
+    the selected participant. Includes both currently-deployed elements and
+    elements with historical data points.
+    """
+    rows = await CaretakersQuery(db).get_participant_data_elements(
+        participant_id, current_user.user_id
+    )
+    return [
+        ParticipantDataElementItem(
+            element_id=row.element_id,
+            code=row.code,
+            label=row.label,
+            unit=row.unit,
+            datatype=row.datatype,
+            description=row.description,
+            form_names=[n for n in (row.form_names or []) if n],
+            data_point_count=int(row.data_point_count or 0),
+            is_currently_deployed=bool(row.is_currently_deployed),
+        )
+        for row in rows
+    ]
 
 
 # ── Notifications ──────────────────────────────────────────────────────────────
@@ -740,7 +795,7 @@ async def list_notifications(
 async def mark_notification_read(
     notification_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     n = await mark_notification_read_for_user(db, notification_id, current_user.user_id)
     return NotificationItem(

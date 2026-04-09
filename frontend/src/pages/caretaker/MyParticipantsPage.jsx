@@ -1,11 +1,94 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { useOutletContext, useNavigate } from "react-router-dom";
+import { useOutletContext, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../services/api";
+
+// ─── Status helpers (4-bucket activity model — matches CaretakerDashboard) ─────
+
+const STATUS_LABELS = {
+  highly_active: "Highly Active",
+  moderately_active: "Moderately Active",
+  low_active: "Low Activity",
+  inactive: "Inactive",
+};
+
+const STATUS_DOT_COLOR = {
+  highly_active: "bg-emerald-400",
+  moderately_active: "bg-blue-400",
+  low_active: "bg-amber-400",
+  inactive: "bg-slate-300",
+};
+
+function getStatusLabel(status) {
+  return STATUS_LABELS[status] || "Unknown";
+}
+
+// ─── Backend query param builder (B6 + B7) ────────────────────────────────────
+//
+// Translates the frontend filter/search/sort UI state into the query parameters
+// the backend's GET /caretaker/participants route expects. Centralizing this
+// here keeps callers (initial fetch, filter-change refetch, "load more") in
+// sync, and pins the value mapping (B7) to one place — e.g. the UI uses
+// "complete" but the backend expects "completed".
+
+function buildParticipantsQueryParams(filters, search, sort) {
+  const params = {};
+
+  // Free-text search
+  const trimmedSearch = (search || "").trim();
+  if (trimmedSearch) params.q = trimmedSearch;
+
+  // Status — backend accepts the same 5 values plus "active" as "any non-inactive"
+  if (filters.status && filters.status !== "all") {
+    params.status = filters.status;
+  }
+
+  // Gender — passed through (backend lower-cases for comparison)
+  if (filters.gender && filters.gender !== "all") {
+    params.gender = filters.gender;
+  }
+
+  // Alerts → has_alerts boolean
+  if (filters.flagged === "flagged") params.has_alerts = true;
+  else if (filters.flagged === "clear") params.has_alerts = false;
+
+  // Age range — only send if a real number was typed
+  const ageMin = Number(filters.ageMin);
+  const ageMax = Number(filters.ageMax);
+  if (filters.ageMin !== "" && Number.isFinite(ageMin)) params.age_min = ageMin;
+  if (filters.ageMax !== "" && Number.isFinite(ageMax)) params.age_max = ageMax;
+
+  // Survey progress — B7: rename frontend "complete" → backend "completed"
+  if (filters.surveyProgress && filters.surveyProgress !== "all") {
+    params.survey_progress = filters.surveyProgress === "complete"
+      ? "completed"
+      : filters.surveyProgress;
+  }
+
+  // Goal progress — same B7 rename
+  if (filters.goalProgress && filters.goalProgress !== "all") {
+    params.goal_progress = filters.goalProgress === "complete"
+      ? "completed"
+      : filters.goalProgress;
+  }
+
+  // Sort — B7: rename frontend "lastActive" → backend "last_active"
+  if (sort && sort.field) {
+    params.sort_by = sort.field === "lastActive" ? "last_active" : sort.field;
+    params.sort_dir = sort.dir === "desc" ? "desc" : "asc";
+  }
+
+  return params;
+}
 
 // ─── Transform: Backend → Frontend shape ─────────────────────────────────────
 
 function transformParticipant(p, groupsMap) {
-  const nameParts = (p.name || "").split(" ");
+  // We keep firstName/lastName for backwards compat with the Avatar component
+  // and search/sort heuristics, but `fullName` is the source of truth for
+  // display because we can't reliably split "Mary Anne Smith" or "Jean van der
+  // Berg" into first/last without structured fields from the backend.
+  const fullName = (p.name || "").trim();
+  const nameParts = fullName.split(/\s+/).filter(Boolean);
   const firstName = nameParts[0] || "";
   const lastName = nameParts.slice(1).join(" ") || "";
   const isActive = p.status !== "inactive";
@@ -20,13 +103,14 @@ function transformParticipant(p, groupsMap) {
   const gInfo = groupsMap ? groupsMap[p.group_id] : null;
   return {
     id: p.participant_id,
-    firstName, lastName,
+    firstName, lastName, fullName,
     email: p.email || "",
     phone: p.phone || "",
     dob: p.dob || null,
     gender: p.gender || "—",
     age: p.age != null ? Math.round(p.age) : null,
-    status: isActive ? "active" : "inactive",
+    status: p.status || "inactive",
+    isActive,
     enrolledAt: p.enrolled_at || null,
     lastActive: p.last_login_at || p.last_submission_at || null,
     healthGoals: goalsDone,
@@ -104,16 +188,27 @@ function daysUntil(d) { if (!d) return ""; const diff = Math.floor((new Date(d).
 
 // ─── Sub-Components ─────────────────────────────────────────────────────────────
 
-function Avatar({ firstName, lastName, size = "md" }) {
-  const initials = `${firstName?.[0] ?? ""}${lastName?.[0] ?? ""}`.toUpperCase();
+function Avatar({ fullName, size = "md" }) {
+  // Compute initials from the first two whitespace-separated tokens.
+  // For single-token names ("Sarah") fall back to the first two characters.
+  const tokens = (fullName || "").trim().split(/\s+/).filter(Boolean);
+  let initials;
+  if (tokens.length >= 2) {
+    initials = `${tokens[0][0] ?? ""}${tokens[1][0] ?? ""}`;
+  } else if (tokens.length === 1) {
+    initials = tokens[0].slice(0, 2);
+  } else {
+    initials = "?";
+  }
+  initials = initials.toUpperCase();
   const palette = ["bg-blue-500","bg-emerald-500","bg-indigo-500","bg-rose-500","bg-amber-500","bg-violet-500"];
-  const color = palette[(firstName?.charCodeAt(0) ?? 0) % palette.length];
+  const color = palette[(fullName?.charCodeAt(0) ?? 0) % palette.length];
   const sz = size === "lg" ? "w-14 h-14 text-lg" : "w-9 h-9 text-xs";
   return <div className={`rounded-full ${color} text-white flex items-center justify-center font-bold shrink-0 ${sz}`}>{initials}</div>;
 }
 
 function StatusDot({ status }) {
-  return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${status === "active" ? "bg-emerald-400" : "bg-slate-300"}`} />;
+  return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${STATUS_DOT_COLOR[status] || "bg-slate-300"}`} />;
 }
 
 function InfoRow({ label, value }) {
@@ -431,11 +526,14 @@ function FilterPanel({ filters, setFilters, onReset }) {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Status</label>
-            <div className="flex gap-1">
-              {[{ value: "all", label: "All" }, { value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }].map(s => (
-                <button key={s.value} onClick={() => setFilters(f => ({...f, status: s.value}))} className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all ${filters.status === s.value ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{s.label}</button>
-              ))}
-            </div>
+            <select value={filters.status} onChange={e => setFilters(f => ({...f, status: e.target.value}))} className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 bg-white">
+              <option value="all">All</option>
+              <option value="active">Any Active</option>
+              <option value="highly_active">Highly Active</option>
+              <option value="moderately_active">Moderately Active</option>
+              <option value="low_active">Low Activity</option>
+              <option value="inactive">Inactive</option>
+            </select>
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Gender</label>
@@ -502,7 +600,7 @@ function InviteModal({ group, onDone, onCancel }) {
     setSending(true);
     setError(null);
     try {
-      await api.sendInvite(email.trim(), "participant");
+      await api.sendInvite(email.trim(), "participant", group.id);
       setSent(true);
     } catch (err) {
       setError(err.message || "Failed to send invite. Please try again.");
@@ -576,41 +674,114 @@ function InviteModal({ group, onDone, onCancel }) {
 // ─── Note Modal ─────────────────────────────────────────────────────────────────
 
 function NoteModal({ participant, onSave, onCancel }) {
+  const [mode, setMode] = useState("note"); // "note" | "feedback"
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  const isFeedback = mode === "feedback";
 
   async function handleSave() {
     if (!text.trim()) return;
     setSaving(true);
     setError(null);
     try {
-      await api.caretakerCreateNote(participant.id, text.trim());
-      onSave(text.trim());
+      if (isFeedback) {
+        await api.caretakerCreateGeneralFeedback(participant.id, text.trim());
+      } else {
+        await api.caretakerCreateNote(participant.id, text.trim());
+      }
+      onSave(text.trim(), mode);
     } catch (err) {
-      console.warn("Note save failed (backend may not be ready):", err.message);
-      onSave(text.trim());
+      setError(err.message || (isFeedback ? "Failed to send feedback. Please try again." : "Failed to save note. Please try again."));
+      return;
     } finally {
       setSaving(false);
     }
   }
 
+  // Mode-dependent copy
+  const title = isFeedback ? "Send Feedback" : "Add Private Note";
+  const subtitle = isFeedback ? "The participant will be notified" : "Only you can see this";
+  const placeholder = isFeedback
+    ? "Write feedback that the participant will see. They'll receive a notification."
+    : "Write a private note for your own records. The participant will not see this.";
+  const buttonLabel = saving
+    ? (isFeedback ? "Sending…" : "Saving…")
+    : (isFeedback ? "Send Feedback" : "Save Note");
+
+  // Mode-dependent styling
+  const accent = isFeedback
+    ? { iconBg: "bg-emerald-100", iconText: "text-emerald-600", focusRing: "focus:ring-emerald-500", button: "bg-emerald-600 hover:bg-emerald-700" }
+    : { iconBg: "bg-blue-100",    iconText: "text-blue-600",    focusRing: "focus:ring-blue-500",    button: "bg-blue-600 hover:bg-blue-700" };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 w-full max-w-md space-y-4">
+        {/* Header */}
         <div className="flex items-start gap-4">
-          <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+          <div className={`w-10 h-10 rounded-full ${accent.iconBg} flex items-center justify-center shrink-0 transition-colors`}>
+            {isFeedback ? (
+              <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${accent.iconText}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${accent.iconText}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+            )}
           </div>
-          <div><h3 className="text-base font-bold text-slate-800">Write Feedback</h3><p className="text-sm text-slate-500 mt-1">For <span className="font-semibold text-slate-700">{participant.firstName} {participant.lastName}</span></p></div>
+          <div>
+            <h3 className="text-base font-bold text-slate-800">{title}</h3>
+            <p className="text-sm text-slate-500 mt-1">
+              For <span className="font-semibold text-slate-700">{participant.fullName}</span> · {subtitle}
+            </p>
+          </div>
         </div>
-        <textarea value={text} onChange={e => setText(e.target.value)} rows={5} placeholder="Write your personalized feedback or note here..."
-          className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 placeholder:text-slate-300 resize-none" />
+
+        {/* Mode toggle — prominent, can't be missed */}
+        <div className="bg-slate-100 rounded-xl p-1 flex gap-1">
+          <button
+            type="button"
+            onClick={() => setMode("note")}
+            disabled={saving}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all disabled:opacity-50 ${mode === "note" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+            PRIVATE NOTE
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("feedback")}
+            disabled={saving}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all disabled:opacity-50 ${mode === "feedback" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+            SEND TO PARTICIPANT
+          </button>
+        </div>
+
+        {/* Warning banner in feedback mode — extra safety */}
+        {isFeedback && (
+          <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <p className="text-xs text-emerald-800">
+              The participant will see this message and receive a notification. Switch to Private Note if you want to keep it to yourself.
+            </p>
+          </div>
+        )}
+
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          rows={5}
+          placeholder={placeholder}
+          disabled={saving}
+          className={`w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 ${accent.focusRing} focus:border-transparent text-slate-800 placeholder:text-slate-300 resize-none disabled:opacity-60`}
+        />
+
         {error && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2.5 rounded-xl">{error}</p>}
+
         <div className="flex gap-3">
-          <button onClick={onCancel} className="flex-1 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">Cancel</button>
-          <button onClick={handleSave} disabled={!text.trim() || saving} className="flex-1 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            {saving ? "Saving…" : "Save Note"}
+          <button onClick={onCancel} disabled={saving} className="flex-1 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-50">Cancel</button>
+          <button onClick={handleSave} disabled={!text.trim() || saving} className={`flex-1 py-2.5 text-sm font-bold text-white ${accent.button} rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}>
+            {buttonLabel}
           </button>
         </div>
       </div>
@@ -744,13 +915,13 @@ function InvitesPanel({ invites, onRevoke, onResend, onOpenInviteModal, hasMore,
                     </div>
                   ) : (
                     <>
-                      <Tip text="Resend invite"><button onClick={() => onResend(inv.email)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button></Tip>
+                      <Tip text="Resend invite"><button onClick={() => onResend(inv.email, inv.groupId)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button></Tip>
                       <Tip text="Revoke invite"><button onClick={() => setConfirmRevoke(inv.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg></button></Tip>
                     </>
                   )
                 )}
                 {(inv.status === "expired" || inv.status === "revoked") && (
-                  <Tip text="Resend invite"><button onClick={() => onResend(inv.email)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button></Tip>
+                  <Tip text="Resend invite"><button onClick={() => onResend(inv.email, inv.groupId)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button></Tip>
                 )}
                 {inv.status === "accepted" && (
                   <span className="text-xs text-emerald-500"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></span>
@@ -792,12 +963,12 @@ function ParticipantDetailPanel({ participant: p, groups, onClose, onViewFull })
         </div>
         <div className="flex-1 overflow-y-auto">
           <div className="px-5 py-5 border-b border-slate-100 flex items-center gap-4">
-            <Avatar firstName={p.firstName} lastName={p.lastName} size="lg" />
+            <Avatar fullName={p.fullName} size="lg" />
             <div className="min-w-0">
-              <p className="text-lg font-bold text-slate-800">{p.firstName} {p.lastName}</p>
+              <p className="text-lg font-bold text-slate-800">{p.fullName}</p>
               <p className="text-xs text-slate-400 truncate">{p.email || "—"}</p>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                <div className="flex items-center gap-1.5"><StatusDot status={p.status} /><span className="text-xs text-slate-400 capitalize">{p.status}</span></div>
+                <div className="flex items-center gap-1.5"><StatusDot status={p.status} /><span className="text-xs text-slate-400">{getStatusLabel(p.status)}</span></div>
                 {p.age != null && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-slate-400">Age {p.age}</span></>}
                 {getAge(p.dob) !== null && !p.age && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-slate-400">Age {getAge(p.dob)}</span></>}
                 <span className="text-xs text-slate-300">·</span>
@@ -985,6 +1156,7 @@ const PAGE_SIZE = 10;
 export default function MyParticipantsPage() {
   const { user } = useOutletContext();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [participants, setParticipants] = useState([]);
   const [groups, setGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("all");
@@ -992,6 +1164,7 @@ export default function MyParticipantsPage() {
   const [forms, setForms] = useState([]);
   const [participantsHasMore, setParticipantsHasMore] = useState(false);
   const [participantsOffset, setParticipantsOffset] = useState(0);
+  const [participantsTotal, setParticipantsTotal] = useState(0);
   const [participantsLoadingMore, setParticipantsLoadingMore] = useState(false);
   const [invitesHasMore, setInvitesHasMore] = useState(false);
   const [invitesOffset, setInvitesOffset] = useState(0);
@@ -1004,7 +1177,9 @@ export default function MyParticipantsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [participantsRefreshing, setParticipantsRefreshing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [sort, setSort] = useState({ field: "name", dir: "asc" });
   const [detailParticipant, setDetailParticipant] = useState(null);
@@ -1018,6 +1193,7 @@ export default function MyParticipantsPage() {
   const hasBootstrappedRef = useRef(false);
   const groupsMapRef = useRef({});
   const [participantSummary, setParticipantSummary] = useState({ total: 0, active: 0, inactive: 0, flagged: 0 });
+  const [activityCounts, setActivityCounts] = useState({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 });
   const [formsSummary, setFormsSummary] = useState({ total: 0, active: 0, revoked: 0 });
 
   function showToastMsg(msg) { setToast(msg); setTimeout(() => setToast(null), 3000); }
@@ -1025,31 +1201,29 @@ export default function MyParticipantsPage() {
   // ── Invite handlers ─────────────────────────────────────────────────────────
 
   async function handleRevokeInvite(inviteId) {
-    setInvites(prev => prev.map(inv => inv.id === inviteId ? { ...inv, status: "revoked", revokedAt: new Date().toISOString().split("T")[0] } : inv));
-    showToastMsg("Invite revoked successfully.");
     try {
       await api.caretakerRevokeInvite(inviteId);
+      showToastMsg("Invite revoked successfully.");
+      await loadInvitesPage({ reset: true, offsetValue: 0 });
     } catch (err) {
-      console.warn("Revoke via API failed:", err.message);
+      showToastMsg(`Failed to revoke invite: ${err.message || "Please try again."}`);
     }
   }
 
-  async function handleResendInvite(email) {
-    const newInv = { id: `inv${Date.now()}`, email, status: "pending", sentAt: new Date().toISOString().split("T")[0], expiresAt: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0] };
-    setInvites(prev => [newInv, ...prev]);
-    showToastMsg(`Invite resent to ${email}.`);
+  async function handleResendInvite(email, groupId) {
     try {
-      await api.sendInvite(email, "participant");
+      await api.sendInvite(email, "participant", groupId);
+      showToastMsg(`Invite resent to ${email}.`);
+      await loadInvitesPage({ reset: true, offsetValue: 0 });
     } catch (err) {
-      console.warn("Resend via API failed:", err.message);
+      showToastMsg(`Failed to resend invite: ${err.message || "Please try again."}`);
     }
   }
 
-  function handleInviteSent(email) {
-    const newInv = { id: `inv${Date.now()}`, email, status: "pending", sentAt: new Date().toISOString().split("T")[0], expiresAt: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0] };
-    setInvites(prev => [newInv, ...prev]);
+  async function handleInviteSent(email) {
     showToastMsg(`Invite sent to ${email}. Admin notified.`);
     setShowInvite(false);
+    await loadInvitesPage({ reset: true, offsetValue: 0 });
   }
 
   async function handleViewForm(formRow) {
@@ -1077,6 +1251,7 @@ export default function MyParticipantsPage() {
     await loadParticipantsPage({
       reset: false,
       offsetValue: participantsOffset,
+      queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
     });
     setParticipantsLoadingMore(false);
   }
@@ -1100,9 +1275,10 @@ export default function MyParticipantsPage() {
   const selectedGroupQuery = selectedGroupId !== "all" ? selectedGroupId : null;
 
   const loadSummaries = useCallback(async () => {
-    const [pSummary, fSummary] = await Promise.all([
+    const [pSummary, fSummary, aCounts] = await Promise.all([
       api.caretakerGetParticipantsSummary(selectedGroupQuery).catch(() => ({ total: 0, active: 0, inactive: 0, flagged: 0 })),
       api.caretakerGetFormsSummary(selectedGroupQuery).catch(() => ({ total: 0, active: 0, revoked: 0 })),
+      api.caretakerGetActivityCounts(selectedGroupQuery).catch(() => ({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 })),
     ]);
     setParticipantSummary({
       total: Number(pSummary?.total || 0),
@@ -1115,6 +1291,12 @@ export default function MyParticipantsPage() {
       active: Number(fSummary?.active || 0),
       revoked: Number(fSummary?.revoked || 0),
     });
+    setActivityCounts({
+      highly_active: Number(aCounts?.highly_active || 0),
+      moderately_active: Number(aCounts?.moderately_active || 0),
+      low_active: Number(aCounts?.low_active || 0),
+      inactive: Number(aCounts?.inactive || 0),
+    });
   }, [selectedGroupQuery]);
 
   const loadParticipantsPage = useCallback(async ({ reset = false, groupsMapOverride = null, offsetValue = 0, queryParamsOverride = {} } = {}) => {
@@ -1125,13 +1307,21 @@ export default function MyParticipantsPage() {
       ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
       ...queryParamsOverride,
     };
-    const participantData = await api.caretakerListParticipants(params).catch(() => []);
-    const page = Array.isArray(participantData) ? participantData : [];
+    // B8: response is now { items, total_count } instead of a bare array.
+    const participantData = await api.caretakerListParticipants(params).catch(() => null);
+    const page = Array.isArray(participantData?.items) ? participantData.items : [];
+    const total = Number(participantData?.total_count ?? 0);
     const groupsMap = groupsMapOverride || groupsMapRef.current || {};
     const transformed = page.map((p) => transformParticipant(p, groupsMap));
     setParticipants((prev) => (reset ? transformed : [...prev, ...transformed]));
-    setParticipantsOffset(nextOffset + transformed.length);
-    setParticipantsHasMore(transformed.length === PAGE_SIZE);
+    const newOffset = nextOffset + transformed.length;
+    setParticipantsOffset(newOffset);
+    setParticipantsTotal(total);
+    // Trust total_count for hasMore. Falls back to length heuristic if the
+    // backend ever returns a malformed response.
+    setParticipantsHasMore(participantData?.total_count != null
+      ? newOffset < total
+      : transformed.length === PAGE_SIZE);
   }, [selectedGroupQuery]);
 
   const loadFormsPage = useCallback(async ({ reset = false, offsetValue = 0 } = {}) => {
@@ -1174,7 +1364,12 @@ export default function MyParticipantsPage() {
       groupsMapRef.current = initialGroupMap;
       setParticipants([]);
       setParticipantsOffset(0);
-      await loadParticipantsPage({ reset: true, groupsMapOverride: initialGroupMap, offsetValue: 0 });
+      await loadParticipantsPage({
+        reset: true,
+        groupsMapOverride: initialGroupMap,
+        offsetValue: 0,
+        queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
+      });
       await loadSummaries();
       // Lazy tabs: do not load invites/forms until user opens those tabs.
       setInvites([]);
@@ -1197,6 +1392,30 @@ export default function MyParticipantsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Apply URL params from dashboard quick actions once groups have loaded.
+  // e.g. /caretaker/participants?view=invites&group=<uuid> from the dashboard
+  // "Invite Participant" dropdown.
+  useEffect(() => {
+    if (groups.length === 0) return;
+    const viewParam = searchParams.get("view");
+    const groupParam = searchParams.get("group");
+    if (!viewParam && !groupParam) return;
+
+    if (groupParam && groups.some(g => g.id === groupParam)) {
+      setSelectedGroupId(groupParam);
+    }
+    if (viewParam === "invites") {
+      setView("invites");
+      setShowInvite(true);
+    } else if (viewParam === "participants" || viewParam === "forms") {
+      setView(viewParam);
+    }
+
+    // Clear the params so a manual refresh doesn't re-open the modal.
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups.length]);
+
   useEffect(() => {
     if (view === "forms" && forms.length === 0) {
       loadFormsPage({ reset: true, offsetValue: 0 });
@@ -1208,17 +1427,43 @@ export default function MyParticipantsPage() {
 
   useEffect(() => {
     if (!hasBootstrappedRef.current) return;
-    // when group changes, reset paged datasets
+    // when group or view changes, reset paged datasets and refetch with current filters
     setForms([]);
     setFormsOffset(0);
     setFormsHasMore(false);
     setFormsLoading(view === "forms");
-    loadParticipantsPage({ reset: true, offsetValue: 0 });
+    setParticipantsRefreshing(true);
+    loadParticipantsPage({
+      reset: true,
+      offsetValue: 0,
+      queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
+    }).finally(() => setParticipantsRefreshing(false));
     loadSummaries();
     if (view === "forms") {
       loadFormsPage({ reset: true, offsetValue: 0 });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGroupQuery, view, loadParticipantsPage, loadSummaries, loadFormsPage]);
+
+  // Debounce the search input so we don't fire one request per keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // B6: Refetch participants whenever filters/search/sort change.
+  // Server-side filtering replaces the old client-side `processed` memo.
+  // Skipped on initial mount — fetchData() handles the first load.
+  useEffect(() => {
+    if (!hasBootstrappedRef.current) return;
+    setParticipantsRefreshing(true);
+    loadParticipantsPage({
+      reset: true,
+      offsetValue: 0,
+      queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
+    }).finally(() => setParticipantsRefreshing(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, debouncedSearch, sort]);
 
   // ── Sort handler ────────────────────────────────────────────────────────────
 
@@ -1226,64 +1471,12 @@ export default function MyParticipantsPage() {
     setSort(prev => prev.field === field ? { field, dir: prev.dir === "asc" ? "desc" : "asc" } : { field, dir: "asc" });
   }
 
-  // ── Group pre-filter ───────────────────────────────────────────────────────
-
-  const groupFiltered = useMemo(() => participants, [participants]);
-
-  // ── Filter + Sort logic (client-side, instant UX) ─────────────────────────
-  const processed = useMemo(() => {
-    let rows = [...groupFiltered];
-    const q = search.trim().toLowerCase();
-    rows = rows.filter((p) => {
-      if (q && !`${p.firstName || ""} ${p.lastName || ""} ${p.email || ""}`.toLowerCase().includes(q)) return false;
-      if (filters.status !== "all" && p.status !== filters.status) return false;
-      if (filters.gender !== "all" && (p.gender || "").toLowerCase() !== filters.gender.toLowerCase()) return false;
-      if (filters.flagged === "flagged" && p.flags.length === 0) return false;
-      if (filters.flagged === "clear" && p.flags.length > 0) return false;
-      const age = p.age ?? getAge(p.dob);
-      if (filters.ageMin && (age === null || age < Number(filters.ageMin))) return false;
-      if (filters.ageMax && (age === null || age > Number(filters.ageMax))) return false;
-      const surveyRatio = p.surveysTotal > 0 ? (p.surveysDone / p.surveysTotal) * 100 : 0;
-      if (filters.surveyProgress === "complete" && surveyRatio < 100) return false;
-      if (filters.surveyProgress === "in_progress" && (surveyRatio <= 0 || surveyRatio >= 100)) return false;
-      if (filters.surveyProgress === "not_started" && surveyRatio > 0) return false;
-      if (filters.surveyProgress === "below_50" && surveyRatio >= 50) return false;
-      if (filters.surveyProgress === "above_50" && surveyRatio < 50) return false;
-      const hasGoals = (p.healthGoalsTotal || 0) > 0;
-      const goalRatio = hasGoals ? (p.healthGoals / p.healthGoalsTotal) * 100 : 0;
-      if (filters.goalProgress === "complete" && (!hasGoals || goalRatio < 100)) return false;
-      if (filters.goalProgress === "in_progress" && (!hasGoals || goalRatio <= 0 || goalRatio >= 100)) return false;
-      if (filters.goalProgress === "no_goals" && hasGoals) return false;
-      return true;
-    });
-
-    const statusOrder = { active: 0, inactive: 1 };
-    rows.sort((a, b) => {
-      const dir = sort.dir === "desc" ? -1 : 1;
-      switch (sort.field) {
-        case "name":
-          return dir * `${a.firstName || ""} ${a.lastName || ""}`.localeCompare(`${b.firstName || ""} ${b.lastName || ""}`);
-        case "age":
-          return dir * ((a.age ?? -1) - (b.age ?? -1));
-        case "status":
-          return dir * ((statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99));
-        case "gender":
-          return dir * (a.gender || "").localeCompare(b.gender || "");
-        case "surveys":
-          return dir * ((a.surveysTotal ? a.surveysDone / a.surveysTotal : 0) - (b.surveysTotal ? b.surveysDone / b.surveysTotal : 0));
-        case "goals":
-          return dir * ((a.healthGoalsTotal ? a.healthGoals / a.healthGoalsTotal : 0) - (b.healthGoalsTotal ? b.healthGoals / b.healthGoalsTotal : 0));
-        case "lastActive":
-          return dir * ((new Date(a.lastActive || 0).getTime()) - (new Date(b.lastActive || 0).getTime()));
-        case "enrolled":
-          return dir * ((new Date(a.enrolledAt || 0).getTime()) - (new Date(b.enrolledAt || 0).getTime()));
-        default:
-          return 0;
-      }
-    });
-
-    return rows;
-  }, [groupFiltered, sort, search, filters]);
+  // B6: Filter and sort now happen on the server. `processed` is just an alias
+  // for `participants` so the JSX consumers below don't need to be rewritten.
+  // The previous client-side filter/sort logic was removed when this page moved
+  // to server-side filtering — see buildParticipantsQueryParams() at the top of
+  // this file and the refetch effects above.
+  const processed = participants;
 
   const counts = useMemo(() => ({
     total: participantSummary.total,
@@ -1340,7 +1533,12 @@ export default function MyParticipantsPage() {
         </div>
       )}
       {showInvite && groups.length > 0 && <InviteModal group={selectedGroupId !== "all" ? groups.find(g => g.id === selectedGroupId) || groups[0] : groups[0]} onDone={handleInviteSent} onCancel={() => setShowInvite(false)} />}
-      {noteTarget && <NoteModal participant={noteTarget} onSave={text => { showToastMsg(`Feedback saved for ${noteTarget.firstName} ${noteTarget.lastName}.`); setNoteTarget(null); }} onCancel={() => setNoteTarget(null)} />}
+      {noteTarget && <NoteModal participant={noteTarget} onSave={(text, mode) => {
+        const name = noteTarget.fullName;
+        const msg = mode === "feedback" ? `Feedback sent to ${name}.` : `Note saved for ${name}.`;
+        showToastMsg(msg);
+        setNoteTarget(null);
+      }} onCancel={() => setNoteTarget(null)} />}
       {detailParticipant && <ParticipantDetailPanel participant={detailParticipant} groups={groups} onClose={() => setDetailParticipant(null)} onViewFull={() => { setDetailParticipant(null); navigate(`/caretaker/participants/${detailParticipant.id}`); }} />}
       {formModalOpen && (
         <FormDetailModal
@@ -1421,12 +1619,64 @@ export default function MyParticipantsPage() {
       {/* Participants view */}
       {view === "participants" && (<>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-slate-800">{counts.total}</p><p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Total</p></div>
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-emerald-600">{counts.active}</p><p className="text-xs font-semibold text-emerald-500 uppercase tracking-wider mt-1">Active</p></div>
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-slate-400">{counts.inactive}</p><p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Inactive</p></div>
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4"><p className="text-2xl font-extrabold text-rose-600">{counts.flagged}</p><p className="text-xs font-semibold text-rose-500 uppercase tracking-wider mt-1">Flagged</p></div>
+      {/* Stat cards — clickable filter chips. Each card toggles its filter on/off,
+          with a colored ring when that filter is currently active. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <button
+          type="button"
+          onClick={() => { setFilters(DEFAULT_FILTERS); setSearch(""); setSelectedGroupId("all"); }}
+          className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4 text-left transition-all hover:shadow-md hover:border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-300"
+          title="Clear all filters"
+        >
+          <p className="text-2xl font-extrabold text-slate-800">{counts.total}</p>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Total</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilters(f => ({ ...f, status: f.status === "active" ? "all" : "active" }))}
+          className={`bg-white rounded-2xl shadow-sm border px-4 py-4 text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-300 ${filters.status === "active" ? "border-emerald-400 ring-2 ring-emerald-200" : "border-slate-100 hover:border-emerald-200"}`}
+          title={filters.status === "active" ? "Click to clear filter" : "Click to filter by Active"}
+        >
+          <p className="text-2xl font-extrabold text-emerald-600">{activityCounts.highly_active + activityCounts.moderately_active}</p>
+          <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wider mt-1">Active</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilters(f => ({ ...f, status: f.status === "low_active" ? "all" : "low_active" }))}
+          className={`bg-white rounded-2xl shadow-sm border px-4 py-4 text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-amber-300 ${filters.status === "low_active" ? "border-amber-400 ring-2 ring-amber-200" : "border-slate-100 hover:border-amber-200"}`}
+          title={filters.status === "low_active" ? "Click to clear filter" : "Click to filter by Low Activity"}
+        >
+          <p className="text-2xl font-extrabold text-amber-600">{activityCounts.low_active}</p>
+          <p className="text-xs font-semibold text-amber-500 uppercase tracking-wider mt-1">Low Activity</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilters(f => ({ ...f, status: f.status === "inactive" ? "all" : "inactive" }))}
+          className={`bg-white rounded-2xl shadow-sm border px-4 py-4 text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-slate-300 ${filters.status === "inactive" ? "border-slate-400 ring-2 ring-slate-200" : "border-slate-100 hover:border-slate-300"}`}
+          title={filters.status === "inactive" ? "Click to clear filter" : "Click to filter by Inactive"}
+        >
+          <p className="text-2xl font-extrabold text-slate-400">{activityCounts.inactive}</p>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">Inactive</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilters(f => ({ ...f, flagged: f.flagged === "flagged" ? "all" : "flagged" }))}
+          className={`bg-white rounded-2xl shadow-sm border px-4 py-4 text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-rose-300 ${filters.flagged === "flagged" ? "border-rose-400 ring-2 ring-rose-200" : "border-slate-100 hover:border-rose-200"}`}
+          title={filters.flagged === "flagged" ? "Click to clear filter" : "Click to filter by Flagged"}
+        >
+          <p className="text-2xl font-extrabold text-rose-600">{counts.flagged}</p>
+          <p className="text-xs font-semibold text-rose-500 uppercase tracking-wider mt-1">Flagged</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectedGroupId("all")}
+          disabled={selectedGroupId === "all"}
+          className={`bg-white rounded-2xl shadow-sm border px-4 py-4 text-left transition-all focus:outline-none focus:ring-2 focus:ring-blue-300 ${selectedGroupId !== "all" ? "border-blue-400 ring-2 ring-blue-200 hover:shadow-md cursor-pointer" : "border-slate-100 cursor-default"}`}
+          title={selectedGroupId !== "all" ? "Click to show all groups" : `${groups.length} group${groups.length === 1 ? "" : "s"} assigned`}
+        >
+          <p className="text-2xl font-extrabold text-blue-600">{groups.length}</p>
+          <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider mt-1">Groups</p>
+        </button>
       </div>
 
       {/* Search + sort + filter toggle */}
@@ -1454,7 +1704,18 @@ export default function MyParticipantsPage() {
       {showFilters && <FilterPanel filters={filters} setFilters={setFilters} onReset={() => setFilters(DEFAULT_FILTERS)} />}
 
       <div className="flex items-center justify-between px-1">
-        <p className="text-xs text-slate-400">Showing <span className="font-semibold text-slate-600">{processed.length}</span> of {counts.total} participants{selectedGroupName && <span> in <span className="font-semibold text-slate-600">{selectedGroupName}</span></span>}</p>
+        <p className="text-xs text-slate-400">
+          {participantsRefreshing ? (
+            <span className="inline-flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+              Updating results…
+            </span>
+          ) : (activeFilterCount > 0 || debouncedSearch) ? (
+            <>Showing <span className="font-semibold text-slate-600">{processed.length}</span> of <span className="font-semibold text-slate-600">{participantsTotal}</span> participant{participantsTotal === 1 ? "" : "s"} matching filters{selectedGroupName && <> in <span className="font-semibold text-slate-600">{selectedGroupName}</span></>}</>
+          ) : (
+            <>Showing <span className="font-semibold text-slate-600">{processed.length}</span> of <span className="font-semibold text-slate-600">{participantsTotal}</span> participant{participantsTotal === 1 ? "" : "s"}{selectedGroupName && <> in <span className="font-semibold text-slate-600">{selectedGroupName}</span></>}</>
+          )}
+        </p>
       </div>
 
       {/* List */}
@@ -1494,9 +1755,9 @@ export default function MyParticipantsPage() {
               return (
                 <div key={p.id} onClick={() => setDetailParticipant(p)} className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <Avatar firstName={p.firstName} lastName={p.lastName} />
+                    <Avatar fullName={p.fullName} />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2"><p className="text-sm font-semibold text-slate-800 truncate">{p.firstName} {p.lastName}</p><StatusDot status={p.status} /></div>
+                      <div className="flex items-center gap-2"><p className="text-sm font-semibold text-slate-800 truncate">{p.fullName}</p><StatusDot status={p.status} /></div>
                       <p className="text-xs text-slate-400 truncate">{p.email || "—"}</p>
                       {p.flags.length > 0 && <div className="flex items-center gap-1 mt-1 flex-wrap">{p.flags.map((f, i) => <FlagBadge key={i} text={f} />)}</div>}
                       <div className="md:hidden mt-2 space-y-1.5">
@@ -1520,7 +1781,7 @@ export default function MyParticipantsPage() {
                   </div>
                   <div className="hidden md:block w-24 text-center"><span className={`text-xs font-medium ${p.status === "inactive" ? "text-amber-600" : "text-slate-400"}`}>{daysSince(p.lastActive) || "—"}</span></div>
                   <div className="hidden md:flex w-20 items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => setNoteTarget(p)} title="Write feedback" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg></button>
+                    <button onClick={() => setNoteTarget(p)} title="Add note or send feedback" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg></button>
                     <button onClick={() => navigate(`/caretaker/reports?tab=comparison&participant=${p.id}`)} title="Generate report" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg></button>
                     <button onClick={() => navigate(`/caretaker/participants/${p.id}`)} title="View full profile" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg></button>
                   </div>

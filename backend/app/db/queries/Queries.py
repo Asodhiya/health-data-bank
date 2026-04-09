@@ -1216,28 +1216,94 @@ class CaretakersQuery:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_groups(self, user_id: uuid.UUID) -> list[Group]:
-        result = await self.db.execute(
-            select(Group)
+    async def _assert_group_owned(self, group_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        """B2: ownership guard for any group-scoped query.
+
+        Raises 404 ('Group not found or not assigned to you') if the group
+        either doesn't exist or isn't owned by the caretaker. Same wording as
+        get_group() so callers don't accidentally leak the difference between
+        'no such group' and 'not yours'.
+        """
+        owns_group = await self.db.scalar(
+            select(Group.group_id)
             .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(Group.group_id == group_id)
             .where(CaretakerProfile.user_id == user_id)
         )
-        return result.scalars().all()
-    
+        if not owns_group:
+            raise HTTPException(status_code=404, detail="Group not found or not assigned to you")
 
+    async def _assert_participant_in_owned_group(
+        self, participant_id: uuid.UUID, user_id: uuid.UUID
+    ) -> None:
+        """B1: ownership guard for any participant-scoped query.
 
-    async def get_group(self, group_id: uuid.UUID, user_id: uuid.UUID) -> Group:
-        result = await self.db.execute(
-            select(Group)
+        Raises 404 ('Participant not found or not assigned to you') if the
+        participant either doesn't exist or isn't a current member of any
+        group owned by this caretaker. Deliberately ambiguous to prevent
+        caretakers from enumerating participant IDs they don't own.
+        """
+        has_access = await self.db.scalar(
+            select(GroupMember.participant_id)
+            .join(Group, Group.group_id == GroupMember.group_id)
             .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(GroupMember.participant_id == participant_id)
+            .where(GroupMember.left_at == None)
+            .where(CaretakerProfile.user_id == user_id)
+            .limit(1)
+        )
+        if not has_access:
+            raise HTTPException(status_code=404, detail="Participant not found or not assigned to you")
+
+    async def get_groups(self, user_id: uuid.UUID) -> list:
+        # Subquery: number of currently-active members per group.
+        member_count_sq = (
+            select(
+                GroupMember.group_id.label("gm_group_id"),
+                func.count(GroupMember.participant_id).label("member_count"),
+            )
+            .where(GroupMember.left_at == None)
+            .group_by(GroupMember.group_id)
+            .subquery()
+        )
+
+        result = await self.db.execute(
+            select(Group, func.coalesce(member_count_sq.c.member_count, 0).label("member_count"))
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .outerjoin(member_count_sq, member_count_sq.c.gm_group_id == Group.group_id)
+            .where(CaretakerProfile.user_id == user_id)
+        )
+        return result.all()
+
+
+
+    async def get_group(self, group_id: uuid.UUID, user_id: uuid.UUID):
+        member_count_sq = (
+            select(
+                GroupMember.group_id.label("gm_group_id"),
+                func.count(GroupMember.participant_id).label("member_count"),
+            )
+            .where(GroupMember.left_at == None)
+            .where(GroupMember.group_id == group_id)
+            .group_by(GroupMember.group_id)
+            .subquery()
+        )
+
+        result = await self.db.execute(
+            select(Group, func.coalesce(member_count_sq.c.member_count, 0).label("member_count"))
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .outerjoin(member_count_sq, member_count_sq.c.gm_group_id == Group.group_id)
             .where(Group.group_id == group_id, CaretakerProfile.user_id == user_id)
         )
-        group = result.scalar_one_or_none()
-        if not group:
+        row = result.one_or_none()
+        if not row:
             raise HTTPException(status_code=404, detail="Group not found or not assigned to you")
-        return group
+        return row
 
     async def get_group_participants(self, group_id: uuid.UUID, user_id: uuid.UUID):
+        # B2: was previously accepting user_id but never using it — group_id
+        # alone was enough to read any group's participants. Now guarded.
+        await self._assert_group_owned(group_id, user_id)
         result = await self.db.execute(
             select(ParticipantProfile, User.first_name, User.last_name, GroupMember.joined_at)
             .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
@@ -1248,9 +1314,13 @@ class CaretakersQuery:
         )
         return result.all()
 
-    async def get_group_participant(self, group_id: uuid.UUID, participant_id: uuid.UUID):
+    async def get_group_participant(self, group_id: uuid.UUID, participant_id: uuid.UUID, user_id: uuid.UUID):
+        # B1: was previously taking only group_id and participant_id with no
+        # caretaker filter. Any caretaker could read any participant in any
+        # group just by guessing IDs. Now guarded.
+        await self._assert_group_owned(group_id, user_id)
         result = await self.db.execute(
-            select(ParticipantProfile, User.first_name, User.last_name, GroupMember.joined_at)
+            select(ParticipantProfile, User.first_name, User.last_name, User.status, GroupMember.joined_at)
             .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
             .join(User, User.user_id == ParticipantProfile.user_id)
             .where(GroupMember.group_id == group_id)
@@ -1310,6 +1380,14 @@ class CaretakersQuery:
                 FormSubmission.participant_id,
                 func.max(func.cast(FormSubmission.submitted_at, SADate)).label("last_submission_at"),
             )
+            .join(
+                FormDeployment,
+                and_(
+                    FormDeployment.group_id == FormSubmission.group_id,
+                    FormDeployment.form_id == FormSubmission.form_id,
+                    FormDeployment.revoked_at == None,
+                ),
+            )
             .where(FormSubmission.participant_id.in_(caretaker_participants_sq))
             .group_by(FormSubmission.participant_id)
             .subquery()
@@ -1346,6 +1424,20 @@ class CaretakersQuery:
         return counts
 
     async def _compute_goal_stats_map(self, participant_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
+        # B22: previously this method was an N+1 query: it loaded the active
+        # goals, then for EACH (participant, goal) pair called
+        # ParticipantQuery._compute_goal_current_value, which ran its own SQL
+        # aggregation. For 11 participants × 5 goals that's 55 sequential
+        # queries — about 1 second of latency on the My Participants page.
+        #
+        # The fix: fetch all relevant HealthDataPoints in ONE batched query
+        # and do the per-goal window/aggregation logic in Python. The math is
+        # identical to ParticipantQuery._compute_goal_current_value, just
+        # done in memory after a single trip to the database. We still call
+        # the participant query class for its PURE helpers (no SQL):
+        # _window_bounds, _is_numeric_datatype, _goal_completed. Those are
+        # date math and value comparison only — no DB I/O — so reusing them
+        # has no cross-role behavioral impact.
         if not participant_ids:
             return {}
 
@@ -1358,10 +1450,67 @@ class CaretakersQuery:
         rows = result.all()
 
         grouped: dict[uuid.UUID, list[tuple[HealthGoal, str | None]]] = {}
+        all_element_ids: set[uuid.UUID] = set()
         for goal, datatype in rows:
             grouped.setdefault(goal.participant_id, []).append((goal, datatype))
+            all_element_ids.add(goal.element_id)
 
+        # ── Single batched data-point fetch ──
+        # One query for ALL goal-source data points across every (participant,
+        # element) pair we care about. We do NOT filter by date here because
+        # each goal has its own window — the per-goal date filter is applied
+        # in Python below. The query is bounded by participant_ids and
+        # element_ids so it can't return excess data.
+        points_by_key: dict[tuple[uuid.UUID, uuid.UUID], list] = {}
+        if all_element_ids:
+            points_result = await self.db.execute(
+                select(
+                    HealthDataPoint.participant_id,
+                    HealthDataPoint.element_id,
+                    HealthDataPoint.value_number,
+                    HealthDataPoint.value_text,
+                    HealthDataPoint.observed_at,
+                )
+                .where(HealthDataPoint.participant_id.in_(participant_ids))
+                .where(HealthDataPoint.element_id.in_(all_element_ids))
+                .where(HealthDataPoint.source_type == "goal")
+            )
+            for p_row in points_result:
+                key = (p_row.participant_id, p_row.element_id)
+                points_by_key.setdefault(key, []).append(p_row)
+
+        # We use ParticipantQuery only for its pure helpers (no SQL).
         participant_query = ParticipantQuery(self.db)
+        as_of = datetime.now(timezone.utc)
+
+        def _current_value_for(goal: HealthGoal, datatype: str | None, pid: uuid.UUID):
+            """In-Python equivalent of _compute_goal_current_value."""
+            start, end = participant_query._window_bounds(goal.window, as_of)
+            points = points_by_key.get((pid, goal.element_id), [])
+            in_window = [
+                p for p in points
+                if (start is None or p.observed_at >= start)
+                and (end is None or p.observed_at < end)
+            ]
+            progress_mode = (goal.progress_mode or "incremental").lower()
+            numeric = participant_query._is_numeric_datatype(datatype)
+
+            if progress_mode == "incremental" and numeric:
+                # SQL COUNT(value_number) ignores NULLs; mirror that here.
+                non_null = [p.value_number for p in in_window if p.value_number is not None]
+                if not non_null:
+                    return None
+                return float(sum(non_null))
+
+            # Latest mode: pick the row with the most recent observed_at,
+            # prefer value_number if set, else value_text.
+            if not in_window:
+                return None
+            latest = max(in_window, key=lambda p: p.observed_at)
+            if latest.value_number is not None:
+                return float(latest.value_number)
+            return latest.value_text
+
         stats_map: dict[uuid.UUID, dict] = {}
         for pid in participant_ids:
             goals = grouped.get(pid, [])
@@ -1375,9 +1524,7 @@ class CaretakersQuery:
 
             completed_count = 0
             for goal, datatype in goals:
-                current = await participant_query._compute_goal_current_value(
-                    goal, datatype, pid, as_of=datetime.now(timezone.utc)
-                )
+                current = _current_value_for(goal, datatype, pid)
                 if participant_query._goal_completed(goal, current):
                     completed_count += 1
 
@@ -1435,6 +1582,7 @@ class CaretakersQuery:
             .where(CaretakerProfile.user_id == user_id)
             .where(GroupMember.left_at == None)
         )
+
         submissions_stmt = (
             select(
                 FormSubmission.participant_id,
@@ -1571,6 +1719,14 @@ class CaretakersQuery:
                 )
             )
 
+        # B8: Compute total_count BEFORE applying ORDER BY / LIMIT / OFFSET so
+        # the frontend gets the real filtered total. Note: this count reflects
+        # SQL-level filters only — goal_progress is post-filtered in Python
+        # below, so when goal_progress is set this is an upper bound. That
+        # limitation is tracked as B22.
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        sql_total = (await self.db.execute(count_stmt)).scalar() or 0
+
         # ── Sorting ───────────────────────────────────────────────────────────
         is_desc = sort_dir == "desc"
         if sort_by == "name":
@@ -1640,7 +1796,7 @@ class CaretakersQuery:
         elif goal_progress == "no_goals":
             output_rows = [row for row in output_rows if int(getattr(row, "goals_total_count", 0) or 0) == 0]
 
-        return output_rows
+        return output_rows, int(sql_total)
 
     async def get_participant_summary(
         self,
@@ -1662,6 +1818,14 @@ class CaretakersQuery:
                 FormSubmission.participant_id,
                 func.count(distinct(FormSubmission.form_id)).label("submitted_count"),
                 func.cast(func.max(FormSubmission.submitted_at), SADate).label("last_submission_at"),
+            )
+            .join(
+                FormDeployment,
+                and_(
+                    FormDeployment.group_id == FormSubmission.group_id,
+                    FormDeployment.form_id == FormSubmission.form_id,
+                    FormDeployment.revoked_at == None,
+                ),
             )
             .group_by(FormSubmission.participant_id)
             .subquery()
@@ -1749,7 +1913,14 @@ class CaretakersQuery:
         participant_id: uuid.UUID,
         date_from: date | None = None,
         date_to: date | None = None,
+        caretaker_user_id: uuid.UUID | None = None,
     ):
+        # B1: when called from a caretaker route, caretaker_user_id MUST be
+        # passed so the ownership check fires. The param is optional only
+        # because admin_service.py also calls this function and admins are
+        # already authorized to see any participant's submissions.
+        if caretaker_user_id is not None:
+            await self._assert_participant_in_owned_group(participant_id, caretaker_user_id)
         stmt = (
             select(
                 FormSubmission.submission_id,
@@ -1771,7 +1942,32 @@ class CaretakersQuery:
         result = await self.db.execute(stmt)
         return result.all()
 
-    async def get_group_elements(self, group_id: uuid.UUID):
+    async def get_group_elements(self, group_id: uuid.UUID, user_id: uuid.UUID):
+        # B2: was previously taking only group_id with no caretaker filter,
+        # which let any caretaker read the deployed elements of any group.
+        await self._assert_group_owned(group_id, user_id)
+
+        # Reports v2: also return description (was missing from the SELECT),
+        # the form name(s) where this element appears in this group's
+        # currently-deployed forms, and a count of HealthDataPoints for this
+        # element across all current members of the group. The form_names
+        # array uses array_agg(distinct ...) so multi-form elements collapse
+        # into a single row.
+        members_sq = (
+            select(GroupMember.participant_id)
+            .where(GroupMember.group_id == group_id)
+            .where(GroupMember.left_at == None)
+        ).subquery()
+
+        data_point_count_sq = (
+            select(
+                HealthDataPoint.element_id.label("element_id"),
+                func.count(HealthDataPoint.data_id).label("dp_count"),
+            )
+            .where(HealthDataPoint.participant_id.in_(select(members_sq.c.participant_id)))
+            .group_by(HealthDataPoint.element_id)
+        ).subquery()
+
         result = await self.db.execute(
             select(
                 DataElement.element_id,
@@ -1779,14 +1975,108 @@ class CaretakersQuery:
                 DataElement.label,
                 DataElement.unit,
                 DataElement.datatype,
+                DataElement.description,
+                func.array_agg(func.distinct(SurveyForm.title)).label("form_names"),
+                func.coalesce(
+                    func.max(data_point_count_sq.c.dp_count), 0
+                ).label("data_point_count"),
             )
             .join(FieldElementMap, FieldElementMap.element_id == DataElement.element_id)
             .join(FormField, FormField.field_id == FieldElementMap.field_id)
             .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
             .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
+            .outerjoin(
+                data_point_count_sq,
+                data_point_count_sq.c.element_id == DataElement.element_id,
+            )
             .where(FormDeployment.group_id == group_id)
             .where(FormDeployment.revoked_at == None)
-            .distinct()
+            .group_by(
+                DataElement.element_id,
+                DataElement.code,
+                DataElement.label,
+                DataElement.unit,
+                DataElement.datatype,
+                DataElement.description,
+            )
+        )
+        return result.all()
+
+    async def get_participant_data_elements(
+        self, participant_id: uuid.UUID, user_id: uuid.UUID
+    ):
+        """Reports v2: data elements relevant to a specific participant.
+
+        Returns the union of:
+          (a) elements currently deployed to any group the participant is a
+              current member of, AND
+          (b) elements with at least one HealthDataPoint for this participant.
+
+        Each row includes a count of data points for THIS participant (not
+        the whole group) and a flag indicating whether the element is still
+        deployed somewhere for them.
+        """
+        await self._assert_participant_in_owned_group(participant_id, user_id)
+
+        # (a) Currently-deployed elements for this participant's groups.
+        deployed_elements_sq = (
+            select(
+                DataElement.element_id.label("element_id"),
+                func.array_agg(func.distinct(SurveyForm.title)).label("form_names"),
+            )
+            .join(FieldElementMap, FieldElementMap.element_id == DataElement.element_id)
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
+            .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
+            .join(
+                GroupMember,
+                and_(
+                    GroupMember.group_id == FormDeployment.group_id,
+                    GroupMember.participant_id == participant_id,
+                    GroupMember.left_at == None,
+                ),
+            )
+            .where(FormDeployment.revoked_at == None)
+            .group_by(DataElement.element_id)
+        ).subquery()
+
+        # (b) Per-participant data point counts.
+        dp_count_sq = (
+            select(
+                HealthDataPoint.element_id.label("element_id"),
+                func.count(HealthDataPoint.data_id).label("dp_count"),
+            )
+            .where(HealthDataPoint.participant_id == participant_id)
+            .group_by(HealthDataPoint.element_id)
+        ).subquery()
+
+        # Union: any element from (a) OR (b).
+        relevant_ids_stmt = select(deployed_elements_sq.c.element_id).union(
+            select(dp_count_sq.c.element_id)
+        )
+
+        result = await self.db.execute(
+            select(
+                DataElement.element_id,
+                DataElement.code,
+                DataElement.label,
+                DataElement.unit,
+                DataElement.datatype,
+                DataElement.description,
+                deployed_elements_sq.c.form_names.label("form_names"),
+                func.coalesce(dp_count_sq.c.dp_count, 0).label("data_point_count"),
+                (deployed_elements_sq.c.element_id != None).label("is_currently_deployed"),
+            )
+            .outerjoin(
+                deployed_elements_sq,
+                deployed_elements_sq.c.element_id == DataElement.element_id,
+            )
+            .outerjoin(
+                dp_count_sq,
+                dp_count_sq.c.element_id == DataElement.element_id,
+            )
+            .where(DataElement.element_id.in_(relevant_ids_stmt))
+            .order_by(DataElement.label)
         )
         return result.all()
 
@@ -1882,7 +2172,38 @@ class CaretakersQuery:
         element_ids: list[uuid.UUID] | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        participant_status: str = "all",
     ) -> Report:
+        # B44: ownership guard. Without this, any caretaker could pass any
+        # group_id and get back aggregated stats for that group.
+        await self._assert_group_owned(group_id, requested_by)
+
+        # Reports v2: optional participant activity filter. The same
+        # deployment-aware definition the dashboard's stat cards use:
+        #   "active" = submitted to a currently-deployed form in the last 14d
+        #   "inactive" = no qualifying submission in the last 30d (or never)
+        today = _utc_today()
+        recent_submissions_sq = (
+            select(
+                FormSubmission.participant_id,
+                func.max(func.cast(FormSubmission.submitted_at, SADate)).label("last_submission_at"),
+            )
+            .join(
+                FormDeployment,
+                and_(
+                    FormDeployment.group_id == FormSubmission.group_id,
+                    FormDeployment.form_id == FormSubmission.form_id,
+                    FormDeployment.revoked_at == None,
+                ),
+            )
+            .join(GroupMember, and_(
+                GroupMember.participant_id == FormSubmission.participant_id,
+                GroupMember.group_id == group_id,
+                GroupMember.left_at == None,
+            ))
+            .group_by(FormSubmission.participant_id)
+        ).subquery()
+
         stmt = (
             select(
                 DataElement.element_id,
@@ -1901,6 +2222,23 @@ class CaretakersQuery:
             .where(GroupMember.left_at == None)
             .group_by(DataElement.element_id, DataElement.code, DataElement.label, DataElement.unit)
         )
+
+        if participant_status == "active":
+            active_pids_sq = (
+                select(recent_submissions_sq.c.participant_id)
+                .where(recent_submissions_sq.c.last_submission_at >= today - timedelta(days=14))
+            )
+            stmt = stmt.where(HealthDataPoint.participant_id.in_(active_pids_sq))
+        elif participant_status == "inactive":
+            # Inactive = no qualifying submission in the last 30 days. This
+            # includes both participants whose newest submission is older
+            # than 30 days AND participants who have never submitted at all.
+            recent_pids_sq = (
+                select(recent_submissions_sq.c.participant_id)
+                .where(recent_submissions_sq.c.last_submission_at >= today - timedelta(days=30))
+            )
+            stmt = stmt.where(~HealthDataPoint.participant_id.in_(recent_pids_sq))
+
         if element_ids:
             stmt = stmt.where(HealthDataPoint.element_id.in_(element_ids))
         if date_from:
@@ -1923,7 +2261,8 @@ class CaretakersQuery:
                     "count": row.count,
                 }
                 for row in rows
-            ]
+            ],
+            "participant_status": participant_status,
         }
 
         report = Report(
@@ -1934,6 +2273,7 @@ class CaretakersQuery:
                 "element_ids": [str(e) for e in (element_ids or [])],
                 "date_from": str(date_from) if date_from else None,
                 "date_to": str(date_to) if date_to else None,
+                "participant_status": participant_status,
             },
         )
         self.db.add(report)
@@ -1959,6 +2299,42 @@ class CaretakersQuery:
         date_from: date | None = None,
         date_to: date | None = None,
     ) -> Report:
+        # B45: ownership guards on every ID this function consumes. Previously
+        # this function had no ownership checks at all — any caretaker could
+        # request a comparison report between any two participants, or between
+        # a participant and any group, regardless of ownership. The "all"
+        # branch was even worse: it aggregated over every HealthDataPoint in
+        # the entire database, leaking averages from participants the
+        # caretaker had no access to.
+
+        # Subject: must always be owned by the caretaker.
+        await self._assert_participant_in_owned_group(participant_id, requested_by)
+
+        # Branch-specific guards.
+        if compare_with == "participant":
+            if not compare_participant_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail="compare_participant_id is required when compare_with is 'participant'",
+                )
+            await self._assert_participant_in_owned_group(compare_participant_id, requested_by)
+        elif compare_with == "group":
+            if not group_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail="group_id is required when compare_with is 'group'",
+                )
+            await self._assert_group_owned(group_id, requested_by)
+        elif compare_with == "all":
+            # Nothing to validate here directly, but the "all" set is scoped
+            # below to only participants in the caretaker's owned groups —
+            # NOT literally every participant in the system.
+            pass
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid compare_with value: {compare_with!r}",
+            )
 
         def _build_stats_sq(participant_filter):
             stmt = (
@@ -1990,8 +2366,18 @@ class CaretakersQuery:
                 GroupMember.left_at == None,
             )
             comparison_sq = _build_stats_sq(HealthDataPoint.participant_id.in_(members_sq))
-        else:  # "all"
-            comparison_sq = _build_stats_sq(True)
+        else:  # "all" — B45: scoped to caretaker's owned participants, NOT
+               # the entire system. Previously this was _build_stats_sq(True)
+               # which aggregated over every HealthDataPoint regardless of
+               # ownership.
+            caretaker_owned_pids_sq = (
+                select(GroupMember.participant_id)
+                .join(Group, Group.group_id == GroupMember.group_id)
+                .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+                .where(GroupMember.left_at == None)
+                .where(CaretakerProfile.user_id == requested_by)
+            )
+            comparison_sq = _build_stats_sq(HealthDataPoint.participant_id.in_(caretaker_owned_pids_sq))
 
         stmt = (
             select(
@@ -2092,6 +2478,10 @@ class CaretakersQuery:
         message: str,
         submission_id: uuid.UUID | None = None,
     ) -> CaretakerFeedback:
+        # B1: ownership guard — previously this only checked that both
+        # entities exist independently, allowing a caretaker to create
+        # feedback rows attached to participants in other caretakers' groups.
+        await self._assert_participant_in_owned_group(participant_id, caretaker_user_id)
         row = (await self.db.execute(
             select(CaretakerProfile.caretaker_id, ParticipantProfile.user_id)
             .where(CaretakerProfile.user_id == caretaker_user_id)
@@ -2111,7 +2501,20 @@ class CaretakersQuery:
 
         return feedback
 
-    async def list_feedback(self, participant_id: uuid.UUID) -> list[CaretakerFeedback]:
+    async def list_feedback(
+        self,
+        participant_id: uuid.UUID,
+        caretaker_user_id: uuid.UUID | None = None,
+    ) -> list[CaretakerFeedback]:
+        # B1: when called from a caretaker route, caretaker_user_id MUST be
+        # passed so the ownership check fires. Optional because
+        # participants_only.py uses this endpoint for participants to read
+        # feedback ABOUT themselves (a participant viewing their own data
+        # doesn't go through caretaker ownership rules).
+        # Note: B29 was closed as not-a-bug — feedback is intentionally
+        # collaborative across all caretakers assigned to the same participant.
+        if caretaker_user_id is not None:
+            await self._assert_participant_in_owned_group(participant_id, caretaker_user_id)
         result = await self.db.execute(
             select(CaretakerFeedback)
             .where(CaretakerFeedback.participant_id == participant_id)
@@ -2120,8 +2523,10 @@ class CaretakersQuery:
         return result.scalars().all()
 
     async def get_submission_detail(
-        self, participant_id: uuid.UUID, submission_id: uuid.UUID
+        self, participant_id: uuid.UUID, submission_id: uuid.UUID, user_id: uuid.UUID
     ):
+        # B1: ownership guard
+        await self._assert_participant_in_owned_group(participant_id, user_id)
         row = (await self.db.execute(
             select(
                 FormSubmission.submission_id,
@@ -2154,7 +2559,9 @@ class CaretakersQuery:
 
         return row, answers
 
-    async def get_participant_goals(self, participant_id: uuid.UUID):
+    async def get_participant_goals(self, participant_id: uuid.UUID, user_id: uuid.UUID):
+        # B1: ownership guard
+        await self._assert_participant_in_owned_group(participant_id, user_id)
         return await ParticipantQuery(self.db).get_goals(participant_id)
 
     async def get_health_trends(
@@ -2163,7 +2570,15 @@ class CaretakersQuery:
         element_ids: list[uuid.UUID] | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> list:
+        # B1: ownership guard. Param is keyword-only positionally because it
+        # was added at the end to avoid disturbing existing positional callers,
+        # but it is REQUIRED in practice — passing None bypasses the check
+        # and should never happen from a caretaker route.
+        if user_id is None:
+            raise HTTPException(status_code=500, detail="get_health_trends: missing user_id (caretaker context required)")
+        await self._assert_participant_in_owned_group(participant_id, user_id)
         stmt = (
             select(
                 DataElement.element_id,

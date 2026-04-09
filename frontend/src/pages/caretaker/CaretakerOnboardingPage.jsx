@@ -162,6 +162,11 @@ export default function CaretakerOnboardingPage() {
         working_hours_end: form.workingHoursEnd,
         contact_preference: form.contactPreference,
         available_days: form.availableDays,
+        // B19: explicit signal that initial onboarding is now complete.
+        // The backend used to auto-flip this on every PATCH, which incorrectly
+        // marked profile-edits as onboarding completion. Now the onboarding
+        // page is the only place that sends this true.
+        onboarding_completed: true,
       });
       await refetch();
       setSuccess(true);
