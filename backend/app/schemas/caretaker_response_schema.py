@@ -206,6 +206,10 @@ class ReportGenerateRequest(BaseModel):
     date_to: Optional[date] = None
     element_ids: list[UUID] = Field(default_factory=list)  # filter by data elements
     report_type: Literal["numeric", "graph"] = "numeric"
+    # Reports v2: filter the underlying participant set by activity status.
+    # "all" includes everyone, "active" only highly_active+moderately_active,
+    # "inactive" only inactive (matches the dashboard's bucket definitions).
+    participant_status: Literal["all", "active", "inactive"] = "all"
 
 
 class ComparisonReportRequest(BaseModel):
@@ -238,6 +242,28 @@ class GroupDataElementItem(BaseModel):
     label: Optional[str] = None
     unit: Optional[str] = None
     datatype: Optional[str] = None
+    # Reports v2: richer metadata for the metric picker.
+    description: Optional[str] = None
+    form_names: List[str] = Field(default_factory=list)
+    data_point_count: int = 0
+
+
+class ParticipantDataElementItem(BaseModel):
+    """Reports v2: data elements relevant to a single participant.
+
+    Returned by GET /caretaker/participants/{id}/data-elements. Includes any
+    element either currently deployed to one of the participant's groups OR
+    with at least one HealthDataPoint for the participant — whichever applies.
+    """
+    element_id: UUID
+    code: Optional[str] = None
+    label: Optional[str] = None
+    unit: Optional[str] = None
+    datatype: Optional[str] = None
+    description: Optional[str] = None
+    form_names: List[str] = Field(default_factory=list)
+    data_point_count: int = 0
+    is_currently_deployed: bool = False
 
 
 class GroupCreateRequest(BaseModel):

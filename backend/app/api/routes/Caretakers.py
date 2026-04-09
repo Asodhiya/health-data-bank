@@ -17,6 +17,7 @@ from app.schemas.caretaker_response_schema import (
     GroupItem,
     GroupMemberAddRequest, GroupMemberItem,
     GroupDataElementItem,
+    ParticipantDataElementItem,
     ParticipantListItem, ParticipantDetail, ParticipantActivityCounts,
     PaginatedParticipants,
     FeedbackCreate, FeedbackItem,
@@ -164,6 +165,13 @@ async def list_group_elements(
             label=row.label,
             unit=row.unit,
             datatype=row.datatype,
+            description=row.description,
+            # form_names comes back as None when there are no matches; coerce
+            # to [] so the response shape is consistent. The query also
+            # filters out None entries from the array_agg in case any join
+            # produced a NULL row.
+            form_names=[n for n in (row.form_names or []) if n],
+            data_point_count=int(row.data_point_count or 0),
         )
         for row in rows
     ]
@@ -592,6 +600,7 @@ async def generate_group_report(
         element_ids=body.element_ids or None,
         date_from=body.date_from,
         date_to=body.date_to,
+        participant_status=body.participant_status,
     )
     return ReportResponse(
         report_id=report.report_id,
@@ -720,6 +729,43 @@ async def get_health_trends(
     return await CaretakersQuery(db).get_health_trends(
         participant_id, element_ids, date_from, date_to, user_id=current_user.user_id
     )
+
+
+# ── Participant Data Elements (Reports v2) ─────────────────────────────────────
+
+@router.get(
+    "/participants/{participant_id}/data-elements",
+    response_model=list[ParticipantDataElementItem],
+)
+async def list_participant_data_elements(
+    participant_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
+):
+    """Reports v2: returns data elements relevant to this participant.
+
+    Backs the metric pickers in the Comparison and Trends tabs of the Reports
+    page so caretakers only see metrics that will actually return data for
+    the selected participant. Includes both currently-deployed elements and
+    elements with historical data points.
+    """
+    rows = await CaretakersQuery(db).get_participant_data_elements(
+        participant_id, current_user.user_id
+    )
+    return [
+        ParticipantDataElementItem(
+            element_id=row.element_id,
+            code=row.code,
+            label=row.label,
+            unit=row.unit,
+            datatype=row.datatype,
+            description=row.description,
+            form_names=[n for n in (row.form_names or []) if n],
+            data_point_count=int(row.data_point_count or 0),
+            is_currently_deployed=bool(row.is_currently_deployed),
+        )
+        for row in rows
+    ]
 
 
 # ── Notifications ──────────────────────────────────────────────────────────────

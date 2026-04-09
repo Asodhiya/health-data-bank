@@ -1424,6 +1424,20 @@ class CaretakersQuery:
         return counts
 
     async def _compute_goal_stats_map(self, participant_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
+        # B22: previously this method was an N+1 query: it loaded the active
+        # goals, then for EACH (participant, goal) pair called
+        # ParticipantQuery._compute_goal_current_value, which ran its own SQL
+        # aggregation. For 11 participants × 5 goals that's 55 sequential
+        # queries — about 1 second of latency on the My Participants page.
+        #
+        # The fix: fetch all relevant HealthDataPoints in ONE batched query
+        # and do the per-goal window/aggregation logic in Python. The math is
+        # identical to ParticipantQuery._compute_goal_current_value, just
+        # done in memory after a single trip to the database. We still call
+        # the participant query class for its PURE helpers (no SQL):
+        # _window_bounds, _is_numeric_datatype, _goal_completed. Those are
+        # date math and value comparison only — no DB I/O — so reusing them
+        # has no cross-role behavioral impact.
         if not participant_ids:
             return {}
 
@@ -1436,10 +1450,67 @@ class CaretakersQuery:
         rows = result.all()
 
         grouped: dict[uuid.UUID, list[tuple[HealthGoal, str | None]]] = {}
+        all_element_ids: set[uuid.UUID] = set()
         for goal, datatype in rows:
             grouped.setdefault(goal.participant_id, []).append((goal, datatype))
+            all_element_ids.add(goal.element_id)
 
+        # ── Single batched data-point fetch ──
+        # One query for ALL goal-source data points across every (participant,
+        # element) pair we care about. We do NOT filter by date here because
+        # each goal has its own window — the per-goal date filter is applied
+        # in Python below. The query is bounded by participant_ids and
+        # element_ids so it can't return excess data.
+        points_by_key: dict[tuple[uuid.UUID, uuid.UUID], list] = {}
+        if all_element_ids:
+            points_result = await self.db.execute(
+                select(
+                    HealthDataPoint.participant_id,
+                    HealthDataPoint.element_id,
+                    HealthDataPoint.value_number,
+                    HealthDataPoint.value_text,
+                    HealthDataPoint.observed_at,
+                )
+                .where(HealthDataPoint.participant_id.in_(participant_ids))
+                .where(HealthDataPoint.element_id.in_(all_element_ids))
+                .where(HealthDataPoint.source_type == "goal")
+            )
+            for p_row in points_result:
+                key = (p_row.participant_id, p_row.element_id)
+                points_by_key.setdefault(key, []).append(p_row)
+
+        # We use ParticipantQuery only for its pure helpers (no SQL).
         participant_query = ParticipantQuery(self.db)
+        as_of = datetime.now(timezone.utc)
+
+        def _current_value_for(goal: HealthGoal, datatype: str | None, pid: uuid.UUID):
+            """In-Python equivalent of _compute_goal_current_value."""
+            start, end = participant_query._window_bounds(goal.window, as_of)
+            points = points_by_key.get((pid, goal.element_id), [])
+            in_window = [
+                p for p in points
+                if (start is None or p.observed_at >= start)
+                and (end is None or p.observed_at < end)
+            ]
+            progress_mode = (goal.progress_mode or "incremental").lower()
+            numeric = participant_query._is_numeric_datatype(datatype)
+
+            if progress_mode == "incremental" and numeric:
+                # SQL COUNT(value_number) ignores NULLs; mirror that here.
+                non_null = [p.value_number for p in in_window if p.value_number is not None]
+                if not non_null:
+                    return None
+                return float(sum(non_null))
+
+            # Latest mode: pick the row with the most recent observed_at,
+            # prefer value_number if set, else value_text.
+            if not in_window:
+                return None
+            latest = max(in_window, key=lambda p: p.observed_at)
+            if latest.value_number is not None:
+                return float(latest.value_number)
+            return latest.value_text
+
         stats_map: dict[uuid.UUID, dict] = {}
         for pid in participant_ids:
             goals = grouped.get(pid, [])
@@ -1453,9 +1524,7 @@ class CaretakersQuery:
 
             completed_count = 0
             for goal, datatype in goals:
-                current = await participant_query._compute_goal_current_value(
-                    goal, datatype, pid, as_of=datetime.now(timezone.utc)
-                )
+                current = _current_value_for(goal, datatype, pid)
                 if participant_query._goal_completed(goal, current):
                     completed_count += 1
 
@@ -1877,6 +1946,28 @@ class CaretakersQuery:
         # B2: was previously taking only group_id with no caretaker filter,
         # which let any caretaker read the deployed elements of any group.
         await self._assert_group_owned(group_id, user_id)
+
+        # Reports v2: also return description (was missing from the SELECT),
+        # the form name(s) where this element appears in this group's
+        # currently-deployed forms, and a count of HealthDataPoints for this
+        # element across all current members of the group. The form_names
+        # array uses array_agg(distinct ...) so multi-form elements collapse
+        # into a single row.
+        members_sq = (
+            select(GroupMember.participant_id)
+            .where(GroupMember.group_id == group_id)
+            .where(GroupMember.left_at == None)
+        ).subquery()
+
+        data_point_count_sq = (
+            select(
+                HealthDataPoint.element_id.label("element_id"),
+                func.count(HealthDataPoint.data_id).label("dp_count"),
+            )
+            .where(HealthDataPoint.participant_id.in_(select(members_sq.c.participant_id)))
+            .group_by(HealthDataPoint.element_id)
+        ).subquery()
+
         result = await self.db.execute(
             select(
                 DataElement.element_id,
@@ -1884,14 +1975,108 @@ class CaretakersQuery:
                 DataElement.label,
                 DataElement.unit,
                 DataElement.datatype,
+                DataElement.description,
+                func.array_agg(func.distinct(SurveyForm.title)).label("form_names"),
+                func.coalesce(
+                    func.max(data_point_count_sq.c.dp_count), 0
+                ).label("data_point_count"),
             )
             .join(FieldElementMap, FieldElementMap.element_id == DataElement.element_id)
             .join(FormField, FormField.field_id == FieldElementMap.field_id)
             .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
             .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
+            .outerjoin(
+                data_point_count_sq,
+                data_point_count_sq.c.element_id == DataElement.element_id,
+            )
             .where(FormDeployment.group_id == group_id)
             .where(FormDeployment.revoked_at == None)
-            .distinct()
+            .group_by(
+                DataElement.element_id,
+                DataElement.code,
+                DataElement.label,
+                DataElement.unit,
+                DataElement.datatype,
+                DataElement.description,
+            )
+        )
+        return result.all()
+
+    async def get_participant_data_elements(
+        self, participant_id: uuid.UUID, user_id: uuid.UUID
+    ):
+        """Reports v2: data elements relevant to a specific participant.
+
+        Returns the union of:
+          (a) elements currently deployed to any group the participant is a
+              current member of, AND
+          (b) elements with at least one HealthDataPoint for this participant.
+
+        Each row includes a count of data points for THIS participant (not
+        the whole group) and a flag indicating whether the element is still
+        deployed somewhere for them.
+        """
+        await self._assert_participant_in_owned_group(participant_id, user_id)
+
+        # (a) Currently-deployed elements for this participant's groups.
+        deployed_elements_sq = (
+            select(
+                DataElement.element_id.label("element_id"),
+                func.array_agg(func.distinct(SurveyForm.title)).label("form_names"),
+            )
+            .join(FieldElementMap, FieldElementMap.element_id == DataElement.element_id)
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
+            .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
+            .join(
+                GroupMember,
+                and_(
+                    GroupMember.group_id == FormDeployment.group_id,
+                    GroupMember.participant_id == participant_id,
+                    GroupMember.left_at == None,
+                ),
+            )
+            .where(FormDeployment.revoked_at == None)
+            .group_by(DataElement.element_id)
+        ).subquery()
+
+        # (b) Per-participant data point counts.
+        dp_count_sq = (
+            select(
+                HealthDataPoint.element_id.label("element_id"),
+                func.count(HealthDataPoint.data_id).label("dp_count"),
+            )
+            .where(HealthDataPoint.participant_id == participant_id)
+            .group_by(HealthDataPoint.element_id)
+        ).subquery()
+
+        # Union: any element from (a) OR (b).
+        relevant_ids_stmt = select(deployed_elements_sq.c.element_id).union(
+            select(dp_count_sq.c.element_id)
+        )
+
+        result = await self.db.execute(
+            select(
+                DataElement.element_id,
+                DataElement.code,
+                DataElement.label,
+                DataElement.unit,
+                DataElement.datatype,
+                DataElement.description,
+                deployed_elements_sq.c.form_names.label("form_names"),
+                func.coalesce(dp_count_sq.c.dp_count, 0).label("data_point_count"),
+                (deployed_elements_sq.c.element_id != None).label("is_currently_deployed"),
+            )
+            .outerjoin(
+                deployed_elements_sq,
+                deployed_elements_sq.c.element_id == DataElement.element_id,
+            )
+            .outerjoin(
+                dp_count_sq,
+                dp_count_sq.c.element_id == DataElement.element_id,
+            )
+            .where(DataElement.element_id.in_(relevant_ids_stmt))
+            .order_by(DataElement.label)
         )
         return result.all()
 
@@ -1987,7 +2172,38 @@ class CaretakersQuery:
         element_ids: list[uuid.UUID] | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        participant_status: str = "all",
     ) -> Report:
+        # B44: ownership guard. Without this, any caretaker could pass any
+        # group_id and get back aggregated stats for that group.
+        await self._assert_group_owned(group_id, requested_by)
+
+        # Reports v2: optional participant activity filter. The same
+        # deployment-aware definition the dashboard's stat cards use:
+        #   "active" = submitted to a currently-deployed form in the last 14d
+        #   "inactive" = no qualifying submission in the last 30d (or never)
+        today = _utc_today()
+        recent_submissions_sq = (
+            select(
+                FormSubmission.participant_id,
+                func.max(func.cast(FormSubmission.submitted_at, SADate)).label("last_submission_at"),
+            )
+            .join(
+                FormDeployment,
+                and_(
+                    FormDeployment.group_id == FormSubmission.group_id,
+                    FormDeployment.form_id == FormSubmission.form_id,
+                    FormDeployment.revoked_at == None,
+                ),
+            )
+            .join(GroupMember, and_(
+                GroupMember.participant_id == FormSubmission.participant_id,
+                GroupMember.group_id == group_id,
+                GroupMember.left_at == None,
+            ))
+            .group_by(FormSubmission.participant_id)
+        ).subquery()
+
         stmt = (
             select(
                 DataElement.element_id,
@@ -2006,6 +2222,23 @@ class CaretakersQuery:
             .where(GroupMember.left_at == None)
             .group_by(DataElement.element_id, DataElement.code, DataElement.label, DataElement.unit)
         )
+
+        if participant_status == "active":
+            active_pids_sq = (
+                select(recent_submissions_sq.c.participant_id)
+                .where(recent_submissions_sq.c.last_submission_at >= today - timedelta(days=14))
+            )
+            stmt = stmt.where(HealthDataPoint.participant_id.in_(active_pids_sq))
+        elif participant_status == "inactive":
+            # Inactive = no qualifying submission in the last 30 days. This
+            # includes both participants whose newest submission is older
+            # than 30 days AND participants who have never submitted at all.
+            recent_pids_sq = (
+                select(recent_submissions_sq.c.participant_id)
+                .where(recent_submissions_sq.c.last_submission_at >= today - timedelta(days=30))
+            )
+            stmt = stmt.where(~HealthDataPoint.participant_id.in_(recent_pids_sq))
+
         if element_ids:
             stmt = stmt.where(HealthDataPoint.element_id.in_(element_ids))
         if date_from:
@@ -2028,7 +2261,8 @@ class CaretakersQuery:
                     "count": row.count,
                 }
                 for row in rows
-            ]
+            ],
+            "participant_status": participant_status,
         }
 
         report = Report(
@@ -2039,6 +2273,7 @@ class CaretakersQuery:
                 "element_ids": [str(e) for e in (element_ids or [])],
                 "date_from": str(date_from) if date_from else None,
                 "date_to": str(date_to) if date_to else None,
+                "participant_status": participant_status,
             },
         )
         self.db.add(report)
@@ -2064,6 +2299,42 @@ class CaretakersQuery:
         date_from: date | None = None,
         date_to: date | None = None,
     ) -> Report:
+        # B45: ownership guards on every ID this function consumes. Previously
+        # this function had no ownership checks at all — any caretaker could
+        # request a comparison report between any two participants, or between
+        # a participant and any group, regardless of ownership. The "all"
+        # branch was even worse: it aggregated over every HealthDataPoint in
+        # the entire database, leaking averages from participants the
+        # caretaker had no access to.
+
+        # Subject: must always be owned by the caretaker.
+        await self._assert_participant_in_owned_group(participant_id, requested_by)
+
+        # Branch-specific guards.
+        if compare_with == "participant":
+            if not compare_participant_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail="compare_participant_id is required when compare_with is 'participant'",
+                )
+            await self._assert_participant_in_owned_group(compare_participant_id, requested_by)
+        elif compare_with == "group":
+            if not group_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail="group_id is required when compare_with is 'group'",
+                )
+            await self._assert_group_owned(group_id, requested_by)
+        elif compare_with == "all":
+            # Nothing to validate here directly, but the "all" set is scoped
+            # below to only participants in the caretaker's owned groups —
+            # NOT literally every participant in the system.
+            pass
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid compare_with value: {compare_with!r}",
+            )
 
         def _build_stats_sq(participant_filter):
             stmt = (
@@ -2095,8 +2366,18 @@ class CaretakersQuery:
                 GroupMember.left_at == None,
             )
             comparison_sq = _build_stats_sq(HealthDataPoint.participant_id.in_(members_sq))
-        else:  # "all"
-            comparison_sq = _build_stats_sq(True)
+        else:  # "all" — B45: scoped to caretaker's owned participants, NOT
+               # the entire system. Previously this was _build_stats_sq(True)
+               # which aggregated over every HealthDataPoint regardless of
+               # ownership.
+            caretaker_owned_pids_sq = (
+                select(GroupMember.participant_id)
+                .join(Group, Group.group_id == GroupMember.group_id)
+                .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+                .where(GroupMember.left_at == None)
+                .where(CaretakerProfile.user_id == requested_by)
+            )
+            comparison_sq = _build_stats_sq(HealthDataPoint.participant_id.in_(caretaker_owned_pids_sq))
 
         stmt = (
             select(

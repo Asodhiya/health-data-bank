@@ -618,6 +618,12 @@ export const api = {
   caretakerGetGroupElements: (groupId) =>
     request(`/caretaker/groups/${groupId}/elements`),
 
+  // Reports v2: data elements relevant to a specific participant. Returns
+  // the union of currently-deployed elements and elements with historical
+  // data points for that participant, each with a per-participant count.
+  caretakerGetParticipantDataElements: (participantId) =>
+    request(`/caretaker/participants/${participantId}/data-elements`),
+
   caretakerListForms: (groupId, options = {}) => {
     const params = new URLSearchParams();
     if (groupId) params.set("group_id", groupId);

@@ -950,47 +950,60 @@ export default function ParticipantDetailPage() {
   // ──────────────────────────────────────────────────────────────────────────────
   // Data fetching
   //
-  // TODO(B12): This sequence of fetches is a known performance issue. We currently
-  // load all groups → list every participant in the caretaker's roster → find the
-  // matching one → fetch the group's members → then submissions/feedback/notes,
-  // running 6+ sequential round-trips just to render one participant's detail
-  // page. The right fix is a single backend endpoint
-  //   GET /caretaker/participants/{id}
-  // that returns the participant + group + enrollment in one shot, with the
-  // caretaker access check enforced server-side. Until that endpoint exists,
-  // this cascade is the workaround. Each sub-fetch (submissions, feedback, notes)
-  // is wrapped in its own try/catch so a single broken endpoint doesn't blank
-  // the whole page.
+  // B12: previously these 6 fetches ran strictly sequentially —
+  //   groups → list → group members → submissions → feedback → notes
+  // — meaning the page took ~6× round-trip latency to render. The fetches
+  // don't actually depend on each other (each one only needs participantId
+  // or the auth context), with the single exception that we need to know
+  // the participant's group_id before we can fetch group members for the
+  // joined_at field.
+  //
+  // The fix is to run everything that has no inter-dependency in ONE
+  // Promise.allSettled, then do ONE follow-up fetch for group members. Net
+  // result: 2 sequential rounds of API latency instead of 6, plus the
+  // already-parallel goals/trends fetches running alongside.
+  //
+  // Each sub-fetch still has its own try/catch (or settled-state check) so
+  // a single broken endpoint doesn't blank the whole page.
   // ──────────────────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Fetch groups (used to look up participant's group below)
-      const groups = await api.caretakerGetGroups();
-      const firstGroup = Array.isArray(groups) && groups.length > 0 ? groups[0] : null;
+      // Phase 1: fire all 5 caretaker-scoped fetches in parallel.
+      const [groupsResult, listResult, subsResult, fbResult, notesResult] = await Promise.allSettled([
+        api.caretakerGetGroups(),
+        api.caretakerListParticipants(),
+        api.caretakerListSubmissions(participantId),
+        api.caretakerListFeedback(participantId),
+        api.caretakerListNotes(participantId),
+      ]);
 
+      const groups = groupsResult.status === "fulfilled" && Array.isArray(groupsResult.value)
+        ? groupsResult.value
+        : [];
+      const firstGroup = groups.length > 0 ? groups[0] : null;
       if (!firstGroup) {
         setError("You are not assigned to any groups.");
         setLoading(false);
         return;
       }
 
-      // Find this participant in the caretaker's roster — see TODO(B12) above
-      // B8: caretakerListParticipants now returns { items, total_count } instead of a bare array.
-      const allParticipantsResponse = await api.caretakerListParticipants();
+      // B8: caretakerListParticipants returns { items, total_count } — find
+      // this participant in the items list.
+      const allParticipantsResponse = listResult.status === "fulfilled" ? listResult.value : null;
       const allParticipants = Array.isArray(allParticipantsResponse?.items)
         ? allParticipantsResponse.items
         : [];
       const thisParticipant = allParticipants.find(p => p.participant_id === participantId) || null;
-
       if (!thisParticipant) {
         setError("Participant not found.");
         setLoading(false);
         return;
       }
 
-      // Look up enrolled_at from group members (graceful failure: shows "—")
+      // Phase 2: ONE follow-up fetch for group members (needed for joined_at).
+      // Sequential because it depends on the participant's group_id from Phase 1.
       let enrolledAt = null;
       try {
         const targetGroupId = thisParticipant.group_id || firstGroup.group_id;
@@ -1005,34 +1018,25 @@ export default function ParticipantDetailPage() {
         // Non-critical — enrolledAt will show "—"
       }
 
-      // Transform and set participant; pick the matching group when possible
-      const participantGroup = Array.isArray(groups) ? groups.find(g => String(g.group_id) === String(thisParticipant.group_id)) : null;
+      // Apply Phase 1 results to state.
+      const participantGroup = groups.find(g => String(g.group_id) === String(thisParticipant.group_id));
       setParticipant(transformParticipant(thisParticipant, participantGroup?.name || firstGroup.name, enrolledAt));
 
-      // Fetch submissions (isolated try/catch so other tabs survive a failure)
-      try {
-        const subData = await api.caretakerListSubmissions(participantId);
-        setSubmissions(Array.isArray(subData) ? subData.map(transformSubmission) : []);
-      } catch {
-        setSubmissions([]);
-      }
-
-      // Fetch existing feedback (shown in Notes tab as seed data)
-      try {
-        const fbData = await api.caretakerListFeedback(participantId);
-        setFeedbackItems(Array.isArray(fbData) ? fbData.map(transformFeedback) : []);
-      } catch {
-        setFeedbackItems([]);
-      }
-
-      // Fetch saved caretaker notes
-      try {
-        const notesData = await api.caretakerListNotes(participantId);
-        setNoteItems(Array.isArray(notesData) ? notesData.map(transformNote) : []);
-      } catch {
-        setNoteItems([]);
-      }
-
+      setSubmissions(
+        subsResult.status === "fulfilled" && Array.isArray(subsResult.value)
+          ? subsResult.value.map(transformSubmission)
+          : []
+      );
+      setFeedbackItems(
+        fbResult.status === "fulfilled" && Array.isArray(fbResult.value)
+          ? fbResult.value.map(transformFeedback)
+          : []
+      );
+      setNoteItems(
+        notesResult.status === "fulfilled" && Array.isArray(notesResult.value)
+          ? notesResult.value.map(transformNote)
+          : []
+      );
     } catch (err) {
       console.error("Failed to load participant data:", err);
       setError("Something went wrong loading participant data.");

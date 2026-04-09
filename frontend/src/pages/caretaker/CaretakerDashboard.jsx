@@ -259,19 +259,33 @@ export default function CaretakerDashboard() {
   const [loading, setLoading] = useState(true);
   const selectedGroupQuery = selectedGroupId === "all" ? null : selectedGroupId;
 
-  // Unified loader: runs groups + activity counts + participants in parallel
-  // and only clears `loading` after all three complete. Called on mount and
-  // whenever the selected group changes. Groups only fetch once on mount.
+  // B23: previously this loader was a single useCallback whose dep array
+  // included both `selectedGroupQuery` AND `groups.length`. On initial mount
+  // groups.length was 0, the callback ran, fetched groups, set them — which
+  // changed groups.length and recreated the callback, which the useEffect
+  // then re-fired. Net result: every page load fired
+  // caretakerListParticipants and caretakerGetActivityCounts twice. Splitting
+  // the groups-once fetch into its own effect breaks the cycle.
+  useEffect(() => {
+    let cancelled = false;
+    api.caretakerGetGroups()
+      .then(data => {
+        if (cancelled) return;
+        const transformed = Array.isArray(data)
+          ? data.map(g => ({ id: g.group_id, name: g.name, description: g.description || "" }))
+          : [];
+        setGroups(transformed);
+      })
+      .catch(() => { if (!cancelled) setGroups([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Activity counts + participants — refetched whenever the selected group
+  // changes, but not when groups.length flips from 0 to N.
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      // Groups only need to load once on mount; the other two refresh per group.
-      const groupsPromise = groups.length === 0
-        ? api.caretakerGetGroups().catch(() => [])
-        : Promise.resolve(null);
-
-      const [groupData, countsData, participantsData] = await Promise.all([
-        groupsPromise,
+      const [countsData, participantsData] = await Promise.all([
         api.caretakerGetActivityCounts(selectedGroupQuery).catch(() => ({
           highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0,
         })),
@@ -282,13 +296,6 @@ export default function CaretakerDashboard() {
           ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
         }).catch(() => null),
       ]);
-
-      if (groupData !== null) {
-        const transformedGroups = Array.isArray(groupData)
-          ? groupData.map(g => ({ id: g.group_id, name: g.name, description: g.description || "" }))
-          : [];
-        setGroups(transformedGroups);
-      }
 
       setActivityCounts({
         highly_active: Number(countsData?.highly_active || 0),
@@ -304,8 +311,7 @@ export default function CaretakerDashboard() {
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedGroupQuery, groups.length]);
+  }, [selectedGroupQuery]);
 
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
