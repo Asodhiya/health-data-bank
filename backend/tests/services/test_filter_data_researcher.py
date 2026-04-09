@@ -1138,3 +1138,29 @@ async def test_timeseries_dispatches_raw_and_aggregate(monkeypatch):
 
     assert raw_result == raw_rows
     assert aggregate_result == aggregate_rows
+
+
+def test_element_filter_has_value_and_is_empty_support_text_and_json_storage():
+    from sqlalchemy import column
+
+    hdp = SimpleNamespace(
+        value_number=column("value_number"),
+        value_text=column("value_text"),
+        value_json=column("value_json"),
+    )
+
+    has_value_expr = filter_data_service._element_filter_condition(
+        hdp,
+        SimpleNamespace(operator="has_value"),
+    )
+    is_empty_expr = filter_data_service._element_filter_condition(
+        hdp,
+        SimpleNamespace(operator="is_empty"),
+    )
+
+    assert "value_number IS NOT NULL" in str(has_value_expr)
+    assert "value_text IS NOT NULL" in str(has_value_expr)
+    assert "value_json IS NOT NULL" in str(has_value_expr)
+    assert "value_number IS NULL" in str(is_empty_expr)
+    assert "value_text IS NULL" in str(is_empty_expr)
+    assert "value_json IS NULL" in str(is_empty_expr)

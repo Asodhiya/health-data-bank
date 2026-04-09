@@ -27,7 +27,6 @@ class ParticipantProfileOut(BaseModel):
     highest_education_level: Optional[str] = None
     dependents: Optional[int] = None
     marital_status: Optional[str] = None
-    address: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -44,7 +43,6 @@ class ParticipantProfileUpdate(BaseModel):
     highest_education_level: Optional[str] = None
     dependents: Optional[int] = None
     marital_status: Optional[str] = None
-    address: Optional[str] = None
 
 
 class ElementValueFilter(BaseModel):

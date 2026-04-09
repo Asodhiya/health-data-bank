@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from app.db.models import (
     SurveyForm, FormDeployment, GroupMember, FormSubmission,
     SubmissionAnswer, FormField, ParticipantProfile,
-    FieldElementMap, HealthDataPoint, Group, CaretakerProfile
+    FieldElementMap, HealthDataPoint, Group, CaretakerProfile, FieldOption
 )
 from app.services.notification_service import create_notification, notification_exists_recent
 
@@ -266,6 +266,65 @@ def _build_answer_records(answers: List[Dict[str, Any]], submission_id):
     return records
 
 
+async def _load_field_meta(field_ids: List[UUID], db: AsyncSession) -> Dict[UUID, Dict[str, Any]]:
+    if not field_ids:
+        return {}
+
+    result = await db.execute(
+        select(FormField, FieldOption)
+        .outerjoin(FieldOption, FieldOption.field_id == FormField.field_id)
+        .where(FormField.field_id.in_(field_ids))
+    )
+
+    field_meta: Dict[UUID, Dict[str, Any]] = {}
+    for field, option in result.all():
+        meta = field_meta.setdefault(
+            field.field_id,
+            {
+                "field_type": field.field_type,
+                "options": {},
+            },
+        )
+        if option is not None and option.value is not None and option.label is not None:
+            meta["options"][int(option.value)] = str(option.label)
+
+    return field_meta
+
+
+def _resolve_answer_value(
+    field_uuid: UUID,
+    val_text: Optional[str],
+    val_num: Optional[float],
+    val_json: Optional[Any],
+    field_meta: Dict[UUID, Dict[str, Any]],
+) -> tuple[Optional[str], Optional[float], Optional[Any]]:
+    meta = field_meta.get(field_uuid)
+    if not meta:
+        return val_text, val_num, val_json
+
+    field_type = str(meta.get("field_type") or "").lower()
+    options = meta.get("options") or {}
+
+    if field_type in {"single_select", "dropdown"} and val_num is not None:
+        label = options.get(int(val_num))
+        if label is None:
+            return val_text, val_num, val_json
+        return label, None, None
+
+    if field_type == "multi_select" and isinstance(val_json, list):
+        resolved = [
+            options.get(int(value), value) if isinstance(value, (int, float)) else value
+            for value in val_json
+        ]
+        return None, None, resolved
+
+    if field_type == "likert" and val_num is not None:
+        label = options.get(int(val_num))
+        return (label or val_text), val_num, None
+
+    return val_text, val_num, val_json
+
+
 async def save_survey_response(form_id: UUID, user_id: UUID, answers: List[Dict[str, Any]], db: AsyncSession) -> FormSubmission:
     """Save survey answers as a draft (no submission timestamp, no health data projection)."""
     _, submission = await _get_participant_and_submission(form_id, user_id, db)
@@ -352,6 +411,7 @@ async def submit_survey_response(form_id: UUID, user_id: UUID, answers: List[Dic
         db.add(record)
 
     field_ids = [field_uuid for _, field_uuid, *_ in answer_records]
+    field_meta = await _load_field_meta(field_ids, db)
     map_stmt = select(FieldElementMap).where(FieldElementMap.field_id.in_(field_ids))
     map_result = await db.execute(map_stmt)
     field_map: Dict[UUID, FieldElementMap] = {
@@ -362,6 +422,7 @@ async def submit_survey_response(form_id: UUID, user_id: UUID, answers: List[Dic
         mapping = field_map.get(field_uuid)
         if not mapping:
             continue
+        val_text, val_num, val_json = _resolve_answer_value(field_uuid, val_text, val_num, val_json, field_meta)
         val_text, val_num, val_json = _apply_transform(val_text, val_num, val_json, mapping.transform_rule)
         dp = HealthDataPoint(
             participant_id=participant.participant_id,

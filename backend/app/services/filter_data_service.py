@@ -331,9 +331,17 @@ def _element_filter_condition(health_data_point, element_filter):
             element_filter.value_max,
         )
     if operator == "has_value":
-        return health_data_point.value_number.is_not(None)
+        return or_(
+            health_data_point.value_number.is_not(None),
+            health_data_point.value_text.is_not(None),
+            health_data_point.value_json.is_not(None),
+        )
     if operator == "is_empty":
-        return health_data_point.value_number.is_(None)
+        return and_(
+            health_data_point.value_number.is_(None),
+            health_data_point.value_text.is_(None),
+            health_data_point.value_json.is_(None),
+        )
     raise HTTPException(status_code=400, detail=f"Unsupported operator '{operator}'")
 
 

@@ -15,7 +15,13 @@ from app.db.models import (
     User, Role, UserRole, SurveyForm, FormField, FieldOption, FormSubmission,
     ParticipantProfile, FieldElementMap, HealthDataPoint
 )
-from app.services.participant_survey_service import _get_participant, _build_answer_records, _apply_transform
+from app.services.participant_survey_service import (
+    _get_participant,
+    _build_answer_records,
+    _apply_transform,
+    _load_field_meta,
+    _resolve_answer_value,
+)
 from app.services.onboarding_service import (
     get_active_consent_template,
     get_active_background_template,
@@ -237,6 +243,7 @@ async def submit_intake(
 
     # 4. Save answers and collect mapped profile updates
     answer_records = _build_answer_records([answer.model_dump() for answer in payload.answers], submission.submission_id)
+    field_meta = await _load_field_meta([field_uuid for _, field_uuid, *_ in answer_records], db)
     profile_updates: dict[str, Any] = {
         "program_enrolled_at": datetime.now(timezone.utc),
     }
@@ -250,6 +257,7 @@ async def submit_intake(
         if field.profile_field not in PROFILE_FIELD_NAMES:
             continue
 
+        val_text, val_num, val_json = _resolve_answer_value(field_uuid, val_text, val_num, val_json, field_meta)
         raw_value = val_json if val_json is not None else val_num if val_num is not None else val_text
         raw_value = _resolve_profile_field_raw_value(field, raw_value)
         profile_updates[field.profile_field] = _normalize_profile_field_value(field.profile_field, raw_value)
@@ -273,6 +281,7 @@ async def submit_intake(
             mapping = field_map.get(field_uuid)
             if not mapping:
                 continue
+            val_text, val_num, val_json = _resolve_answer_value(field_uuid, val_text, val_num, val_json, field_meta)
             val_text, val_num, val_json = _apply_transform(val_text, val_num, val_json, mapping.transform_rule)
             db.add(HealthDataPoint(
                 participant_id=participant.participant_id,

@@ -851,7 +851,6 @@ export default function ProfilePage({ role = 'participant' }) {
                 occupation_status: p.occupation_status || '',
                 marital_status: p.marital_status || '',
                 highest_education_level: p.highest_education_level || '',
-                address: p.address || prev.address || '',
                 enrolled_at: p.program_enrolled_at || prev.enrolled_at || '',
               }));
             }

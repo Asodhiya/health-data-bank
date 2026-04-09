@@ -235,7 +235,6 @@ class ParticipantProfile(Base):
     dependents: Mapped[int | None] = mapped_column(Integer)
     marital_status: Mapped[str | None] = mapped_column(Text)
     country_of_origin: Mapped[str | None] = mapped_column(Text)
-    address: Mapped[str | None] = mapped_column(Text)
     program_enrolled_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
     onboarding_status: Mapped[str | None] = mapped_column(Text, server_default=text("'PENDING'"))
     user = relationship("User", back_populates="participant_profile")

@@ -2079,7 +2079,6 @@ async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession
             participant_profile.dependents = None
             participant_profile.marital_status = None
             participant_profile.country_of_origin = None
-            participant_profile.address = None
 
         caretaker_profile = await db.scalar(
             select(CaretakerProfile).where(CaretakerProfile.user_id == user_id)
