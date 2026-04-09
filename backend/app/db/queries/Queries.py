@@ -1233,6 +1233,28 @@ class CaretakersQuery:
         if not owns_group:
             raise HTTPException(status_code=404, detail="Group not found or not assigned to you")
 
+    async def _assert_participant_in_owned_group(
+        self, participant_id: uuid.UUID, user_id: uuid.UUID
+    ) -> None:
+        """B1: ownership guard for any participant-scoped query.
+
+        Raises 404 ('Participant not found or not assigned to you') if the
+        participant either doesn't exist or isn't a current member of any
+        group owned by this caretaker. Deliberately ambiguous to prevent
+        caretakers from enumerating participant IDs they don't own.
+        """
+        has_access = await self.db.scalar(
+            select(GroupMember.participant_id)
+            .join(Group, Group.group_id == GroupMember.group_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(GroupMember.participant_id == participant_id)
+            .where(GroupMember.left_at == None)
+            .where(CaretakerProfile.user_id == user_id)
+            .limit(1)
+        )
+        if not has_access:
+            raise HTTPException(status_code=404, detail="Participant not found or not assigned to you")
+
     async def get_groups(self, user_id: uuid.UUID) -> list:
         # Subquery: number of currently-active members per group.
         member_count_sq = (
@@ -1292,7 +1314,11 @@ class CaretakersQuery:
         )
         return result.all()
 
-    async def get_group_participant(self, group_id: uuid.UUID, participant_id: uuid.UUID):
+    async def get_group_participant(self, group_id: uuid.UUID, participant_id: uuid.UUID, user_id: uuid.UUID):
+        # B1: was previously taking only group_id and participant_id with no
+        # caretaker filter. Any caretaker could read any participant in any
+        # group just by guessing IDs. Now guarded.
+        await self._assert_group_owned(group_id, user_id)
         result = await self.db.execute(
             select(ParticipantProfile, User.first_name, User.last_name, User.status, GroupMember.joined_at)
             .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
@@ -1818,7 +1844,14 @@ class CaretakersQuery:
         participant_id: uuid.UUID,
         date_from: date | None = None,
         date_to: date | None = None,
+        caretaker_user_id: uuid.UUID | None = None,
     ):
+        # B1: when called from a caretaker route, caretaker_user_id MUST be
+        # passed so the ownership check fires. The param is optional only
+        # because admin_service.py also calls this function and admins are
+        # already authorized to see any participant's submissions.
+        if caretaker_user_id is not None:
+            await self._assert_participant_in_owned_group(participant_id, caretaker_user_id)
         stmt = (
             select(
                 FormSubmission.submission_id,
@@ -2164,6 +2197,10 @@ class CaretakersQuery:
         message: str,
         submission_id: uuid.UUID | None = None,
     ) -> CaretakerFeedback:
+        # B1: ownership guard — previously this only checked that both
+        # entities exist independently, allowing a caretaker to create
+        # feedback rows attached to participants in other caretakers' groups.
+        await self._assert_participant_in_owned_group(participant_id, caretaker_user_id)
         row = (await self.db.execute(
             select(CaretakerProfile.caretaker_id, ParticipantProfile.user_id)
             .where(CaretakerProfile.user_id == caretaker_user_id)
@@ -2183,7 +2220,20 @@ class CaretakersQuery:
 
         return feedback
 
-    async def list_feedback(self, participant_id: uuid.UUID) -> list[CaretakerFeedback]:
+    async def list_feedback(
+        self,
+        participant_id: uuid.UUID,
+        caretaker_user_id: uuid.UUID | None = None,
+    ) -> list[CaretakerFeedback]:
+        # B1: when called from a caretaker route, caretaker_user_id MUST be
+        # passed so the ownership check fires. Optional because
+        # participants_only.py uses this endpoint for participants to read
+        # feedback ABOUT themselves (a participant viewing their own data
+        # doesn't go through caretaker ownership rules).
+        # Note: B29 was closed as not-a-bug — feedback is intentionally
+        # collaborative across all caretakers assigned to the same participant.
+        if caretaker_user_id is not None:
+            await self._assert_participant_in_owned_group(participant_id, caretaker_user_id)
         result = await self.db.execute(
             select(CaretakerFeedback)
             .where(CaretakerFeedback.participant_id == participant_id)
@@ -2192,8 +2242,10 @@ class CaretakersQuery:
         return result.scalars().all()
 
     async def get_submission_detail(
-        self, participant_id: uuid.UUID, submission_id: uuid.UUID
+        self, participant_id: uuid.UUID, submission_id: uuid.UUID, user_id: uuid.UUID
     ):
+        # B1: ownership guard
+        await self._assert_participant_in_owned_group(participant_id, user_id)
         row = (await self.db.execute(
             select(
                 FormSubmission.submission_id,
@@ -2226,7 +2278,9 @@ class CaretakersQuery:
 
         return row, answers
 
-    async def get_participant_goals(self, participant_id: uuid.UUID):
+    async def get_participant_goals(self, participant_id: uuid.UUID, user_id: uuid.UUID):
+        # B1: ownership guard
+        await self._assert_participant_in_owned_group(participant_id, user_id)
         return await ParticipantQuery(self.db).get_goals(participant_id)
 
     async def get_health_trends(
@@ -2235,7 +2289,15 @@ class CaretakersQuery:
         element_ids: list[uuid.UUID] | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> list:
+        # B1: ownership guard. Param is keyword-only positionally because it
+        # was added at the end to avoid disturbing existing positional callers,
+        # but it is REQUIRED in practice — passing None bypasses the check
+        # and should never happen from a caretaker route.
+        if user_id is None:
+            raise HTTPException(status_code=500, detail="get_health_trends: missing user_id (caretaker context required)")
+        await self._assert_participant_in_owned_group(participant_id, user_id)
         stmt = (
             select(
                 DataElement.element_id,

@@ -317,7 +317,7 @@ async def get_participant(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    participant, first_name, last_name, user_status, _ = await CaretakersQuery(db).get_group_participant(group_id, participant_id)
+    participant, first_name, last_name, user_status, _ = await CaretakersQuery(db).get_group_participant(group_id, participant_id, current_user.user_id)
     groups = await CaretakersQuery(db).get_participant_group_memberships(
         participant_id,
         current_user.user_id,
@@ -338,7 +338,7 @@ async def list_participant_submissions(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    rows = await CaretakersQuery(db).get_participant_submissions(participant_id, date_from, date_to)
+    rows = await CaretakersQuery(db).get_participant_submissions(participant_id, date_from, date_to, caretaker_user_id=current_user.user_id)
     return [
         SubmissionListItem(
             submission_id=row.submission_id,
@@ -440,7 +440,7 @@ async def list_feedback(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    rows = await CaretakersQuery(db).list_feedback(participant_id)
+    rows = await CaretakersQuery(db).list_feedback(participant_id, caretaker_user_id=current_user.user_id)
     return [
         FeedbackItem(
             feedback_id=row.feedback_id,
@@ -462,6 +462,10 @@ async def list_notes(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
+    # B1: ownership guard before reading. Without this, the route's existing
+    # caretaker_id filter would silently return [] for unauthorized lookups,
+    # which is information leakage rather than an explicit denial.
+    await CaretakersQuery(db)._assert_participant_in_owned_group(participant_id, current_user.user_id)
     caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
     rows = (
         await db.execute(
@@ -492,12 +496,12 @@ async def create_note(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
+    # B1: ownership guard before writing. This subsumes the previous
+    # "participant_exists" check — a participant in a group I own definitely
+    # exists, and one I don't own should look the same as one that doesn't
+    # exist (same 404 wording, no enumeration).
+    await CaretakersQuery(db)._assert_participant_in_owned_group(participant_id, current_user.user_id)
     caretaker_id = await _get_caretaker_id_or_404(db, current_user.user_id)
-    participant_exists = await db.scalar(
-        select(ParticipantProfile.participant_id).where(ParticipantProfile.participant_id == participant_id)
-    )
-    if not participant_exists:
-        raise HTTPException(status_code=404, detail="Participant not found")
 
     note = CaretakerNote(
         caretaker_id=caretaker_id,
@@ -668,9 +672,9 @@ async def get_submission_detail(
     participant_id: UUID,
     submission_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    row, answers = await CaretakersQuery(db).get_submission_detail(participant_id, submission_id)
+    row, answers = await CaretakersQuery(db).get_submission_detail(participant_id, submission_id, current_user.user_id)
     return SubmissionDetailItem(
         submission_id=row.submission_id,
         participant_id=row.participant_id,
@@ -697,9 +701,9 @@ async def get_submission_detail(
 async def get_participant_goals(
     participant_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    return await CaretakersQuery(db).get_participant_goals(participant_id)
+    return await CaretakersQuery(db).get_participant_goals(participant_id, current_user.user_id)
 
 
 # ── Health Trends ──────────────────────────────────────────────────────────────
@@ -711,10 +715,10 @@ async def get_health_trends(
     date_from: Optional[date] = Query(default=None),
     date_to: Optional[date] = Query(default=None),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permissions(CARETAKER_READ)),
+    current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
     return await CaretakersQuery(db).get_health_trends(
-        participant_id, element_ids, date_from, date_to
+        participant_id, element_ids, date_from, date_to, user_id=current_user.user_id
     )
 
 
