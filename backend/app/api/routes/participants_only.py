@@ -279,6 +279,55 @@ async def log_goal_progress(
     return data_point
 
 
+@router.get("/my-care-team")
+async def get_my_care_team(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
+):
+    """Return the group(s) and caretaker(s) the authenticated participant belongs to."""
+    participant_id = get_participant_id(current_user)
+
+    rows = await db.execute(
+        select(
+            Group.group_id,
+            Group.name.label("group_name"),
+            Group.description.label("group_description"),
+            User.first_name.label("caretaker_first_name"),
+            User.last_name.label("caretaker_last_name"),
+            User.email.label("caretaker_email"),
+            CaretakerProfile.title.label("caretaker_title"),
+            CaretakerProfile.specialty.label("caretaker_specialty"),
+        )
+        .select_from(GroupMember)
+        .join(Group, Group.group_id == GroupMember.group_id)
+        .outerjoin(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+        .outerjoin(User, User.user_id == CaretakerProfile.user_id)
+        .where(GroupMember.participant_id == participant_id)
+        .where(GroupMember.left_at.is_(None))
+    )
+
+    results = rows.all()
+    if not results:
+        return {"groups": []}
+
+    return {
+        "groups": [
+            {
+                "group_id": str(row.group_id),
+                "group_name": row.group_name,
+                "group_description": row.group_description,
+                "caretaker": {
+                    "name": f"{row.caretaker_first_name or ''} {row.caretaker_last_name or ''}".strip() or None,
+                    "email": row.caretaker_email,
+                    "title": row.caretaker_title,
+                    "specialty": row.caretaker_specialty,
+                } if row.caretaker_email else None,
+            }
+            for row in results
+        ]
+    }
+
+
 @router.get("/feedback", response_model=list[FeedbackItem])
 async def list_my_feedback(
     db: AsyncSession = Depends(get_db),
