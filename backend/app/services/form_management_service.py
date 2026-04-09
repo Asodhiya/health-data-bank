@@ -16,6 +16,8 @@ from app.db.models import (
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
 from app.services.notification_service import create_notifications_bulk
 
+ONBOARDING_FORM_TITLES = {"Intake Form"}
+
 
 async def create_survey_form(form_data: SurveyCreate, user_id: UUID, db: AsyncSession) -> SurveyForm:
     """Creates a new survey form with all its fields and options"""
@@ -88,6 +90,7 @@ async def list_researcher_forms(db: AsyncSession):
     query = (
         select(SurveyForm, field_count_subq.label("field_count"), submission_count_subq.label("submission_count"))
         .where(SurveyForm.status != "DELETED")
+        .where(~SurveyForm.title.in_(ONBOARDING_FORM_TITLES))
         .order_by(desc(SurveyForm.created_at))
     )
     result = await db.execute(query)

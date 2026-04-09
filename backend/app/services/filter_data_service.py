@@ -520,6 +520,7 @@ async def get_available_surveys(db: AsyncSession):
     stmt = (
         select(SurveyForm)
         .where(SurveyForm.status.in_(['PUBLISHED', 'ARCHIVED', 'DELETED']))
+        .where(SurveyForm.title != "Intake Form")
         .where(
             select(func.count(FormSubmission.submission_id))
             .where(

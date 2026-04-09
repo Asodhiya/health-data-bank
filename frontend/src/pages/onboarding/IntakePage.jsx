@@ -106,6 +106,7 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
   const inputClass =
     "w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 transition-shadow focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200";
   const options = field.options || [];
+  const usesCountryPicker = field.profile_field === "country_of_origin";
 
   return (
     <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
@@ -121,7 +122,16 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
         </p>
       )}
 
-      {field.field_type === "textarea" && (
+      {usesCountryPicker && (
+        <SearchableSelect
+          value={value}
+          onChange={(nextValue) => onChange(field, nextValue)}
+          options={COUNTRIES}
+          placeholder="Search and choose a country"
+        />
+      )}
+
+      {!usesCountryPicker && field.field_type === "textarea" && (
         <textarea
           value={value}
           onChange={(event) => onChange(field, sanitizeText(event.target.value, 1000))}
@@ -129,25 +139,16 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
         />
       )}
 
-      {field.field_type === "text" && (
-        field.profile_field === "country_of_origin" ? (
-          <SearchableSelect
-            value={value}
-            onChange={(nextValue) => onChange(field, nextValue)}
-            options={COUNTRIES}
-            placeholder="Search and choose a country"
-          />
-        ) : (
-          <input
-            type="text"
-            value={value}
-            onChange={(event) => onChange(field, sanitizeText(event.target.value, 200))}
-            className={inputClass}
-          />
-        )
+      {!usesCountryPicker && field.field_type === "text" && (
+        <input
+          type="text"
+          value={value}
+          onChange={(event) => onChange(field, sanitizeText(event.target.value, 200))}
+          className={inputClass}
+        />
       )}
 
-      {field.field_type === "number" && (
+      {!usesCountryPicker && field.field_type === "number" && (
         <input
           type="number"
           min={field.profile_field === "dependents" ? "0" : undefined}
@@ -158,7 +159,7 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
         />
       )}
 
-      {field.field_type === "date" && (
+      {!usesCountryPicker && field.field_type === "date" && (
         <input
           type="date"
           max={field.profile_field === "dob" ? maxDob : undefined}
@@ -168,7 +169,7 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
         />
       )}
 
-      {field.field_type === "dropdown" && (
+      {!usesCountryPicker && field.field_type === "dropdown" && (
         <select
           value={value}
           onChange={(event) => onChange(field, event.target.value)}
@@ -183,7 +184,7 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
         </select>
       )}
 
-      {field.field_type === "single_select" && (
+      {!usesCountryPicker && field.field_type === "single_select" && (
         <div className="flex flex-wrap gap-2">
           {options.map((option, optionIndex) => {
             const optionValue = option.label || option.value || "";
@@ -206,7 +207,7 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
         </div>
       )}
 
-      {field.field_type === "multi_select" && (
+      {!usesCountryPicker && field.field_type === "multi_select" && (
         <div className="space-y-2">
           {options.map((option, optionIndex) => {
             const optionValue = option.label || option.value || "";
