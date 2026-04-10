@@ -558,8 +558,11 @@ export const api = {
 
   // ── Data Elements (researcher) ──
 
-  listElements: () =>
-    request(`/data-elements/elements?t=${new Date().getTime()}`),
+  listElements: ({ includeInactive = false } = {}) =>
+    request(`/data-elements/elements?t=${new Date().getTime()}${includeInactive ? "&include_inactive=true" : ""}`),
+
+  listDeletedElements: () =>
+    request("/data-elements/deleted"),
 
   createDataElement: (payload) =>
     request("/data-elements/data_element", {
@@ -569,6 +572,9 @@ export const api = {
 
   deleteElement: (element_id) =>
     request(`/data-elements/${element_id}`, { method: "DELETE" }),
+
+  restoreElement: (element_id) =>
+    request(`/data-elements/${element_id}/restore`, { method: "POST" }),
 
   getAllMappings: () =>
     request(`/data-elements/all-mappings`),

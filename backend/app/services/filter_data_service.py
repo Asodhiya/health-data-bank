@@ -1438,7 +1438,7 @@ async def get_survey_results_grouped(
         .select_from(User)
         .join(ParticipantProfile, User.user_id == ParticipantProfile.user_id)
         .join(HealthDataPoint, HealthDataPoint.participant_id == ParticipantProfile.participant_id)
-        .join(DataElement, HealthDataPoint.element_id == DataElement.element_id)
+        .outerjoin(DataElement, HealthDataPoint.element_id == DataElement.element_id)
         .where(HealthDataPoint.element_id.in_(element_scope))
         .where(HealthDataPoint.source_type.in_(source_types))
     )
@@ -1614,7 +1614,7 @@ async def get_survey_results_grouped(
 
         if element_id not in elements_meta:
             unit_suffix = f" ({row.unit})" if row.unit else ""
-            base_label = f"{row.element_label}{unit_suffix}"
+            base_label = f"{row.element_label or 'Deleted element'}{unit_suffix}"
             elements_meta[element_id] = {
                 f"{element_id}__mean": f"{base_label} - Mean",
                 f"{element_id}__min": f"{base_label} - Min",

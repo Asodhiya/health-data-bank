@@ -64,6 +64,7 @@ class SurveyListItem(BaseModel):
     description: Optional[str] = None
     version: Optional[int] = 1
     parent_form_id: Optional[UUID] = None
+    created_by: Optional[UUID] = None
     status: Optional[str] = None
     created_at: Optional[datetime] = None
     modified_at: Optional[datetime] = None

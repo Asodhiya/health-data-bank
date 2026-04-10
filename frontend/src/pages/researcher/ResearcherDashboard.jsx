@@ -668,7 +668,7 @@ export default function ResearcherDashboard() {
       try {
         const [surveys, elements, groups, forms] = await Promise.all([
           api.getAvailableSurveys().catch(() => []),
-          api.listElements().catch(() => []),
+          api.listElements({ includeInactive: true }).catch(() => []),
           api.listGroups().catch(() => []),
           api.listForms().catch(() => []),
         ]);
@@ -1947,7 +1947,14 @@ export default function ResearcherDashboard() {
                                 onClick={() => addElementFilterById(element.element_id)}
                                 className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
                               >
-                                <span>{element.label}{element.unit ? ` (${element.unit})` : ""}</span>
+                                <span className="flex items-center gap-2">
+                                  <span>{element.label}{element.unit ? ` (${element.unit})` : ""}</span>
+                                  {element.is_active === false && (
+                                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                                      Deactivated
+                                    </span>
+                                  )}
+                                </span>
                                 <span className="text-xs font-semibold text-blue-600">Add</span>
                               </button>
                             ))

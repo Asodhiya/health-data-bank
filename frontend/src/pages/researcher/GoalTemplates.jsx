@@ -404,6 +404,7 @@ function GoalTemplateSkeleton() {
 export default function GoalTemplates() {
   const [templates, setTemplates] = useState([]);
   const [deletedTemplates, setDeletedTemplates] = useState([]);
+  const [restoringId, setRestoringId] = useState(null);
   const [showDeleted, setShowDeleted] = useState(false);
   const [dataElements, setDataElements] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -520,11 +521,14 @@ export default function GoalTemplates() {
   };
 
   const handleRestore = async (template_id) => {
+    setRestoringId(template_id);
     try {
       await api.restoreGoalTemplate(template_id);
       fetchAllData();
     } catch (err) {
       alert("Restore failed: " + err.message);
+    } finally {
+      setRestoringId(null);
     }
   };
 
@@ -751,9 +755,14 @@ export default function GoalTemplates() {
                     </span>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleRestore(t.template_id); }}
-                      className="text-xs font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-lg transition"
+                      disabled={restoringId === t.template_id}
+                      className={`text-xs font-semibold px-3 py-1 rounded-lg transition ${
+                        restoringId === t.template_id
+                          ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                          : "text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100"
+                      }`}
                     >
-                      Restore
+                      {restoringId === t.template_id ? "Restoring..." : "Restore"}
                     </button>
                   </div>
 

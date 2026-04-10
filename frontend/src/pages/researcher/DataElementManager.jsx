@@ -27,8 +27,10 @@ const TYPE_FILTERS = ["All", "Number", "Boolean", "Text", "Date"];
 
 const DataElementManager = () => {
   const [elements, setElements]     = useState([]);
+  const [deletedElements, setDeletedElements] = useState([]);
   const [loading, setLoading]       = useState(true);
   const [search, setSearch]         = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [typeFilter, setTypeFilter] = useState("All");
   const [mappingFilter, setMappingFilter] = useState("All"); // "All" | "Mapped" | "Unmapped"
   const [sort, setSort] = useState("newest"); // "newest" | "alpha"
@@ -62,6 +64,7 @@ const DataElementManager = () => {
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState(null); // element object to delete
   const [deleting, setDeleting]         = useState(false);
+  const [restoringId, setRestoringId] = useState(null);
 
   useEffect(() => { loadData(); }, []);
 
@@ -71,8 +74,12 @@ const DataElementManager = () => {
     setLoading(true);
     setLoadError(false);
     try {
-      const els = await api.listElements();
-      setElements(els || []);
+      const [activeEls, inactiveEls] = await Promise.all([
+        api.listElements(),
+        api.listDeletedElements(),
+      ]);
+      setElements(activeEls || []);
+      setDeletedElements(inactiveEls || []);
       await buildSurveyCounts();
     } catch (err) {
       console.error("Load error:", err);
@@ -129,9 +136,10 @@ const DataElementManager = () => {
 
   // ── Filtered list ───────────────────────────────────────────────────────────
 
+  const visibleElements = showDeleted ? deletedElements : elements;
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return elements.filter((el) => {
+    return visibleElements.filter((el) => {
       const id = el.element_id || el.id;
       const isMapped = (surveyCountMap[id] || 0) > 0 || (goalCountMap[id] || 0) > 0;
       const matchSearch =
@@ -152,9 +160,9 @@ const DataElementManager = () => {
       const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
       return tb - ta;
     });
-  }, [elements, search, typeFilter, mappingFilter, surveyCountMap, goalCountMap, sort]);
+  }, [visibleElements, search, typeFilter, mappingFilter, surveyCountMap, goalCountMap, sort]);
 
-  useEffect(() => { setPage(1); }, [search, typeFilter, mappingFilter, sort, goalCountMap]);
+  useEffect(() => { setPage(1); }, [search, showDeleted, typeFilter, mappingFilter, sort, goalCountMap]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -200,6 +208,23 @@ const DataElementManager = () => {
       alert("Delete failed: " + err.message);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleRestore = async (el) => {
+    const id = el.element_id || el.id;
+    setRestoringId(id);
+    try {
+      const restored = await api.restoreElement(id);
+      setDeletedElements((prev) => prev.filter((item) => (item.element_id || item.id) !== id));
+      setElements((prev) => [restored, ...prev]);
+      if (selectedEl && (selectedEl.element_id || selectedEl.id) === id) {
+        setSelectedEl(restored);
+      }
+    } catch (err) {
+      alert("Restore failed: " + err.message);
+    } finally {
+      setRestoringId(null);
     }
   };
 
@@ -339,7 +364,7 @@ const DataElementManager = () => {
           const mapped = elements.filter((el) => (surveyCountMap[el.element_id || el.id] || 0) > 0 || (goalCountMap[el.element_id || el.id] || 0) > 0).length;
           const unmapped = total - mapped;
           return (
-            <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="grid grid-cols-4 gap-3 mb-5">
               <div className="bg-slate-50 rounded-xl px-4 py-3">
                 <p className="text-xs text-slate-400 font-medium mb-0.5">Total elements</p>
                 <p className="text-2xl font-bold text-slate-900">{total}</p>
@@ -352,17 +377,41 @@ const DataElementManager = () => {
                 <p className="text-xs text-slate-400 font-medium mb-0.5">Unmapped</p>
                 <p className="text-2xl font-bold text-slate-500">{unmapped}</p>
               </div>
+              <div className="bg-amber-50 rounded-xl px-4 py-3">
+                <p className="text-xs text-amber-700 font-medium mb-0.5">Deleted</p>
+                <p className="text-2xl font-bold text-amber-700">{deletedElements.length}</p>
+              </div>
             </div>
           );
         })()}
 
-        {/* Search */}
-        <input
-          placeholder="Search by code or name..."
-          className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-slate-400 bg-white mb-4"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <div className="mb-4 flex flex-col gap-3">
+          <div className="flex items-center gap-2 rounded-xl bg-slate-100 p-1 w-fit">
+            <button
+              onClick={() => { setShowDeleted(false); setSelectedEl(null); }}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+                !showDeleted ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-white"
+              }`}
+            >
+              Active
+            </button>
+            <button
+              onClick={() => { setShowDeleted(true); setSelectedEl(null); }}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+                showDeleted ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-white"
+              }`}
+            >
+              Deleted
+            </button>
+          </div>
+
+          <input
+            placeholder={showDeleted ? "Search deleted elements..." : "Search by code or name..."}
+            className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-slate-400 bg-white"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
 
         {/* Filters */}
         <div className="flex items-center gap-2 mb-3 border border-slate-200 rounded-full px-3 py-2 w-fit">
@@ -407,7 +456,7 @@ const DataElementManager = () => {
         </div>
 
         <div className="flex items-center justify-between pb-2">
-          <p className="text-sm text-slate-400">{filtered.length} elements</p>
+          <p className="text-sm text-slate-400">{filtered.length} {showDeleted ? "deleted" : "active"} elements</p>
           <div className="flex items-center gap-1 text-xs text-slate-400">
             <span>Sort:</span>
             {[{ key: "newest", label: "Newest" }, { key: "alpha", label: "A → Z" }].map(({ key, label }) => (
@@ -435,7 +484,7 @@ const DataElementManager = () => {
             <button onClick={loadData} className="mt-2 text-xs text-blue-500 hover:underline">Retry</button>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="py-20 text-center text-slate-300 text-sm">No elements found.</div>
+          <div className="py-20 text-center text-slate-300 text-sm">{showDeleted ? "No deleted elements found." : "No elements found."}</div>
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -444,7 +493,7 @@ const DataElementManager = () => {
                 <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Code</th>
                 <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Datatype</th>
                 <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Unit</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide rounded-r-lg"></th>
+                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide rounded-r-lg">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -461,7 +510,14 @@ const DataElementManager = () => {
                     className="cursor-pointer hover:bg-slate-50 transition-colors group"
                   >
                     <td className="px-4 py-3.5 font-semibold text-slate-800">
-                      {toTitleCase(el.label || el.name)}
+                      <div className="flex items-center gap-2">
+                        <span>{toTitleCase(el.label || el.name)}</span>
+                        {showDeleted && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                            Deleted
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3.5">
                       <span className="inline-block font-mono text-sm text-blue-700 bg-blue-50 border border-blue-200 px-3 py-0.5 rounded-full">
@@ -486,12 +542,36 @@ const DataElementManager = () => {
                             {count} {count === 1 ? "survey" : "surveys"}
                           </span>
                         )}
-                        <svg
-                          className="w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors"
-                          fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
+                        {showDeleted ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRestore(el);
+                            }}
+                            disabled={restoringId === id}
+                            className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
+                              restoringId === id
+                                ? "text-slate-400 bg-slate-100 cursor-not-allowed"
+                                : "text-blue-700 bg-blue-50 hover:bg-blue-100"
+                            }`}
+                          >
+                            {restoringId === id ? "Restoring..." : "Restore"}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(el);
+                            }}
+                            className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
+                              isMapped
+                                ? "text-amber-700 bg-amber-50 hover:bg-amber-100"
+                                : "text-rose-600 bg-rose-50 hover:bg-rose-100"
+                            }`}
+                          >
+                            {isMapped ? "Deactivate" : "Delete"}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -721,12 +801,26 @@ const DataElementManager = () => {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => handleDelete(selectedEl)}
-                  className="text-xs text-red-400 hover:text-red-600 font-semibold px-2 py-1 hover:bg-red-50 rounded transition"
-                >
-                  Delete
-                </button>
+                {selectedEl.is_active === false ? (
+                  <button
+                    onClick={() => handleRestore(selectedEl)}
+                    disabled={restoringId === (selectedEl.element_id || selectedEl.id)}
+                    className={`text-xs font-semibold px-2 py-1 rounded transition ${
+                      restoringId === (selectedEl.element_id || selectedEl.id)
+                        ? "text-slate-400 bg-slate-100 cursor-not-allowed"
+                        : "text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                    }`}
+                  >
+                    {restoringId === (selectedEl.element_id || selectedEl.id) ? "Restoring..." : "Restore"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleDelete(selectedEl)}
+                    className="text-xs text-red-400 hover:text-red-600 font-semibold px-2 py-1 hover:bg-red-50 rounded transition"
+                  >
+                    Delete
+                  </button>
+                )}
                 <button
                   onClick={() => setSelectedEl(null)}
                   className="text-slate-400 hover:text-slate-600 transition ml-1"

@@ -522,11 +522,13 @@ export default function HealthGoals() {
                   )}
                   <button
                     onClick={() => handleAddGoal(tId)}
-                    disabled={isAlreadyAdded || isAtLimit || isLoading}
+                    disabled={isAlreadyAdded || isAtLimit || actionLoading === tId}
                     className={`w-full py-2.5 rounded-xl text-sm font-bold transition-all ${
                       isAlreadyAdded
                         ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                        : isAtLimit
+                      : isAtLimit
+                        ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                        : actionLoading === tId
                           ? "bg-slate-100 text-slate-400 cursor-not-allowed"
                           : "bg-blue-600 hover:bg-blue-700 text-white shadow-sm hover:shadow-md"
                     }`}

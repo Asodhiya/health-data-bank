@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct, case, and_, or_, desc
 from sqlalchemy import Date as SADate
-from app.db.models import Role, User, UserRole, Permission, ParticipantProfile, CaretakerProfile, ResearcherProfile, SignupInvite, HealthGoal, GoalTemplate, DataElement, FieldElementMap, HealthDataPoint, FormDeployment, GroupMember, FormSubmission, Group, SurveyForm, CaretakerFeedback, Notification, Report, SubmissionAnswer
+from app.db.models import Role, User, UserRole, Permission, ParticipantProfile, CaretakerProfile, ResearcherProfile, SignupInvite, HealthGoal, GoalTemplate, DataElement, FieldElementMap, HealthDataPoint, FormDeployment, GroupMember, FormSubmission, Group, SurveyForm, CaretakerFeedback, Notification, Report, SubmissionAnswer, FieldOption
 from fastapi import HTTPException, status
 import uuid
 from sqlalchemy.exc import IntegrityError
@@ -387,7 +387,7 @@ class ParticipantQuery:
 
     async def get_goal_progress(self, goal_id: uuid.UUID, participant_id: uuid.UUID):
         result = await self.db.execute(
-            select(HealthGoal, DataElement).join(
+            select(HealthGoal, DataElement).outerjoin(
                 DataElement, DataElement.element_id == HealthGoal.element_id
             ).where(
                 HealthGoal.goal_id == goal_id,
@@ -401,7 +401,7 @@ class ParticipantQuery:
 
         now = datetime.now(timezone.utc)
         current_value = await self._compute_goal_current_value(
-            goal, element.datatype, participant_id, as_of=now
+            goal, getattr(element, "datatype", None), participant_id, as_of=now
         )
         target = float(goal.target_value) if goal.target_value is not None else None
         completed = self._goal_completed(goal, current_value)
@@ -800,9 +800,16 @@ class DataElementQuery:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_data_elements(self):
+    async def get_data_elements(self, include_inactive: bool = False):
+        stmt = select(DataElement)
+        if not include_inactive:
+            stmt = stmt.where(DataElement.is_active == True)
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+
+    async def list_deleted_data_elements(self):
         result = await self.db.execute(
-            select(DataElement).where(DataElement.is_active == True)
+            select(DataElement).where(DataElement.is_active == False)
         )
         return result.scalars().all()
 
@@ -880,6 +887,17 @@ class DataElementQuery:
         await self.db.delete(element)
         await self.db.commit()
         return {"msg": "data element deleted", "deleted": True}
+
+    async def restore_data_element(self, element_id: uuid.UUID):
+        element = await self.db.get(DataElement, element_id)
+        if not element:
+            raise HTTPException(status_code=404, detail="Data element not found")
+        if element.is_active:
+            return {"msg": "Data element already active"}
+        element.is_active = True
+        await self.db.commit()
+        await self.db.refresh(element)
+        return element
 
     async def map_field(self, field_id: uuid.UUID, element_id: uuid.UUID, transform_rule: dict | None = None):
         # Verify the field exists
@@ -2548,6 +2566,7 @@ class CaretakersQuery:
             select(
                 SubmissionAnswer.field_id,
                 FormField.label.label("field_label"),
+                FormField.field_type.label("field_type"),
                 SubmissionAnswer.value_text,
                 SubmissionAnswer.value_number,
                 SubmissionAnswer.value_date,
@@ -2557,7 +2576,74 @@ class CaretakersQuery:
             .where(SubmissionAnswer.submission_id == submission_id)
         )).all()
 
-        return row, answers
+        option_field_ids = [
+            answer.field_id
+            for answer in answers
+            if (answer.field_type or "").lower() in {"single_select", "dropdown", "multi_select", "likert"}
+        ]
+        option_lookup: dict[uuid.UUID, dict[str, str]] = {}
+        if option_field_ids:
+            option_rows = (await self.db.execute(
+                select(FieldOption.field_id, FieldOption.value, FieldOption.label)
+                .where(FieldOption.field_id.in_(option_field_ids))
+            )).all()
+            for field_id, value, label in option_rows:
+                if value is None or label is None:
+                    continue
+                field_lookup = option_lookup.setdefault(field_id, {})
+                field_lookup[str(value)] = label
+                field_lookup[str(float(value))] = label
+
+        def _resolve_option_label(field_id: uuid.UUID, raw_value) -> str | None:
+            if raw_value is None:
+                return None
+            field_lookup = option_lookup.get(field_id) or {}
+            candidates = [str(raw_value)]
+            try:
+                numeric_value = float(raw_value)
+            except (TypeError, ValueError):
+                numeric_value = None
+            if numeric_value is not None:
+                candidates.append(str(numeric_value))
+                if numeric_value.is_integer():
+                    candidates.append(str(int(numeric_value)))
+            for candidate in candidates:
+                if candidate in field_lookup:
+                    return field_lookup[candidate]
+            return None
+
+        resolved_answers = []
+        for answer in answers:
+            field_type = (answer.field_type or "").lower()
+            value_text = answer.value_text
+            value_json = answer.value_json
+
+            if field_type in {"single_select", "dropdown", "likert"}:
+                resolved_label = _resolve_option_label(answer.field_id, answer.value_number)
+                if resolved_label:
+                    value_text = resolved_label
+            elif field_type == "multi_select" and isinstance(answer.value_json, list):
+                labels = []
+                for raw_value in answer.value_json:
+                    resolved_label = _resolve_option_label(answer.field_id, raw_value)
+                    labels.append(resolved_label or str(raw_value))
+                if labels:
+                    value_text = ", ".join(labels)
+                    value_json = labels
+
+            resolved_answers.append(
+                SimpleNamespace(
+                    field_id=answer.field_id,
+                    field_label=answer.field_label,
+                    field_type=answer.field_type,
+                    value_text=value_text,
+                    value_number=answer.value_number,
+                    value_date=answer.value_date,
+                    value_json=value_json,
+                )
+            )
+
+        return row, resolved_answers
 
     async def get_participant_goals(self, participant_id: uuid.UUID, user_id: uuid.UUID):
         # B1: ownership guard
@@ -2644,4 +2730,3 @@ class CaretakersQuery:
         notification.read_at = datetime.now(timezone.utc)
         await self.db.flush()
         return notification
-

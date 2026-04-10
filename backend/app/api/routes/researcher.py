@@ -114,9 +114,13 @@ async def get_submission_detail(
     participant_id: UUID,
     submission_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permissions(FORM_VIEW)),
+    current_user: User = Depends(require_permissions(FORM_VIEW)),
 ):
-    row, answers = await CaretakersQuery(db).get_submission_detail(participant_id, submission_id)
+    row, answers = await CaretakersQuery(db).get_submission_detail(
+        participant_id,
+        submission_id,
+        current_user.user_id,
+    )
     return SubmissionDetailItem(
         submission_id=row.submission_id,
         participant_id=row.participant_id,

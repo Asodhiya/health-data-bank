@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import FieldInput from '../../components/survey/FieldInput';
 import { FieldCard, AddFieldPanel, newField, uid } from '../../components/survey/FieldEditor';
 import { api } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 /* Toast animation — injected once, not per render */
 if (typeof document !== 'undefined' && !document.getElementById('hdb-toast-styles')) {
@@ -143,7 +144,7 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
    FORM LIST VIEW
    #6 tab counts, #7 sort, #8 publish date, #9 empty state
    ══════════════════════════════════════════════ */
-function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, onUnpublish, onArchive, groups, pageTitle = 'Survey Forms' }) {
+function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, onUnpublish, onArchive, groups, currentUser, pageTitle = 'Survey Forms' }) {
   const [showHelp, setShowHelp]         = useState(false);
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -246,6 +247,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
   const selectedForms     = forms.filter((f) => selected.has(f.form_id));
   const selectedDrafts    = selectedForms.filter((f) => f.status === 'DRAFT');
+  const selectedDraftsOwned = selectedDrafts.filter((f) => String(f.created_by || '') === String(currentUser?.user_id || ''));
   const selectedPublished = selectedForms.filter((f) => f.status === 'PUBLISHED');
 
   const handleConfirmDelete = (deleteAll = false) => {
@@ -490,9 +492,16 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
         {selected.size > 0 && (
           <div className="flex items-center gap-2">
             {selectedDrafts.length > 0 && (
-              <button onClick={() => setModal({ type: 'publish', ids: [...selected] })}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition">
-                <CheckIco /> Publish{selectedDrafts.length > 1 ? ` (${selectedDrafts.length})` : ''}
+              <button
+                onClick={() => setModal({ type: 'publish', ids: selectedDraftsOwned.map((f) => f.form_id) })}
+                disabled={selectedDraftsOwned.length === 0}
+                title={selectedDraftsOwned.length === 0 ? 'Only the form author can publish' : undefined}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                  selectedDraftsOwned.length === 0
+                    ? 'text-slate-400 bg-slate-100 cursor-not-allowed'
+                    : 'text-emerald-700 bg-emerald-100 hover:bg-emerald-200'
+                }`}>
+                <CheckIco /> Publish{selectedDraftsOwned.length > 1 ? ` (${selectedDraftsOwned.length})` : selectedDraftsOwned.length === 1 ? '' : ''}
               </button>
             )}
             {selectedPublished.length > 0 && (
@@ -570,7 +579,14 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                 {/* Quick actions on hover */}
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
                   {form.status === 'DRAFT' && (
-                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition" title="Publish"
+                    <button
+                      className={`p-1.5 rounded-lg transition ${
+                        String(form.created_by || '') === String(currentUser?.user_id || '')
+                          ? 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+                          : 'text-slate-300 bg-slate-50 cursor-not-allowed'
+                      }`}
+                      title={String(form.created_by || '') === String(currentUser?.user_id || '') ? 'Publish' : 'Only the form author can publish'}
+                      disabled={String(form.created_by || '') !== String(currentUser?.user_id || '')}
                       onClick={(e) => {
                         e.stopPropagation();
                         const count = form.field_count ?? (form.fields ? form.fields.length : 0);
@@ -1527,6 +1543,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
    MAIN PAGE EXPORT
    ══════════════════════════════════════════════ */
 export default function SurveyBuilderPage() {
+  const { user } = useAuth();
   const [forms, setForms]             = useState([]);
   const [groups, setGroups]           = useState([]);
   const [loading, setLoading]         = useState(true);
@@ -1755,6 +1772,7 @@ export default function SurveyBuilderPage() {
         <FormListView
           forms={forms}
           groups={groups}
+          currentUser={user}
           onEdit={handleEdit}
           onBranch={handleBranch}
           onCreate={handleCreate}

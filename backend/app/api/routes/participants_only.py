@@ -213,6 +213,16 @@ async def delete_goal(
     """
     participant_id = get_participant_id(current_user)
     await ParticipantQuery(db).delete_goal(goal_id, participant_id)
+    await create_notification(
+        db=db,
+        user_id=current_user.user_id,
+        notification_type="goal",
+        title="Goal removed",
+        message="A health goal has been removed from your dashboard.",
+        role_target="participant",
+        source_type="goal_deleted",
+        source_id=goal_id,
+    )
     return {"detail": "Goal deleted"}
 
 
