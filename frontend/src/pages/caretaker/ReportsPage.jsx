@@ -1078,7 +1078,9 @@ function HistoryTab({ selectedGroupId, groups }) {
   }
 
   const filtered = useMemo(() => reports.filter(r => {
-    if (groupFilter !== "all" && r.groupId && r.groupId !== groupFilter) return false;
+    // When a specific group is selected, only show reports that belong to it.
+    // Reports with no groupId (orphaned or cross-group comparisons) are hidden.
+    if (groupFilter !== "all" && (!r.groupId || r.groupId !== groupFilter)) return false;
     if (scopeFilter !== "all" && r.scope !== scopeFilter) return false;
     if (dateFromFilter) {
       const created = new Date(r.createdAt);

@@ -2627,17 +2627,30 @@ class CaretakersQuery:
         return list(trends.values())
 
     async def list_reports(self, user_id: uuid.UUID) -> list:
-        """List reports scoped to the caretaker's currently assigned groups.
+        """List reports scoped to the caretaker's currently assigned groups
+        and currently owned participants.
 
-        Reports for groups the caretaker is no longer assigned to are excluded.
-        Comparison reports with no group_id (scope='all') are included if the
-        caretaker still owns at least one group.
+        - Group reports: only if the caretaker still owns that group.
+        - Comparison reports with a group_id: same rule.
+        - Comparison reports without a group_id: only if the subject
+          participant is still in one of the caretaker's groups.
+        - Orphaned reports (null group_id AND null participant_id,
+          e.g. from deleted groups): excluded entirely.
         """
         # Current groups owned by this caretaker
         owned_group_ids_sq = (
             select(Group.group_id)
             .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
             .where(CaretakerProfile.user_id == user_id)
+        )
+
+        # Current participants in caretaker's groups
+        owned_participant_ids_sq = (
+            select(GroupMember.participant_id)
+            .join(Group, Group.group_id == GroupMember.group_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(CaretakerProfile.user_id == user_id)
+            .where(GroupMember.left_at == None)
         )
 
         stmt = (
@@ -2656,8 +2669,12 @@ class CaretakersQuery:
                 or_(
                     # Reports for groups I still own
                     Report.group_id.in_(owned_group_ids_sq),
-                    # Reports with no group (e.g. comparison scope="all")
-                    Report.group_id.is_(None),
+                    # Comparison reports with no group but participant still in my care
+                    and_(
+                        Report.group_id.is_(None),
+                        Report.participant_id.isnot(None),
+                        Report.participant_id.in_(owned_participant_ids_sq),
+                    ),
                 )
             )
             .order_by(Report.created_at.desc())
