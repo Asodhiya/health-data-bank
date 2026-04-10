@@ -206,7 +206,7 @@ class NoteItem(BaseModel):
 
 
 class NoteUpdateRequest(BaseModel):
-    text: Optional[str] = None
+    text: Optional[str] = Field(default=None, min_length=1)
     tag: Optional[str] = None
 
 
@@ -239,7 +239,7 @@ class ComparisonReportRequest(BaseModel):
 
 class ReportResponse(BaseModel):
     report_id: UUID
-    scope: Literal["participant", "group", "comparison"]
+    scope: str
     created_at: datetime
     payload: dict[str, Any] = Field(default_factory=dict)
     parameters: dict[str, Any] = Field(default_factory=dict)

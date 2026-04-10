@@ -1412,13 +1412,16 @@ export default function MyParticipantsPage() {
       groupsMapRef.current = initialGroupMap;
       setParticipants([]);
       setParticipantsOffset(0);
-      await loadParticipantsPage({
-        reset: true,
-        groupsMapOverride: initialGroupMap,
-        offsetValue: 0,
-        queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
-      });
-      await loadSummaries();
+      // Fire participants + summaries in parallel — they're independent
+      await Promise.all([
+        loadParticipantsPage({
+          reset: true,
+          groupsMapOverride: initialGroupMap,
+          offsetValue: 0,
+          queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
+        }),
+        loadSummaries(),
+      ]);
       // Lazy tabs: do not load invites/forms until user opens those tabs.
       setInvites([]);
       setInvitesOffset(0);

@@ -282,7 +282,7 @@ export default function CaretakerDashboard() {
 
   // Activity counts + participants — refetched whenever the selected group
   // changes, but not when groups.length flips from 0 to N.
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(async (signal) => {
     setLoading(true);
     try {
       const [countsData, participantsData] = await Promise.all([
@@ -297,6 +297,8 @@ export default function CaretakerDashboard() {
         }).catch(() => null),
       ]);
 
+      if (signal?.aborted) return;
+
       setActivityCounts({
         highly_active: Number(countsData?.highly_active || 0),
         moderately_active: Number(countsData?.moderately_active || 0),
@@ -307,13 +309,17 @@ export default function CaretakerDashboard() {
       // B8: response is { items, total_count }; dashboard only needs items.
       setParticipants(Array.isArray(participantsData?.items) ? participantsData.items : []);
     } catch (err) {
-      console.error("Failed to load dashboard data:", err);
+      if (!signal?.aborted) console.error("Failed to load dashboard data:", err);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [selectedGroupQuery]);
 
-  useEffect(() => { loadDashboard(); }, [loadDashboard]);
+  useEffect(() => {
+    const controller = new AbortController();
+    loadDashboard(controller.signal);
+    return () => controller.abort();
+  }, [loadDashboard]);
 
   const filteredParticipants = useMemo(() => participants, [participants]);
 

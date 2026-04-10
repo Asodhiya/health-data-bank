@@ -1756,13 +1756,12 @@ class CaretakersQuery:
         rows = result.all()
 
         participant_ids = [row.participant_id for row in rows]
-        goal_stats_map = await self._compute_goal_stats_map(participant_ids)
+        needs_goals = goal_progress or sort_by == "goals"
+        goal_stats_map = await self._compute_goal_stats_map(participant_ids) if needs_goals else {}
+        default_goal = {"progress": "not_started", "completed_count": 0, "total_count": 0}
         output_rows = []
         for row in rows:
-            goal_stats = goal_stats_map.get(
-                row.participant_id,
-                {"progress": "not_started", "completed_count": 0, "total_count": 0},
-            )
+            goal_stats = goal_stats_map.get(row.participant_id, default_goal) if needs_goals else default_goal
             output_rows.append(
                 SimpleNamespace(
                     participant_id=row.participant_id,
@@ -1796,7 +1795,8 @@ class CaretakersQuery:
         elif goal_progress == "no_goals":
             output_rows = [row for row in output_rows if int(getattr(row, "goals_total_count", 0) or 0) == 0]
 
-        return output_rows, int(sql_total)
+        final_total = len(output_rows) if goal_progress else int(sql_total)
+        return output_rows, final_total
 
     async def get_participant_summary(
         self,
@@ -2498,20 +2498,16 @@ class CaretakersQuery:
         message: str,
         submission_id: uuid.UUID | None = None,
     ) -> CaretakerFeedback:
-        # B1: ownership guard — previously this only checked that both
-        # entities exist independently, allowing a caretaker to create
-        # feedback rows attached to participants in other caretakers' groups.
         await self._assert_participant_in_owned_group(participant_id, caretaker_user_id)
-        row = (await self.db.execute(
-            select(CaretakerProfile.caretaker_id, ParticipantProfile.user_id)
+        caretaker_id = await self.db.scalar(
+            select(CaretakerProfile.caretaker_id)
             .where(CaretakerProfile.user_id == caretaker_user_id)
-            .where(ParticipantProfile.participant_id == participant_id)
-        )).one_or_none()
-        if not row:
-            raise HTTPException(status_code=404, detail="Caretaker or participant not found")
+        )
+        if not caretaker_id:
+            raise HTTPException(status_code=404, detail="Caretaker profile not found")
 
         feedback = CaretakerFeedback(
-            caretaker_id=row.caretaker_id,
+            caretaker_id=caretaker_id,
             participant_id=participant_id,
             submission_id=submission_id,
             message=message,

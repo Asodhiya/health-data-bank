@@ -325,8 +325,9 @@ async def get_participant(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
-    participant, first_name, last_name, user_status, _ = await CaretakersQuery(db).get_group_participant(group_id, participant_id, current_user.user_id)
-    groups = await CaretakersQuery(db).get_participant_group_memberships(
+    q = CaretakersQuery(db)
+    participant, first_name, last_name, user_status, _ = await q.get_group_participant(group_id, participant_id, current_user.user_id)
+    groups = await q.get_participant_group_memberships(
         participant_id,
         current_user.user_id,
     )
@@ -549,7 +550,10 @@ async def update_note(
     data = body.model_dump(exclude_none=True)
     if "text" in data:
         data["text"] = data["text"].strip()
+        if not data["text"]:
+            raise HTTPException(status_code=422, detail="Note text cannot be empty")
     if data:
+        data["updated_at"] = datetime.now(timezone.utc)
         await db.execute(
             update(CaretakerNote)
             .where(CaretakerNote.note_id == note_id)
