@@ -90,9 +90,17 @@ function MetricPicker({ elements, selected, onChange, label = "Select Metrics", 
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">{label}</label>
-        <button onClick={() => setExpanded(!expanded)} className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">
-          {expanded ? "Collapse" : `${selected.length} selected — Edit`}
-        </button>
+        <div className="flex items-center gap-2">
+          {elements.length > 1 && (
+            <button onClick={() => onChange(selected.length === elements.length ? [] : elements.map(e => e.element_id))}
+              className="text-[10px] font-semibold text-slate-500 hover:text-blue-600 transition-colors">
+              {selected.length === elements.length ? "Deselect all" : "Select all"}
+            </button>
+          )}
+          <button onClick={() => setExpanded(!expanded)} className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+            {expanded ? "Collapse" : `${selected.length} selected — Edit`}
+          </button>
+        </div>
       </div>
       {!expanded ? (
         <div className="flex flex-wrap gap-1.5">
@@ -164,28 +172,25 @@ function MetricPicker({ elements, selected, onChange, label = "Select Metrics", 
 }
 
 function DateRangeRow({ from, to, onFromChange, onToChange }) {
+  const presets = [
+    { l: "7d", from: () => { const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().split("T")[0]; } },
+    { l: "30d", from: () => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split("T")[0]; } },
+    { l: "90d", from: () => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split("T")[0]; } },
+    { l: "1y", from: () => { const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d.toISOString().split("T")[0]; } },
+    { l: "All", from: () => "" },
+  ];
   return (
     <div>
       <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Date Range</label>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 mb-2">
         <input type="date" value={from} onChange={e => onFromChange(e.target.value)} className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700" />
         <span className="text-xs text-slate-300">to</span>
         <input type="date" value={to} onChange={e => onToChange(e.target.value)} className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700" />
       </div>
-    </div>
-  );
-}
-
-function ReportTypeRow({ value, onChange }) {
-  return (
-    <div>
-      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Report Type</label>
-      <div className="flex gap-1.5">
-        {[{ v: "graph", l: "Graphical", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" }, { v: "numeric", l: "Numeric", icon: "M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" }].map(t => (
-          <button key={t.v} onClick={() => onChange(t.v)} className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${value === t.v ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={t.icon} /></svg>
-            {t.l}
-          </button>
+      <div className="flex gap-1">
+        {presets.map(p => (
+          <button key={p.l} type="button" onClick={() => { onFromChange(p.from()); onToChange(new Date().toISOString().split("T")[0]); }}
+            className="px-2 py-1 text-[10px] font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">{p.l}</button>
         ))}
       </div>
     </div>
@@ -196,36 +201,32 @@ function ReportTypeRow({ value, onChange }) {
 
 function GroupReportTab({ groups, selectedGroupId, elements }) {
   const [metrics, setMetrics] = useState([]);
-  const [dateFrom, setDateFrom] = useState("2025-09-01");
+  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split("T")[0]; });
   const [dateTo, setDateTo] = useState(new Date().toISOString().split("T")[0]);
-  const [reportType, setReportType] = useState("graph");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [genderFilter, setGenderFilter] = useState("");
+  const [ageMin, setAgeMin] = useState("");
+  const [ageMax, setAgeMax] = useState("");
   const [generating, setGenerating] = useState(false);
   const [report, setReport] = useState(null);
   const [chartMetric, setChartMetric] = useState(null);
+  const [chartType, setChartType] = useState("bar");
   const [error, setError] = useState(null);
 
-  // Reports v2: when the elements pool changes (group switch or initial load)
-  // reset the metric selection to the first 4 from the new pool. Previously
-  // the metric list persisted across group switches, leading to invalid
-  // element_ids being submitted to the backend.
   useEffect(() => {
     if (elements.length === 0) {
       setMetrics([]);
     } else {
-      setMetrics(elements.slice(0, 4).map(e => e.element_id));
+      setMetrics(elements.map(e => e.element_id));
     }
   }, [elements]);
 
   const groupName = selectedGroupId === "all" ? "All Groups" : groups.find(g => g.id === selectedGroupId)?.name || "Group";
-  // Reports v2: explicit group required. Previously this silently fell back
-  // to groups[0] when "All Groups" was selected, generating a report for the
-  // wrong group without telling the user.
   const requiresSpecificGroup = selectedGroupId === "all";
 
   async function handleGenerate() {
     if (requiresSpecificGroup) {
-      setError("Please select a specific group from the dropdown above. Group reports cannot aggregate across all groups.");
+      setError("Please select a specific group from the dropdown above.");
       return;
     }
     setGenerating(true);
@@ -235,18 +236,16 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
         element_ids: metrics,
         date_from: dateFrom || null,
         date_to: dateTo || null,
-        report_type: reportType,
-        // Reports v2: participant_status is now wired to the backend filter.
-        // Previously this state existed but was never sent — the buttons
-        // were entirely cosmetic.
         participant_status: statusFilter,
+        gender: genderFilter || null,
+        age_min: ageMin !== "" ? parseInt(ageMin, 10) : null,
+        age_max: ageMax !== "" ? parseInt(ageMax, 10) : null,
       };
       const data = await api.caretakerGenerateGroupReport(selectedGroupId, payload);
       setReport(data.payload || data);
       const elems = data.payload?.elements || data.elements || [];
       if (elems.length > 0) setChartMetric(elems[0].element_id);
     } catch (err) {
-      console.error("Group report generation failed:", err);
       setError(err.message || "Failed to generate report. Please try again.");
     } finally {
       setGenerating(false);
@@ -254,6 +253,8 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
   }
 
   useEffect(() => { setReport(null); }, [selectedGroupId]);
+
+  const hasFilters = genderFilter || ageMin !== "" || ageMax !== "" || statusFilter !== "all";
 
   if (!report) {
     return (
@@ -264,44 +265,82 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-800">Configure Group Report</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Aggregate data across all participants in <span className="font-semibold text-slate-500">{groupName}</span></p>
+              <h2 className="text-base font-bold text-slate-800">Generate Group Report</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Aggregate health data across all participants in <span className="font-semibold text-slate-500">{groupName}</span></p>
             </div>
           </div>
 
           {requiresSpecificGroup ? (
             <div className="rounded-xl border border-dashed border-amber-200 bg-amber-50 px-4 py-8 text-center">
               <p className="text-sm font-semibold text-amber-700">Select a specific group to continue</p>
-              <p className="text-xs text-amber-600 mt-1">Group reports aggregate data within one group at a time. Pick one from the dropdown above.</p>
+              <p className="text-xs text-amber-600 mt-1">Pick a group from the dropdown above.</p>
             </div>
           ) : elements.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
-              <p className="text-sm text-slate-400">No data elements configured for this group yet.</p>
-              <p className="text-xs text-slate-300 mt-1">Ask a researcher to set up data element mappings for the surveys deployed to this group.</p>
+              <p className="text-sm text-slate-400">No health data elements found for this group.</p>
+              <p className="text-xs text-slate-300 mt-1">Participants need to submit surveys with mapped data elements first.</p>
             </div>
           ) : (
             <>
-              <MetricPicker elements={elements} selected={metrics} onChange={setMetrics} emptyMessage="No metrics configured for this group." />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <DateRangeRow from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
-                <ReportTypeRow value={reportType} onChange={setReportType} />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Include Participants</label>
-                <div className="flex gap-1.5">
-                  {[{ v: "all", l: "All" }, { v: "active", l: "Active Only" }, { v: "inactive", l: "Inactive Only" }].map(s => (
-                    <button key={s.v} onClick={() => setStatusFilter(s.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${statusFilter === s.v ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{s.l}</button>
-                  ))}
+              <MetricPicker elements={elements} selected={metrics} onChange={setMetrics} emptyMessage="No metrics available for this group." />
+              <DateRangeRow from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+
+              {/* ── Participant Filters ── */}
+              <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Participant Filters</p>
+                  {hasFilters && (
+                    <button onClick={() => { setStatusFilter("all"); setGenderFilter(""); setAgeMin(""); setAgeMax(""); }}
+                      className="text-[10px] font-semibold text-blue-600 hover:text-blue-800">Clear all</button>
+                  )}
                 </div>
-                <p className="text-[10px] text-slate-400 mt-1.5">Active = submitted to a current form within the last 14 days. Inactive = no submission in 30+ days.</p>
+
+                {/* Activity status */}
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 mb-1 block">Activity Status</label>
+                  <div className="flex gap-1.5">
+                    {[{ v: "all", l: "All" }, { v: "active", l: "Active" }, { v: "inactive", l: "Inactive" }].map(s => (
+                      <button key={s.v} onClick={() => setStatusFilter(s.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${statusFilter === s.v ? "bg-blue-600 text-white" : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-100"}`}>{s.l}</button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Gender */}
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-500 mb-1 block">Gender</label>
+                    <select value={genderFilter} onChange={e => setGenderFilter(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700">
+                      <option value="">All Genders</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  {/* Age Range */}
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-500 mb-1 block">Age Range</label>
+                    <div className="flex items-center gap-2">
+                      <input type="number" value={ageMin} onChange={e => setAgeMin(e.target.value)} placeholder="Min"
+                        min="0" max="150"
+                        className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 placeholder:text-slate-300" />
+                      <span className="text-xs text-slate-300">to</span>
+                      <input type="number" value={ageMax} onChange={e => setAgeMax(e.target.value)} placeholder="Max"
+                        min="0" max="150"
+                        className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 placeholder:text-slate-300" />
+                    </div>
+                  </div>
+                </div>
               </div>
+
               {error && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2.5 rounded-xl">{error}</p>}
               <button onClick={handleGenerate} disabled={metrics.length === 0 || generating}
                 className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                 {generating ? (
                   <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Generating...</>
                 ) : (
-                  <><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>Generate Group Report</>
+                  <><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>Generate Report</>
                 )}
               </button>
             </>
@@ -312,6 +351,8 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
   }
 
   const elems = report.elements || [];
+  const totalParticipants = elems.length > 0 ? Math.max(...elems.map(e => e.participant_count || 0)) : 0;
+  const totalDataPoints = elems.reduce((s, e) => s + (e.count || 0), 0);
 
   return (
     <div className="space-y-5">
@@ -324,7 +365,8 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
         <span>·</span><span>{elems.length} metrics</span>
         <span>·</span><span>{fmt(dateFrom)} — {fmt(dateTo)}</span>
         <span>·</span><span className="capitalize">{statusFilter} participants</span>
-        <span>·</span><span className="capitalize">{reportType}</span>
+        {genderFilter && <><span>·</span><span>{genderFilter}</span></>}
+        {(ageMin !== "" || ageMax !== "") && <><span>·</span><span>Age {ageMin || "0"}–{ageMax || "∞"}</span></>}
       </div>
 
       {elems.length === 0 ? (
@@ -334,64 +376,149 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {elems.map(e => (
-              <div key={e.element_id} onClick={() => setChartMetric(e.element_id)}
-                className={`bg-white rounded-2xl shadow-sm border px-4 py-3 text-center cursor-pointer transition-colors ${chartMetric === e.element_id ? "border-blue-200 bg-blue-50/30" : "border-slate-100 hover:border-blue-200"}`}>
-                <p className="text-xs text-slate-400 mb-0.5 truncate">{e.label}</p>
-                <p className="text-xl font-extrabold text-slate-800">{e.avg}<span className="text-xs text-slate-400 ml-0.5">{e.unit}</span></p>
-                <p className="text-xs text-slate-300 mt-0.5">{e.min} — {e.max}</p>
-                <p className="text-[10px] text-slate-300">{e.count} data points</p>
-              </div>
-            ))}
+          {/* ── Overview Summary Cards ── */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-center">
+              <p className="text-2xl font-extrabold text-blue-600">{elems.length}</p>
+              <p className="text-xs text-slate-400 mt-0.5">Metrics Tracked</p>
+            </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-center">
+              <p className="text-2xl font-extrabold text-emerald-600">{totalParticipants}</p>
+              <p className="text-xs text-slate-400 mt-0.5">Participants</p>
+            </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-center">
+              <p className="text-2xl font-extrabold text-indigo-600">{totalDataPoints}</p>
+              <p className="text-xs text-slate-400 mt-0.5">Data Points</p>
+            </div>
           </div>
-          {reportType === "graph" && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Average Values</p>
-                <div className="flex gap-1 overflow-x-auto">
-                  {elems.map(e => (
-                    <button key={e.element_id} onClick={() => setChartMetric(e.element_id)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${chartMetric === e.element_id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
-                      {e.label.split(" ")[0]}
-                    </button>
-                  ))}
+
+          {/* ── Metric Detail Cards ── */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {elems.map(e => {
+              const range = (e.max != null && e.min != null) ? (e.max - e.min) : null;
+              const variability = e.stddev != null && e.avg != null && e.avg !== 0
+                ? ((e.stddev / Math.abs(e.avg)) * 100)
+                : null;
+              const variabilityLabel = variability != null
+                ? (variability < 15 ? "Low" : variability < 40 ? "Moderate" : "High")
+                : null;
+              const variabilityColor = variability != null
+                ? (variability < 15 ? "text-emerald-600 bg-emerald-50" : variability < 40 ? "text-amber-600 bg-amber-50" : "text-rose-600 bg-rose-50")
+                : "text-slate-400 bg-slate-50";
+
+              return (
+                <div key={e.element_id} onClick={() => setChartMetric(e.element_id)}
+                  className={`bg-white rounded-2xl shadow-sm border px-4 py-4 cursor-pointer transition-colors ${chartMetric === e.element_id ? "border-blue-200 bg-blue-50/20" : "border-slate-100 hover:border-blue-200"}`}>
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <p className="text-sm font-bold text-slate-700">{e.label}</p>
+                      <p className="text-[11px] text-slate-400">{e.participant_count || 0} participant{(e.participant_count || 0) !== 1 ? "s" : ""} · {e.count} data point{e.count !== 1 ? "s" : ""}</p>
+                    </div>
+                    {variabilityLabel && (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${variabilityColor}`}>{variabilityLabel} variability</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 mt-3">
+                    <div className="text-center">
+                      <p className="text-lg font-extrabold text-blue-600">{e.avg ?? "—"}</p>
+                      <p className="text-[10px] text-slate-400">Average</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-extrabold text-slate-600">{e.median ?? "—"}</p>
+                      <p className="text-[10px] text-slate-400">Median</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-extrabold text-slate-500">{e.min ?? "—"}</p>
+                      <p className="text-[10px] text-slate-400">Min</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-extrabold text-slate-500">{e.max ?? "—"}</p>
+                      <p className="text-[10px] text-slate-400">Max</p>
+                    </div>
+                  </div>
+                  {(e.stddev != null || range != null) && (
+                    <div className="flex items-center gap-3 mt-2 pt-2 border-t border-slate-100">
+                      {e.stddev != null && <p className="text-[11px] text-slate-400">Std Dev: <span className="font-semibold text-slate-600">{e.stddev}</span> {e.unit}</p>}
+                      {range != null && <p className="text-[11px] text-slate-400">Range: <span className="font-semibold text-slate-600">{range.toFixed(1)}</span> {e.unit}</p>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── Chart with Bar/Line toggle ── */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Average vs Median Comparison</p>
+              <div className="flex items-center gap-3">
+                <div className="flex gap-0.5 bg-slate-100 rounded-lg p-0.5">
+                  <button onClick={() => setChartType("bar")} className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${chartType === "bar" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>Bar
+                  </button>
+                  <button onClick={() => setChartType("line")} className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${chartType === "line" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>Line
+                  </button>
                 </div>
               </div>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
+            </div>
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                {chartType === "bar" ? (
                   <BarChart data={elems} margin={{ bottom: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                     <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} angle={-20} textAnchor="end" height={50} />
                     <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                    <ReTooltip contentStyle={CHART_TT} formatter={(v, name, props) => [`${v} ${props.payload.unit}`, "Average"]} />
-                    <Bar dataKey="avg" name="Group Average" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                    <ReTooltip contentStyle={CHART_TT} formatter={(v, name, props) => [`${v} ${props.payload.unit || ""}`, name]} />
+                    <Legend wrapperStyle={{ fontSize: "12px" }} />
+                    <Bar dataKey="avg" name="Average" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="median" name="Median" fill="#10b981" radius={[6, 6, 0, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
-              </div>
+                ) : (
+                  <LineChart data={elems} margin={{ bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} angle={-20} textAnchor="end" height={50} />
+                    <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                    <ReTooltip contentStyle={CHART_TT} formatter={(v, name, props) => [`${v} ${props.payload.unit || ""}`, name]} />
+                    <Legend wrapperStyle={{ fontSize: "12px" }} />
+                    <Line type="monotone" dataKey="avg" name="Average" stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 5, fill: "#3b82f6" }} />
+                    <Line type="monotone" dataKey="median" name="Median" stroke="#10b981" strokeWidth={2.5} dot={{ r: 5, fill: "#10b981" }} />
+                    <Line type="monotone" dataKey="min" name="Min" stroke="#94a3b8" strokeWidth={1} strokeDasharray="4 4" dot={{ r: 3, fill: "#94a3b8" }} />
+                    <Line type="monotone" dataKey="max" name="Max" stroke="#f59e0b" strokeWidth={1} strokeDasharray="4 4" dot={{ r: 3, fill: "#f59e0b" }} />
+                  </LineChart>
+                )}
+              </ResponsiveContainer>
             </div>
-          )}
+          </div>
+
+          {/* ── Full Statistics Table ── */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Numeric Summary</p>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Full Statistical Summary</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-slate-100">
                   <th className="text-left text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Metric</th>
                   <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Avg</th>
+                  <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Median</th>
+                  <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Std Dev</th>
                   <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Min</th>
                   <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Max</th>
-                  <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Count</th>
+                  <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Points</th>
+                  <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Participants</th>
                 </tr></thead>
                 <tbody>
                   {elems.map(e => (
                     <tr key={e.element_id} className="border-b border-slate-50 hover:bg-slate-50">
                       <td className="py-2.5 px-4 font-semibold text-slate-700">{e.label} <span className="text-slate-400 font-normal">({e.unit})</span></td>
-                      <td className="py-2.5 px-4 text-center font-bold text-blue-600">{e.avg}</td>
-                      <td className="py-2.5 px-4 text-center text-slate-500">{e.min}</td>
-                      <td className="py-2.5 px-4 text-center text-slate-500">{e.max}</td>
+                      <td className="py-2.5 px-4 text-center font-bold text-blue-600">{e.avg ?? "—"}</td>
+                      <td className="py-2.5 px-4 text-center font-bold text-emerald-600">{e.median ?? "—"}</td>
+                      <td className="py-2.5 px-4 text-center text-slate-500">{e.stddev ?? "—"}</td>
+                      <td className="py-2.5 px-4 text-center text-slate-500">{e.min ?? "—"}</td>
+                      <td className="py-2.5 px-4 text-center text-slate-500">{e.max ?? "—"}</td>
                       <td className="py-2.5 px-4 text-center text-slate-400">{e.count}</td>
+                      <td className="py-2.5 px-4 text-center text-slate-400">{e.participant_count || "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -412,7 +539,7 @@ function ComparisonTab({ participants, groups, selectedGroupId, initialParticipa
   const [compareWith, setCompareWith] = useState("group");
   const [compareParticipantId, setCompareParticipantId] = useState("");
   const [metrics, setMetrics] = useState([]);
-  const [dateFrom, setDateFrom] = useState("2025-09-01");
+  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split("T")[0]; });
   const [dateTo, setDateTo] = useState(new Date().toISOString().split("T")[0]);
   const [generating, setGenerating] = useState(false);
   const [report, setReport] = useState(null);
@@ -677,7 +804,7 @@ function ComparisonTab({ participants, groups, selectedGroupId, initialParticipa
 function TrendsTab({ participants }) {
   const [selectedId, setSelectedId] = useState("");
   const [metrics, setMetrics] = useState([]);
-  const [dateFrom, setDateFrom] = useState("2025-09-01");
+  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split("T")[0]; });
   const [dateTo, setDateTo] = useState(new Date().toISOString().split("T")[0]);
   const [loading, setLoading] = useState(false);
   const [trends, setTrends] = useState(null);
@@ -889,44 +1016,98 @@ function TrendsTab({ participants }) {
 
 // ─── Tab: History ───────────────────────────────────────────────────────────────
 
-function HistoryTab() {
+function HistoryTab({ selectedGroupId, groups }) {
   const [reports, setReports] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [scopeFilter, setScopeFilter] = useState("all");
+  const [groupFilter, setGroupFilter] = useState("all");
+  const [dateFromFilter, setDateFromFilter] = useState("");
+  const [dateToFilter, setDateToFilter] = useState("");
   const [viewing, setViewing] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(null);
 
   useEffect(() => {
+    setHistoryLoading(true);
     api.caretakerListReports()
       .then(data => {
         setReports((data || []).map(r => ({
           id: r.report_id,
           scope: r.scope || "unknown",
+          groupId: r.group_id || null,
+          groupName: r.group_name || null,
+          participantId: r.participant_id || null,
           createdAt: r.created_at,
+          dateFrom: r.date_from || null,
+          dateTo: r.date_to || null,
+          participantStatus: r.participant_status || null,
+          compareWith: r.compare_with || null,
+          elementCount: r.element_count || 0,
+          elementLabels: r.element_labels || [],
         })));
       })
       .catch(() => setReports([]))
       .finally(() => setHistoryLoading(false));
   }, []);
 
+  useEffect(() => { setViewing(null); }, [selectedGroupId]);
+
+  useEffect(() => {
+    setGroupFilter(selectedGroupId === "all" ? "all" : selectedGroupId);
+  }, [selectedGroupId]);
+
+  const reportGroups = useMemo(() => {
+    const seen = new Map();
+    reports.forEach(r => {
+      if (r.groupId && r.groupName && !seen.has(r.groupId)) {
+        seen.set(r.groupId, r.groupName);
+      }
+    });
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [reports]);
+
+  const hasFilters = search || scopeFilter !== "all" || groupFilter !== "all" || dateFromFilter || dateToFilter;
+
+  function clearAllFilters() {
+    setSearch("");
+    setScopeFilter("all");
+    setGroupFilter("all");
+    setDateFromFilter("");
+    setDateToFilter("");
+  }
+
   const filtered = useMemo(() => reports.filter(r => {
+    if (groupFilter !== "all" && r.groupId && r.groupId !== groupFilter) return false;
     if (scopeFilter !== "all" && r.scope !== scopeFilter) return false;
-    if (search && !`${r.scope} ${fmt(r.createdAt)}`.toLowerCase().includes(search.toLowerCase())) return false;
+    if (dateFromFilter) {
+      const created = new Date(r.createdAt);
+      if (created < new Date(dateFromFilter)) return false;
+    }
+    if (dateToFilter) {
+      const created = new Date(r.createdAt);
+      const endOfDay = new Date(dateToFilter);
+      endOfDay.setDate(endOfDay.getDate() + 1);
+      if (created >= endOfDay) return false;
+    }
+    if (search) {
+      const needle = search.toLowerCase();
+      const haystack = `${r.scope} ${r.groupName || ""} ${r.elementLabels.join(" ")} ${fmt(r.createdAt)} ${r.compareWith || ""}`.toLowerCase();
+      if (!haystack.includes(needle)) return false;
+    }
     return true;
-  }), [search, scopeFilter, reports]);
+  }), [search, scopeFilter, groupFilter, dateFromFilter, dateToFilter, reports]);
 
   async function handleViewReport(r) {
     setDetailLoading(true);
     setDetailError(null);
-    setViewing({ ...r, payload: null });
+    setViewing({ ...r, payload: null, params: null });
     try {
       const detail = await api.caretakerGetReport(r.id);
-      setViewing({ ...r, payload: detail.payload || {} });
+      setViewing({ ...r, payload: detail.payload || {}, params: detail.parameters || {} });
     } catch (err) {
       setDetailError(err.message || "Couldn't load this report. Please try again.");
-      setViewing({ ...r, payload: {} });
+      setViewing({ ...r, payload: {}, params: {} });
     } finally {
       setDetailLoading(false);
     }
@@ -940,9 +1121,11 @@ function HistoryTab() {
     );
   }
 
+  // ── Detail view ──
   if (viewing) {
     const elems = viewing.payload?.elements || [];
     const isComparison = viewing.scope === "comparison";
+    const config = viewing.params || {};
 
     return (
       <div className="space-y-5">
@@ -950,10 +1133,20 @@ function HistoryTab() {
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           Back to History
         </button>
+
+        {/* Report metadata header */}
         <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
           <ScopeBadge scope={viewing.scope} />
           <span>·</span><span>Generated {fmt(viewing.createdAt)}</span>
-          <span>·</span><span>{elems.length} elements</span>
+          {viewing.groupName && <><span>·</span><span className="font-medium text-slate-600">{viewing.groupName}</span></>}
+          {elems.length > 0 && <><span>·</span><span>{elems.length} metrics</span></>}
+          {(config.date_from || viewing.dateFrom) && (config.date_to || viewing.dateTo) && (
+            <><span>·</span><span>{config.date_from || viewing.dateFrom} → {config.date_to || viewing.dateTo}</span></>
+          )}
+          {config.participant_status && config.participant_status !== "all" && <><span>·</span><span className="capitalize">{config.participant_status} participants</span></>}
+          {config.gender && <><span>·</span><span>{config.gender}</span></>}
+          {(config.age_min != null || config.age_max != null) && <><span>·</span><span>Age {config.age_min ?? 0}–{config.age_max ?? "∞"}</span></>}
+          {isComparison && config.compare_with && <><span>·</span><span>vs {config.compare_with}</span></>}
         </div>
 
         {detailLoading ? (
@@ -980,17 +1173,44 @@ function HistoryTab() {
           </div>
         ) : (
           <>
-            {!isComparison && (
+            {/* Metric cards — enhanced for group reports, compact for comparison */}
+            {!isComparison ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {elems.map(e => {
+                  const range = (e.max != null && e.min != null) ? (e.max - e.min) : null;
+                  return (
+                    <div key={e.element_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-4">
+                      <p className="text-sm font-bold text-slate-700 mb-0.5">{e.label}</p>
+                      <p className="text-[11px] text-slate-400 mb-2">{e.participant_count || "—"} participants · {e.count} data points</p>
+                      <div className="grid grid-cols-4 gap-2">
+                        <div className="text-center"><p className="text-lg font-extrabold text-blue-600">{e.avg ?? "—"}</p><p className="text-[10px] text-slate-400">Avg</p></div>
+                        <div className="text-center"><p className="text-lg font-extrabold text-emerald-600">{e.median ?? "—"}</p><p className="text-[10px] text-slate-400">Median</p></div>
+                        <div className="text-center"><p className="text-lg font-extrabold text-slate-500">{e.min ?? "—"}</p><p className="text-[10px] text-slate-400">Min</p></div>
+                        <div className="text-center"><p className="text-lg font-extrabold text-slate-500">{e.max ?? "—"}</p><p className="text-[10px] text-slate-400">Max</p></div>
+                      </div>
+                      {(e.stddev != null || range != null) && (
+                        <div className="flex items-center gap-3 mt-2 pt-2 border-t border-slate-100">
+                          {e.stddev != null && <p className="text-[11px] text-slate-400">Std Dev: <span className="font-semibold text-slate-600">{e.stddev}</span></p>}
+                          {range != null && <p className="text-[11px] text-slate-400">Range: <span className="font-semibold text-slate-600">{range.toFixed(1)}</span></p>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {elems.map(e => (
                   <div key={e.element_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-center">
                     <p className="text-xs text-slate-400 mb-0.5 truncate">{e.label}</p>
-                    <p className="text-xl font-extrabold text-slate-800">{e.avg}<span className="text-xs text-slate-400 ml-0.5">{e.unit}</span></p>
-                    <p className="text-xs text-slate-300 mt-0.5">{e.min} — {e.max}</p>
+                    <p className="text-lg font-extrabold text-indigo-600">{e.subject?.avg ?? "—"}</p>
+                    <p className="text-xs text-slate-400">vs <span className="font-semibold text-slate-500">{e.comparison?.avg ?? "—"}</span></p>
                   </div>
                 ))}
               </div>
             )}
+
+            {/* Data table */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Report Data</p>
@@ -1000,14 +1220,16 @@ function HistoryTab() {
                   <thead><tr className="border-b border-slate-100">
                     <th className="text-left text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Element</th>
                     {isComparison ? (
-                      <><th className="text-center text-xs font-bold text-indigo-500 uppercase tracking-wider py-2.5 px-4">Subject Avg</th>
-                      <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Comparison Avg</th>
+                      <><th className="text-center text-xs font-bold text-indigo-500 uppercase tracking-wider py-2.5 px-4">Subject</th>
+                      <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Comparison</th>
                       <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Diff</th></>
                     ) : (
                       <><th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Avg</th>
+                      <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Median</th>
                       <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Min</th>
                       <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Max</th>
-                      <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Count</th></>
+                      <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Std Dev</th>
+                      <th className="text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-2.5 px-4">Points</th></>
                     )}
                   </tr></thead>
                   <tbody>
@@ -1015,7 +1237,7 @@ function HistoryTab() {
                       const diff = isComparison && e.subject?.avg != null && e.comparison?.avg != null ? e.subject.avg - e.comparison.avg : null;
                       return (
                         <tr key={e.element_id} className="border-b border-slate-50 hover:bg-slate-50">
-                          <td className="py-2.5 px-4 font-semibold text-slate-700">{e.label} <span className="text-slate-400 font-normal">({e.unit})</span></td>
+                          <td className="py-2.5 px-4 font-semibold text-slate-700">{e.label} {e.unit && <span className="text-slate-400 font-normal">({e.unit})</span>}</td>
                           {isComparison ? (
                             <><td className="py-2.5 px-4 text-center font-bold text-indigo-600">{e.subject?.avg ?? "—"}</td>
                             <td className="py-2.5 px-4 text-center text-slate-500">{e.comparison?.avg ?? "—"}</td>
@@ -1023,10 +1245,12 @@ function HistoryTab() {
                               {diff != null ? `${diff > 0 ? "+" : ""}${diff.toFixed(1)}` : "—"}
                             </td></>
                           ) : (
-                            <><td className="py-2.5 px-4 text-center font-bold text-blue-600">{e.avg}</td>
-                            <td className="py-2.5 px-4 text-center text-slate-500">{e.min}</td>
-                            <td className="py-2.5 px-4 text-center text-slate-500">{e.max}</td>
-                            <td className="py-2.5 px-4 text-center text-slate-400">{e.count}</td></>
+                            <><td className="py-2.5 px-4 text-center font-bold text-blue-600">{e.avg ?? "—"}</td>
+                            <td className="py-2.5 px-4 text-center font-bold text-emerald-600">{e.median ?? "—"}</td>
+                            <td className="py-2.5 px-4 text-center text-slate-500">{e.min ?? "—"}</td>
+                            <td className="py-2.5 px-4 text-center text-slate-500">{e.max ?? "—"}</td>
+                            <td className="py-2.5 px-4 text-center text-slate-500">{e.stddev ?? "—"}</td>
+                            <td className="py-2.5 px-4 text-center text-slate-400">{e.count ?? "—"}</td></>
                           )}
                         </tr>
                       );
@@ -1041,36 +1265,98 @@ function HistoryTab() {
     );
   }
 
+  // ── List view ──
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
+        {/* Search */}
+        <div className="relative">
           <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search reports…"
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by type, group, or metric…"
             className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-slate-300" />
         </div>
-        <div className="flex gap-1.5 shrink-0">
-          {[{ v: "all", l: "All" }, { v: "group", l: "Group" }, { v: "comparison", l: "Comparison" }].map(s => (
-            <button key={s.v} onClick={() => setScopeFilter(s.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${scopeFilter === s.v ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{s.l}</button>
-          ))}
+
+        {/* Filter row 1: type + group */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex gap-1.5 shrink-0">
+            <span className="text-[10px] font-bold text-slate-400 uppercase self-center mr-1">Type:</span>
+            {[{ v: "all", l: "All" }, { v: "group", l: "Group" }, { v: "comparison", l: "Comparison" }].map(s => (
+              <button key={s.v} onClick={() => setScopeFilter(s.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${scopeFilter === s.v ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{s.l}</button>
+            ))}
+          </div>
+          {reportGroups.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Group:</span>
+              <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)}
+                className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-600">
+                <option value="all">All Groups</option>
+                {reportGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
+
+        {/* Filter row 2: date range */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Generated:</span>
+          <input type="date" value={dateFromFilter} onChange={e => setDateFromFilter(e.target.value)}
+            className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-600" />
+          <span className="text-xs text-slate-300">to</span>
+          <input type="date" value={dateToFilter} onChange={e => setDateToFilter(e.target.value)}
+            className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-600" />
+          {(dateFromFilter || dateToFilter) && (
+            <button onClick={() => { setDateFromFilter(""); setDateToFilter(""); }} className="text-[10px] font-semibold text-slate-400 hover:text-rose-500">✕</button>
+          )}
+        </div>
+
+        {/* Clear all */}
+        {hasFilters && (
+          <div className="flex justify-end">
+            <button onClick={clearAllFilters} className="text-[10px] font-semibold text-blue-600 hover:text-blue-800">Clear all filters</button>
+          </div>
+        )}
       </div>
-      <p className="text-xs text-slate-400 px-1">{filtered.length} report{filtered.length !== 1 ? "s" : ""}</p>
+
+      <p className="text-xs text-slate-400 px-1">{filtered.length} report{filtered.length !== 1 ? "s" : ""}{reports.length !== filtered.length ? ` (${reports.length} total)` : ""}</p>
+
       {filtered.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-12 text-center">
-          <p className="text-sm text-slate-400">{reports.length === 0 ? "No reports generated yet. Use the Group or Comparison tabs to create one." : "No reports match your search."}</p>
+          <p className="text-sm text-slate-400">{reports.length === 0 ? "No reports generated yet. Use the Group or Comparison tabs to create one." : "No reports match your filters."}</p>
+          {hasFilters && (
+            <button onClick={clearAllFilters} className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear filters</button>
+          )}
         </div>
       ) : filtered.map(r => (
         <div key={r.id} onClick={() => handleViewReport(r)}
-          className="bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-4 flex items-center justify-between gap-3 hover:bg-slate-50 hover:border-slate-200 transition-all cursor-pointer group">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-700 transition-colors capitalize">{r.scope} Report</p>
-              <ScopeBadge scope={r.scope} />
+          className="bg-white rounded-2xl shadow-sm border border-slate-100 px-5 py-4 hover:bg-slate-50 hover:border-slate-200 transition-all cursor-pointer group">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-700 transition-colors capitalize">{r.scope} Report</p>
+                <ScopeBadge scope={r.scope} />
+                {r.compareWith && r.compareWith !== "group" && (
+                  <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">vs {r.compareWith}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                <p className="text-xs text-slate-400">{fmt(r.createdAt)}</p>
+                {r.groupName && <><span className="text-xs text-slate-300">·</span><p className="text-xs text-slate-500 font-medium">{r.groupName}</p></>}
+                {r.elementCount > 0 && <><span className="text-xs text-slate-300">·</span><p className="text-xs text-slate-400">{r.elementCount} metric{r.elementCount !== 1 ? "s" : ""}</p></>}
+                {r.dateFrom && r.dateTo && <><span className="text-xs text-slate-300">·</span><p className="text-xs text-slate-400">{r.dateFrom} → {r.dateTo}</p></>}
+              </div>
+              {r.elementLabels.length > 0 && (
+                <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                  {r.elementLabels.map((label, i) => (
+                    <span key={i} className="text-[10px] font-medium text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-full">{label}</span>
+                  ))}
+                  {r.elementCount > r.elementLabels.length && (
+                    <span className="text-[10px] text-slate-400">+{r.elementCount - r.elementLabels.length} more</span>
+                  )}
+                </div>
+              )}
             </div>
-            <p className="text-xs text-slate-400 mt-1">Generated {fmt(r.createdAt)}</p>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-300 group-hover:text-blue-500 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
           </div>
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-300 group-hover:text-blue-500 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
         </div>
       ))}
     </div>
@@ -1302,7 +1588,7 @@ export default function ReportsPage() {
       {activeTab === "group" && <GroupReportTab groups={groups} selectedGroupId={selectedGroupId} elements={elements} />}
       {activeTab === "comparison" && <ComparisonTab participants={filteredParticipants} groups={groups} selectedGroupId={selectedGroupId} initialParticipantId={initialParticipantId} />}
       {activeTab === "trends" && <TrendsTab participants={filteredParticipants} />}
-      {activeTab === "history" && <HistoryTab />}
+      {activeTab === "history" && <HistoryTab selectedGroupId={selectedGroupId} groups={groups} />}
     </div>
   );
 }

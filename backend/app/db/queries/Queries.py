@@ -1933,6 +1933,10 @@ class CaretakersQuery:
             .where(FormSubmission.participant_id == participant_id)
             .order_by(FormSubmission.submitted_at.desc())
         )
+        # Only hide deleted-form submissions in caretaker context.
+        # Admins may need to see them for auditing purposes.
+        if caretaker_user_id is not None:
+            stmt = stmt.where(SurveyForm.status != "DELETED")
 
         if date_from:
             stmt = stmt.where(FormSubmission.submitted_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
@@ -1943,22 +1947,30 @@ class CaretakersQuery:
         return result.all()
 
     async def get_group_elements(self, group_id: uuid.UUID, user_id: uuid.UUID):
-        # B2: was previously taking only group_id with no caretaker filter,
-        # which let any caretaker read the deployed elements of any group.
         await self._assert_group_owned(group_id, user_id)
 
-        # Reports v2: also return description (was missing from the SELECT),
-        # the form name(s) where this element appears in this group's
-        # currently-deployed forms, and a count of HealthDataPoints for this
-        # element across all current members of the group. The form_names
-        # array uses array_agg(distinct ...) so multi-form elements collapse
-        # into a single row.
         members_sq = (
             select(GroupMember.participant_id)
             .where(GroupMember.group_id == group_id)
             .where(GroupMember.left_at == None)
         ).subquery()
 
+        # (a) Elements from currently deployed forms for this group
+        deployed_elements_sq = (
+            select(
+                DataElement.element_id.label("element_id"),
+                func.array_agg(func.distinct(SurveyForm.title)).label("form_names"),
+            )
+            .join(FieldElementMap, FieldElementMap.element_id == DataElement.element_id)
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
+            .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
+            .where(FormDeployment.group_id == group_id)
+            .where(FormDeployment.revoked_at == None)
+            .group_by(DataElement.element_id)
+        ).subquery()
+
+        # (b) All elements with any HealthDataPoints for current group members
         data_point_count_sq = (
             select(
                 HealthDataPoint.element_id.label("element_id"),
@@ -1968,6 +1980,11 @@ class CaretakersQuery:
             .group_by(HealthDataPoint.element_id)
         ).subquery()
 
+        # Union: any element from (a) OR (b)
+        relevant_ids_stmt = select(deployed_elements_sq.c.element_id).union(
+            select(data_point_count_sq.c.element_id)
+        )
+
         result = await self.db.execute(
             select(
                 DataElement.element_id,
@@ -1976,29 +1993,13 @@ class CaretakersQuery:
                 DataElement.unit,
                 DataElement.datatype,
                 DataElement.description,
-                func.array_agg(func.distinct(SurveyForm.title)).label("form_names"),
-                func.coalesce(
-                    func.max(data_point_count_sq.c.dp_count), 0
-                ).label("data_point_count"),
+                deployed_elements_sq.c.form_names.label("form_names"),
+                func.coalesce(data_point_count_sq.c.dp_count, 0).label("data_point_count"),
             )
-            .join(FieldElementMap, FieldElementMap.element_id == DataElement.element_id)
-            .join(FormField, FormField.field_id == FieldElementMap.field_id)
-            .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
-            .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
-            .outerjoin(
-                data_point_count_sq,
-                data_point_count_sq.c.element_id == DataElement.element_id,
-            )
-            .where(FormDeployment.group_id == group_id)
-            .where(FormDeployment.revoked_at == None)
-            .group_by(
-                DataElement.element_id,
-                DataElement.code,
-                DataElement.label,
-                DataElement.unit,
-                DataElement.datatype,
-                DataElement.description,
-            )
+            .outerjoin(deployed_elements_sq, deployed_elements_sq.c.element_id == DataElement.element_id)
+            .outerjoin(data_point_count_sq, data_point_count_sq.c.element_id == DataElement.element_id)
+            .where(DataElement.element_id.in_(relevant_ids_stmt))
+            .order_by(DataElement.label)
         )
         return result.all()
 
@@ -2173,15 +2174,12 @@ class CaretakersQuery:
         date_from: date | None = None,
         date_to: date | None = None,
         participant_status: str = "all",
+        gender: str | None = None,
+        age_min: int | None = None,
+        age_max: int | None = None,
     ) -> Report:
-        # B44: ownership guard. Without this, any caretaker could pass any
-        # group_id and get back aggregated stats for that group.
         await self._assert_group_owned(group_id, requested_by)
 
-        # Reports v2: optional participant activity filter. The same
-        # deployment-aware definition the dashboard's stat cards use:
-        #   "active" = submitted to a currently-deployed form in the last 14d
-        #   "inactive" = no qualifying submission in the last 30d (or never)
         today = _utc_today()
         recent_submissions_sq = (
             select(
@@ -2214,6 +2212,12 @@ class CaretakersQuery:
                 func.min(HealthDataPoint.value_number).label("min"),
                 func.max(HealthDataPoint.value_number).label("max"),
                 func.count(HealthDataPoint.data_id).label("count"),
+                func.count(distinct(HealthDataPoint.participant_id)).label("participant_count"),
+                func.coalesce(
+                    func.percentile_cont(0.5).within_group(HealthDataPoint.value_number),
+                    0,
+                ).label("median"),
+                func.stddev(HealthDataPoint.value_number).label("stddev"),
             )
             .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
             .join(ParticipantProfile, ParticipantProfile.participant_id == HealthDataPoint.participant_id)
@@ -2222,6 +2226,16 @@ class CaretakersQuery:
             .where(GroupMember.left_at == None)
             .group_by(DataElement.element_id, DataElement.code, DataElement.label, DataElement.unit)
         )
+
+        # ── Demographic filters ──
+        if gender:
+            stmt = stmt.where(func.lower(ParticipantProfile.gender) == gender.strip().lower())
+        if age_min is not None:
+            age_expr = func.date_part("year", func.age(ParticipantProfile.dob))
+            stmt = stmt.where(age_expr >= age_min)
+        if age_max is not None:
+            age_expr = func.date_part("year", func.age(ParticipantProfile.dob))
+            stmt = stmt.where(age_expr <= age_max)
 
         if participant_status == "active":
             active_pids_sq = (
@@ -2258,7 +2272,10 @@ class CaretakersQuery:
                     "avg": round(float(row.avg), 2) if row.avg is not None else None,
                     "min": float(row.min) if row.min is not None else None,
                     "max": float(row.max) if row.max is not None else None,
+                    "median": round(float(row.median), 2) if row.median is not None else None,
+                    "stddev": round(float(row.stddev), 2) if row.stddev is not None else None,
                     "count": row.count,
+                    "participant_count": row.participant_count,
                 }
                 for row in rows
             ],
@@ -2274,6 +2291,9 @@ class CaretakersQuery:
                 "date_from": str(date_from) if date_from else None,
                 "date_to": str(date_to) if date_to else None,
                 "participant_status": participant_status,
+                "gender": gender,
+                "age_min": age_min,
+                "age_max": age_max,
             },
         )
         self.db.add(report)
@@ -2610,14 +2630,67 @@ class CaretakersQuery:
             })
         return list(trends.values())
 
-    async def list_reports(self, user_id: uuid.UUID) -> list[Report]:
-        result = await self.db.execute(
-            select(Report)
+    async def list_reports(self, user_id: uuid.UUID) -> list:
+        """List reports scoped to the caretaker's currently assigned groups.
+
+        Reports for groups the caretaker is no longer assigned to are excluded.
+        Comparison reports with no group_id (scope='all') are included if the
+        caretaker still owns at least one group.
+        """
+        # Current groups owned by this caretaker
+        owned_group_ids_sq = (
+            select(Group.group_id)
+            .join(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+            .where(CaretakerProfile.user_id == user_id)
+        )
+
+        stmt = (
+            select(
+                Report.report_id,
+                Report.report_type,
+                Report.group_id,
+                Report.participant_id,
+                Report.created_at,
+                Report.parameters,
+                Group.name.label("group_name"),
+            )
+            .outerjoin(Group, Group.group_id == Report.group_id)
             .where(Report.requested_by == user_id)
+            .where(
+                or_(
+                    # Reports for groups I still own
+                    Report.group_id.in_(owned_group_ids_sq),
+                    # Reports with no group (e.g. comparison scope="all")
+                    Report.group_id.is_(None),
+                )
+            )
             .order_by(Report.created_at.desc())
             .limit(100)
         )
-        return result.scalars().all()
+        rows = (await self.db.execute(stmt)).all()
+
+        results = []
+        for row in rows:
+            params = row.parameters or {}
+            # Extract element labels from stored payload for display
+            payload_elements = (params.get("payload", {}) or {}).get("elements", [])
+            element_labels = [e.get("label", "") for e in payload_elements if e.get("label")]
+
+            results.append(SimpleNamespace(
+                report_id=row.report_id,
+                report_type=row.report_type,
+                group_id=row.group_id,
+                group_name=row.group_name,
+                participant_id=row.participant_id,
+                created_at=row.created_at,
+                date_from=params.get("date_from"),
+                date_to=params.get("date_to"),
+                participant_status=params.get("participant_status"),
+                compare_with=params.get("compare_with"),
+                element_count=len(payload_elements),
+                element_labels=element_labels[:5],  # First 5 for preview
+            ))
+        return results
 
     async def list_notifications(self, user_id: uuid.UUID) -> list[Notification]:
         result = await self.db.execute(

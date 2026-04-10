@@ -601,12 +601,18 @@ async def generate_group_report(
         date_from=body.date_from,
         date_to=body.date_to,
         participant_status=body.participant_status,
+        gender=body.gender,
+        age_min=body.age_min,
+        age_max=body.age_max,
     )
+    all_params = report.parameters or {}
+    config = {k: v for k, v in all_params.items() if k != "payload"}
     return ReportResponse(
         report_id=report.report_id,
         scope="group",
         created_at=report.created_at,
-        payload=report.parameters.get("payload", {}),
+        payload=all_params.get("payload", {}),
+        parameters=config,
     )
 
 
@@ -635,11 +641,14 @@ async def generate_comparison_report(
         date_from=body.date_from,
         date_to=body.date_to,
     )
+    all_params = report.parameters or {}
+    config = {k: v for k, v in all_params.items() if k != "payload"}
     return ReportResponse(
         report_id=report.report_id,
         scope="comparison",
         created_at=report.created_at,
-        payload=report.parameters.get("payload", {}),
+        payload=all_params.get("payload", {}),
+        parameters=config,
     )
 
 
@@ -653,7 +662,16 @@ async def list_reports(
         ReportListItem(
             report_id=r.report_id,
             scope=r.report_type or "unknown",
+            group_id=r.group_id,
+            group_name=r.group_name,
+            participant_id=r.participant_id,
             created_at=r.created_at,
+            date_from=r.date_from,
+            date_to=r.date_to,
+            participant_status=r.participant_status,
+            compare_with=r.compare_with,
+            element_count=r.element_count,
+            element_labels=r.element_labels,
         )
         for r in reports
     ]
@@ -666,11 +684,15 @@ async def get_report(
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
     report = await CaretakersQuery(db).get_report(report_id, current_user.user_id)
+    all_params = report.parameters or {}
+    # payload holds the computed results; parameters holds the config
+    config = {k: v for k, v in all_params.items() if k != "payload"}
     return ReportResponse(
         report_id=report.report_id,
         scope=report.report_type,
         created_at=report.created_at,
-        payload=report.parameters.get("payload", {}) if report.parameters else {},
+        payload=all_params.get("payload", {}),
+        parameters=config,
     )
 
 

@@ -522,11 +522,39 @@ async def unpublish_survey_form_all(form_id: UUID, user_id: UUID, db: AsyncSessi
         select(FormDeployment).where(FormDeployment.form_id == form_id)
     )
     deployments = deployment_result.scalars().all()
+
+    # Collect caretaker user IDs for affected groups before deleting deployments
+    affected_group_ids = [d.group_id for d in deployments if d.group_id]
+    caretaker_user_ids = []
+    if affected_group_ids:
+        ct_result = await db.execute(
+            select(CaretakerProfile.user_id)
+            .join(Group, Group.caretaker_id == CaretakerProfile.caretaker_id)
+            .where(Group.group_id.in_(affected_group_ids))
+            .where(CaretakerProfile.user_id.isnot(None))
+        )
+        caretaker_user_ids = list({row[0] for row in ct_result.all()})
+
     for deployment in deployments:
         await db.delete(deployment)
 
     form.status = "ARCHIVED"
     form.modified_at = func.now()
+
+    # Notify affected caretakers
+    if caretaker_user_ids:
+        await create_notifications_bulk(
+            db=db,
+            user_ids=caretaker_user_ids,
+            notification_type="flag",
+            title="Form unpublished",
+            message=f"The form \"{form.title}\" has been unpublished from your group(s) and archived.",
+            link="/caretaker",
+            role_target="caretaker",
+            source_type="form_unpublished",
+            source_id=form_id,
+        )
+
     await db.commit()
     return {"msg": f"Form unpublished from all {len(deployments)} group(s) and archived."}
 
@@ -546,6 +574,14 @@ async def unpublish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db
     if not deployment:
         raise HTTPException(status_code=404, detail="This form is not deployed to that group.")
 
+    # Find the caretaker for this group before deleting the deployment
+    ct_result = await db.execute(
+        select(CaretakerProfile.user_id, Group.name)
+        .join(Group, Group.caretaker_id == CaretakerProfile.caretaker_id)
+        .where(Group.group_id == group_id)
+    )
+    ct_row = ct_result.one_or_none()
+
     await db.delete(deployment)
 
     # Check if any deployments remain — if none, archive the form
@@ -556,6 +592,21 @@ async def unpublish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db
     if not remaining:
         form.status = "ARCHIVED"
         form.modified_at = func.now()
+
+    # Notify the affected caretaker
+    if ct_row and ct_row.user_id:
+        group_name = ct_row.name or "your group"
+        await create_notifications_bulk(
+            db=db,
+            user_ids=[ct_row.user_id],
+            notification_type="flag",
+            title="Form unpublished",
+            message=f"The form \"{form.title}\" has been unpublished from {group_name}.",
+            link="/caretaker",
+            role_target="caretaker",
+            source_type="form_unpublished",
+            source_id=form_id,
+        )
 
     await db.commit()
 
