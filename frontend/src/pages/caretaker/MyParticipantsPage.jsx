@@ -117,7 +117,6 @@ function transformParticipant(p, groupsMap) {
     healthGoalsTotal: goalsTotal,
     surveysDone,
     surveysTotal,
-    latestMetrics: null,
     flags,
     groupId: p.group_id || null,
     groupName: gInfo ? gInfo.name : null,
@@ -951,6 +950,32 @@ function InvitesPanel({ invites, onRevoke, onResend, onOpenInviteModal, hasMore,
 function ParticipantDetailPanel({ participant: p, groups, onClose, onViewFull }) {
   const sPct = Math.round(pct(p.surveysDone, p.surveysTotal));
   const gPct = Math.round(pct(p.healthGoals, p.healthGoalsTotal));
+
+  // ── Fetch data elements tracked for this participant ──
+  const [elements, setElements] = useState(null);
+  const [elementsLoading, setElementsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setElementsLoading(true);
+    setElements(null);
+
+    api.caretakerGetParticipantDataElements(p.id)
+      .then((data) => {
+        if (!cancelled) setElements(data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setElements([]);
+      })
+      .finally(() => {
+        if (!cancelled) setElementsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [p.id]);
+
+  const withData = (elements || []).filter((el) => el.data_point_count > 0);
+
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
@@ -974,7 +999,6 @@ function ParticipantDetailPanel({ participant: p, groups, onClose, onViewFull })
                 <span className="text-xs text-slate-300">·</span>
                 <span className="text-xs text-slate-400">Last active {daysSince(p.lastActive) || "—"}</span>
               </div>
-              {/* NEW: Group badge */}
               {p.groupName && <div className="mt-2"><GroupBadge groupId={p.groupId} groupName={p.groupName} groups={groups} size="lg" /></div>}
             </div>
           </div>
@@ -1005,15 +1029,39 @@ function ParticipantDetailPanel({ participant: p, groups, onClose, onViewFull })
             </div>
           </div>
           <div className="px-5 py-4">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Latest Health Metrics</p>
-            {p.latestMetrics ? (
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-center"><p className={`text-xl font-extrabold ${p.latestMetrics.bpSystolic >= 140 ? "text-rose-600" : p.latestMetrics.bpSystolic >= 130 ? "text-amber-600" : "text-emerald-600"}`}>{p.latestMetrics.bpSystolic}/{p.latestMetrics.bpDiastolic}</p><p className="text-xs text-slate-400 mt-0.5">Blood Pressure</p></div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-center"><p className="text-xl font-extrabold text-slate-700">{p.latestMetrics.weight} <span className="text-sm font-semibold text-slate-400">kg</span></p><p className="text-xs text-slate-400 mt-0.5">Weight</p></div>
-                <div className="col-span-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-center"><p className={`text-xl font-extrabold ${p.latestMetrics.painLevel >= 5 ? "text-rose-600" : p.latestMetrics.painLevel >= 3 ? "text-amber-600" : "text-emerald-600"}`}>{p.latestMetrics.painLevel}<span className="text-sm font-semibold text-slate-400">/10</span></p><p className="text-xs text-slate-400 mt-0.5">Pain Level</p></div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Health Data Elements</p>
+            {elementsLoading ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-center">
+                <div className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin h-4 w-4 text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  <p className="text-sm text-slate-400">Loading...</p>
+                </div>
+              </div>
+            ) : withData.length > 0 ? (
+              <div className="space-y-2">
+                {withData.map((el) => (
+                  <div key={el.element_id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-700 truncate">{el.label || el.code}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        {el.unit && <span className="text-[11px] text-slate-400">{el.unit}</span>}
+                        {el.unit && el.form_names?.length > 0 && <span className="text-[11px] text-slate-300">·</span>}
+                        {el.form_names?.length > 0 && <span className="text-[11px] text-slate-400 truncate">{el.form_names.join(", ")}</span>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{el.data_point_count}</span>
+                      {el.is_currently_deployed && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Currently deployed" />
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-center"><p className="text-sm text-slate-400">No health data submitted yet.</p></div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-center">
+                <p className="text-sm text-slate-400">No health data submitted yet.</p>
+              </div>
             )}
           </div>
         </div>
