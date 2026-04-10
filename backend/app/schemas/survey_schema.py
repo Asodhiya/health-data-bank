@@ -74,9 +74,19 @@ class SurveyListItem(BaseModel):
     submission_count: int = 0
     deployed_groups: List[str] = []
     deployed_group_ids: List[UUID] = []
+    deployed_group_deployers: Dict[str, Optional[str]] = {}
+    deployed_group_deployed_at: Dict[str, Optional[datetime]] = {}
 
     class Config:
         from_attributes = True
+
+class SurveyListPage(BaseModel):
+    items: List[SurveyListItem] = []
+    total_count: int = 0
+    page: int = 1
+    page_size: int = 10
+    total_pages: int = 1
+    counts: Dict[str, int] = Field(default_factory=dict)
 
 class ParticipantSurveyItem(BaseModel):
     form_id: UUID

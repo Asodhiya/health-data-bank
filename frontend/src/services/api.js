@@ -162,6 +162,30 @@ export const api = {
   // ── Form Management (researcher/admin) ──
   listForms: () => request("/form_management/list"),
 
+  listFormsPaged: ({
+    page = 1,
+    pageSize = 10,
+    search,
+    statusFilter,
+    sort,
+    groupId,
+    dateFrom,
+    dateTo,
+    ownershipFilter,
+  } = {}) => {
+    const params = new URLSearchParams();
+    params.set("page", String(page));
+    params.set("page_size", String(pageSize));
+    if (search) params.set("search", search);
+    if (statusFilter) params.set("status_filter", statusFilter);
+    if (sort) params.set("sort", sort);
+    if (groupId && groupId !== "ALL") params.set("group_id", String(groupId));
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
+    if (ownershipFilter) params.set("ownership_filter", ownershipFilter);
+    return request(`/form_management/list-paged?${params.toString()}`);
+  },
+
   getFormDetail: (formId) => request(`/form_management/detail/${formId}`),
 
   createForm: (payload) =>
@@ -214,6 +238,26 @@ export const api = {
 
   archiveForm: (formId) =>
     request(`/form_management/${formId}/archive`, { method: "POST" }),
+
+  listElementsPaged: ({
+    deleted = false,
+    page = 1,
+    pageSize = 15,
+    search,
+    typeFilter,
+    mappingFilter,
+    sort,
+  } = {}) => {
+    const params = new URLSearchParams();
+    params.set("deleted", String(deleted));
+    params.set("page", String(page));
+    params.set("page_size", String(pageSize));
+    if (search) params.set("search", search);
+    if (typeFilter) params.set("type_filter", typeFilter);
+    if (mappingFilter) params.set("mapping_filter", mappingFilter);
+    if (sort) params.set("sort", sort);
+    return request(`/data-elements/elements-paged?${params.toString()}`);
+  },
 
 // ── Admin: Audit Logs ──
   getAuditLogs: ({ limit = 20, offset = 0, action, user_id } = {}) => {

@@ -1,20 +1,22 @@
 """
 Form Management Routes (Researcher)
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from uuid import UUID
 from sqlalchemy import select
+from datetime import datetime
 
 from app.db.session import get_db
 from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import FORM_VIEW, FORM_CREATE, FORM_GET, FORM_UPDATE, FORM_DELETE, FORM_PUBLISH, FORM_UNPUBLISH
 from app.db.models import User, Group, FormDeployment, SurveyForm
 from sqlalchemy import func
-from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
+from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate, SurveyListPage
 from app.services.form_management_service import (
     list_researcher_forms,
+    list_researcher_forms_paged,
     create_survey_form,
     get_form_by_id,
     update_survey_form,
@@ -39,6 +41,41 @@ async def list_all_forms(db: AsyncSession = Depends(get_db)):
     if forms is None:
         return [] #empty
     return forms
+
+@router.get("/list-paged", response_model=SurveyListPage, dependencies=[Depends(require_permissions(FORM_VIEW))])
+async def list_forms_paged(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=50),
+    search: str | None = Query(default=None),
+    status_filter: str | None = Query(default="ALL"),
+    sort: str = Query(default="edited"),
+    group_id: UUID | None = Query(default=None),
+    date_from: str | None = Query(default=None),
+    date_to: str | None = Query(default=None),
+    ownership_filter: str | None = Query(default="ALL"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    parsed_from = None
+    parsed_to = None
+    if date_from:
+        parsed_from = datetime.fromisoformat(date_from)
+    if date_to:
+        parsed_to = datetime.fromisoformat(f"{date_to}T23:59:59.999999")
+
+    return await list_researcher_forms_paged(
+        db,
+        page=page,
+        page_size=page_size,
+        search=search,
+        status=status_filter,
+        sort=sort,
+        group_id=group_id,
+        date_from=parsed_from,
+        date_to=parsed_to,
+        ownership_filter=ownership_filter,
+        current_user_id=current_user.user_id,
+    )
 
 @router.post("/create", response_model=SurveyDetailOut, dependencies=[Depends(require_permissions(FORM_CREATE))])
 async def create_form(form_data: SurveyCreate, db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):

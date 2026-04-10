@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, distinct, case, and_, or_, desc
+from sqlalchemy import select, func, distinct, case, and_, or_, desc, exists
 from sqlalchemy import Date as SADate
 from app.db.models import Role, User, UserRole, Permission, ParticipantProfile, CaretakerProfile, ResearcherProfile, SignupInvite, HealthGoal, GoalTemplate, DataElement, FieldElementMap, HealthDataPoint, FormDeployment, GroupMember, FormSubmission, Group, SurveyForm, CaretakerFeedback, Notification, Report, SubmissionAnswer, FieldOption
 from fastapi import HTTPException, status
@@ -11,6 +11,7 @@ from app.services.participant_survey_service import _get_deployed_forms
 from datetime import date, datetime, timezone, timedelta, time
 from app.db.models import FormField
 from types import SimpleNamespace
+import math
 
 
 def _utc_today() -> date:
@@ -812,6 +813,72 @@ class DataElementQuery:
             select(DataElement).where(DataElement.is_active == False)
         )
         return result.scalars().all()
+
+    async def list_data_elements_paged(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 15,
+        deleted: bool = False,
+        search: str | None = None,
+        type_filter: str | None = None,
+        mapping_filter: str | None = None,
+        sort: str = "newest",
+    ):
+        type_value = (type_filter or "All").strip().lower()
+        mapping_value = (mapping_filter or "All").strip().lower()
+        search_value = (search or "").strip().lower()
+
+        survey_mapping_exists = exists(
+            select(1)
+            .select_from(FieldElementMap)
+            .join(FormField, FieldElementMap.field_id == FormField.field_id)
+            .join(SurveyForm, FormField.form_id == SurveyForm.form_id)
+            .where(FieldElementMap.element_id == DataElement.element_id)
+        )
+        goal_mapping_exists = exists(
+            select(1)
+            .select_from(GoalTemplate)
+            .where(GoalTemplate.element_id == DataElement.element_id)
+        )
+        is_mapped_expr = or_(survey_mapping_exists, goal_mapping_exists)
+
+        stmt = select(DataElement).where(DataElement.is_active == (not deleted))
+        if search_value:
+            stmt = stmt.where(
+                or_(
+                    func.lower(DataElement.label).like(f"%{search_value}%"),
+                    func.lower(DataElement.code).like(f"%{search_value}%"),
+                )
+            )
+        if type_value and type_value != "all":
+            stmt = stmt.where(func.lower(DataElement.datatype) == type_value)
+        if mapping_value == "mapped":
+            stmt = stmt.where(is_mapped_expr)
+        elif mapping_value == "unmapped":
+            stmt = stmt.where(~is_mapped_expr)
+
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total_count = int(await self.db.scalar(count_stmt) or 0)
+
+        if sort == "alpha":
+            stmt = stmt.order_by(func.lower(DataElement.label), func.lower(DataElement.code))
+        else:
+            stmt = stmt.order_by(DataElement.created_at.desc(), DataElement.label.asc())
+
+        total_pages = max(1, math.ceil(total_count / page_size))
+        page = max(1, min(page, total_pages))
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+
+        result = await self.db.execute(stmt)
+        items = result.scalars().all()
+        return {
+            "items": items,
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
 
     async def get_data_element(self, element_id: uuid.UUID):
         result = await self.db.execute(

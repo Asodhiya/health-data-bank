@@ -2,9 +2,10 @@
 Data Element Schemas
 """
 import re
-from pydantic import BaseModel, field_validator, model_validator
-from typing import Optional
+from pydantic import BaseModel, field_validator, model_validator, Field
+from typing import Optional, List
 from uuid import UUID
+from datetime import datetime
 
 
 class DataElementCreate(BaseModel):
@@ -79,3 +80,25 @@ class DataElementCreate(BaseModel):
 class FieldMapPayload(BaseModel):
     element_id: UUID
     transform_rule: Optional[dict] = None
+
+
+class DataElementListItem(BaseModel):
+    element_id: UUID
+    code: str
+    label: Optional[str] = None
+    datatype: Optional[str] = None
+    unit: Optional[str] = None
+    description: Optional[str] = None
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DataElementListPage(BaseModel):
+    items: List[DataElementListItem] = Field(default_factory=list)
+    total_count: int = 0
+    page: int = 1
+    page_size: int = 15
+    total_pages: int = 1

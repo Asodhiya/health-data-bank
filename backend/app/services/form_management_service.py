@@ -8,6 +8,8 @@ from sqlalchemy.orm import selectinload
 from uuid import UUID, uuid4
 from typing import List, Optional
 import asyncio
+import math
+from datetime import datetime
 
 from app.db.models import (
     SurveyForm, FormField, FieldOption, FormDeployment, Group, FieldElementMap,
@@ -100,24 +102,147 @@ async def list_researcher_forms(db: AsyncSession):
         form.submission_count = sub_count
     forms = [form for form, _, __ in rows]
 
-    # Attach deployed group names
+    # Attach deployed group names and deployer metadata
     if forms:
         form_ids = [f.form_id for f in forms]
         dep_result = await db.execute(
-            select(FormDeployment.form_id, Group.group_id, Group.name)
+            select(FormDeployment.form_id, FormDeployment.deployed_by, FormDeployment.deployed_at, Group.group_id, Group.name)
             .join(Group, Group.group_id == FormDeployment.group_id)
             .where(FormDeployment.form_id.in_(form_ids))
         )
         group_map: dict = {}
         group_id_map: dict = {}
-        for fid, gid, gname in dep_result.all():
+        deployer_map: dict = {}
+        deployed_at_map: dict = {}
+        for fid, deployed_by, deployed_at, gid, gname in dep_result.all():
             group_map.setdefault(fid, []).append(gname)
             group_id_map.setdefault(fid, []).append(gid)
+            deployer_map.setdefault(fid, {})[str(gid)] = str(deployed_by) if deployed_by else None
+            deployed_at_map.setdefault(fid, {})[str(gid)] = deployed_at
         for form in forms:
             form.deployed_groups = group_map.get(form.form_id, [])
             form.deployed_group_ids = group_id_map.get(form.form_id, [])
+            form.deployed_group_deployers = deployer_map.get(form.form_id, {})
+            form.deployed_group_deployed_at = deployed_at_map.get(form.form_id, {})
 
     return forms
+
+async def list_researcher_forms_paged(
+    db: AsyncSession,
+    *,
+    page: int = 1,
+    page_size: int = 10,
+    search: str | None = None,
+    status: str | None = None,
+    sort: str = "edited",
+    group_id: UUID | None = None,
+    date_from=None,
+    date_to=None,
+    ownership_filter: str | None = None,
+    current_user_id: UUID | None = None,
+):
+    forms = await list_researcher_forms(db)
+
+    family_map = {}
+    for form in forms:
+      root_id = str(form.parent_form_id or form.form_id)
+      family_map.setdefault(root_id, []).append(form)
+
+    families = []
+    for fam in family_map.values():
+        by_version = sorted(fam, key=lambda f: (f.version or 1), reverse=True)
+        active = [f for f in by_version if f.status not in {"DELETED", "ARCHIVED"}]
+        inactive = [f for f in by_version if f.status in {"ARCHIVED", "DELETED"}]
+        if not active:
+            top_archived = next((f for f in inactive if f.status == "ARCHIVED"), None)
+            if not top_archived:
+                continue
+            rest = [f for f in inactive if f.form_id != top_archived.form_id]
+            families.append({
+                "latest": top_archived,
+                "history": rest,
+                "root_id": str(top_archived.parent_form_id or top_archived.form_id),
+            })
+            continue
+        latest = active[0]
+        families.append({
+            "latest": latest,
+            "history": [*active[1:], *inactive],
+            "root_id": str(latest.parent_form_id or latest.form_id),
+        })
+
+    counts = {
+        "ALL": len(families),
+        "DRAFT": sum(1 for fam in families if fam["latest"].status == "DRAFT"),
+        "PUBLISHED": sum(1 for fam in families if fam["latest"].status == "PUBLISHED"),
+        "ARCHIVED": sum(1 for fam in families if fam["latest"].status == "ARCHIVED"),
+    }
+
+    normalized_search = (search or "").strip().lower()
+    normalized_status = (status or "ALL").upper()
+    normalized_ownership = (ownership_filter or "ALL").upper()
+    current_user_str = str(current_user_id or "")
+
+    def matches(family):
+        form = family["latest"]
+        deployed_ids = [str(v or "") for v in (form.deployed_group_deployers or {}).values()]
+        is_created_by_me = str(form.created_by or "") == current_user_str
+        published_by_me = current_user_str and current_user_str in deployed_ids
+        published_by_others = any(v and v != current_user_str for v in deployed_ids)
+        match_search = not normalized_search or normalized_search in (form.title or "").lower()
+        match_status = normalized_status == "ALL" or (form.status or "").upper() == normalized_status
+        match_group = (
+            group_id is None or (
+                (form.status or "").upper() == "PUBLISHED"
+                and any(str(gid) == str(group_id) for gid in (form.deployed_group_ids or []))
+            )
+        )
+        created_at = form.created_at
+        match_from = not date_from or (created_at and created_at >= date_from)
+        match_to = not date_to or (created_at and created_at <= date_to)
+        match_ownership = (
+            normalized_ownership == "ALL"
+            or (normalized_ownership == "CREATED_BY_ME" and is_created_by_me)
+            or (normalized_ownership == "CREATED_BY_OTHERS" and not is_created_by_me)
+            or (normalized_ownership == "PUBLISHED_BY_ME" and published_by_me)
+            or (normalized_ownership == "PUBLISHED_BY_OTHERS" and published_by_others)
+        )
+        return match_search and match_status and match_group and match_from and match_to and match_ownership
+
+    filtered = [family for family in families if matches(family)]
+
+    def sort_key(item):
+        form = item["latest"]
+        if sort == "newest":
+            return form.created_at or datetime.min
+        if sort == "oldest":
+            return form.created_at or datetime.min
+        if sort == "alpha":
+            return (form.title or "").lower()
+        return form.modified_at or form.created_at or datetime.min
+
+    reverse = sort != "oldest" and sort != "alpha"
+    filtered = sorted(filtered, key=sort_key, reverse=reverse)
+
+    total_count = len(filtered)
+    total_pages = max(1, math.ceil(total_count / page_size))
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * page_size
+    page_families = filtered[start:start + page_size]
+
+    items = []
+    for family in page_families:
+        items.append(family["latest"])
+        items.extend(family["history"])
+
+    return {
+        "items": items,
+        "total_count": total_count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "counts": counts,
+    }
 
 async def get_form_by_id(form_id: UUID, db: AsyncSession) -> Optional[SurveyForm]:
     """Get forms by ID, with element_id attached to each field."""
@@ -415,8 +540,6 @@ async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: 
     form = await get_form_by_id(form_id, db)
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
-    if str(form.created_by) != str(user_id):
-        raise HTTPException(status_code=403, detail="Only the researcher who created this form can publish it.")
 
     group_query = select(Group).where(Group.group_id == group_id)
     group_result = await db.execute(group_query)
@@ -564,8 +687,6 @@ async def unpublish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db
     form = await get_form_by_id(form_id, db)
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
-    if str(form.created_by) != str(user_id):
-        raise HTTPException(status_code=403, detail="Only the researcher who created this form can unpublish it.")
 
     deployment_result = await db.execute(
         select(FormDeployment).where(FormDeployment.form_id == form_id, FormDeployment.group_id == group_id)
@@ -573,6 +694,8 @@ async def unpublish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db
     deployment = deployment_result.scalar_one_or_none()
     if not deployment:
         raise HTTPException(status_code=404, detail="This form is not deployed to that group.")
+    if str(form.created_by) != str(user_id) and str(deployment.deployed_by) != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the researcher who deployed this form to this group can unpublish it.")
 
     # Find the caretaker for this group before deleting the deployment
     ct_result = await db.execute(

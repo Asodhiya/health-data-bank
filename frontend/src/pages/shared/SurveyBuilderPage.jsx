@@ -107,6 +107,15 @@ const daysSince = (dateStr) => {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
+const formatShortDate = (dateStr) => {
+  if (!dateStr) return '';
+  return new Date(dateStr).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+};
+
 const timeAgo = (date) => {
   if (!date) return '';
   const sec = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -144,13 +153,19 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
    FORM LIST VIEW
    #6 tab counts, #7 sort, #8 publish date, #9 empty state
    ══════════════════════════════════════════════ */
-function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, onUnpublish, onArchive, groups, currentUser, pageTitle = 'Survey Forms' }) {
+function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDelete, onPublish, onUnpublish, onArchive, groups, currentUser, pageTitle = 'Survey Forms' }) {
+  const [forms, setForms]               = useState([]);
+  const [listLoading, setListLoading]   = useState(true);
+  const [counts, setCounts]             = useState({ ALL: 0, DRAFT: 0, PUBLISHED: 0, ARCHIVED: 0 });
+  const [totalCount, setTotalCount]     = useState(0);
+  const [totalPages, setTotalPages]     = useState(1);
   const [showHelp, setShowHelp]         = useState(false);
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sort, setSort]                 = useState('edited');
   const [showSort, setShowSort]         = useState(false);
   const [groupFilter, setGroupFilter]   = useState('ALL');
+  const [ownershipFilter, setOwnershipFilter] = useState('ALL');
   const [groupSearch, setGroupSearch]   = useState('');
   const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
   const groupDropdownRef = useRef(null);
@@ -165,6 +180,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
   const [selected, setSelected]         = useState(new Set());
   const [modal, setModal]               = useState(null);
   const [publishGroups, setPublishGroups] = useState(new Set());
+  const [unpublishGroups, setUnpublishGroups] = useState(new Set());
   const [publishGroupSearch, setPublishGroupSearch] = useState('');
   const [publishError, setPublishError] = useState('');
   const [expandedHistory, setExpandedHistory] = useState(new Set());
@@ -173,7 +189,8 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
   const hasDateFilter  = dateFrom || dateTo;
   const hasGroupFilter = groupFilter !== 'ALL';
-  const activeFilterCount = (hasDateFilter ? 1 : 0) + (hasGroupFilter ? 1 : 0);
+  const hasOwnershipFilter = ownershipFilter !== 'ALL';
+  const activeFilterCount = (hasDateFilter ? 1 : 0) + (hasGroupFilter ? 1 : 0) + (hasOwnershipFilter ? 1 : 0);
 
   /* Group forms into version families — each family shows only its latest non-deleted version */
   const families = (() => {
@@ -198,34 +215,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
       return [{ latest, history: [...active.slice(1), ...inactive], rootId: String(latest.parent_form_id || latest.form_id) }];
     });
   })();
-
-  /* #6 — Status counts (by latest version per family) */
-  const counts = {
-    ALL: families.length,
-    DRAFT: families.filter(({ latest: f }) => f.status === 'DRAFT').length,
-    PUBLISHED: families.filter(({ latest: f }) => f.status === 'PUBLISHED').length,
-    ARCHIVED: families.filter(({ latest: f }) => f.status === 'ARCHIVED').length,
-  };
-
-  const filtered = families.filter(({ latest: f }) => {
-    const matchSearch = f.title.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === 'ALL' || f.status === statusFilter;
-    const matchGroup  = groupFilter === 'ALL' || (f.status === 'PUBLISHED' && Array.isArray(f.deployed_group_ids) && f.deployed_group_ids.map(String).includes(groupFilter));
-    const matchFrom   = !dateFrom || new Date(f.created_at) >= new Date(dateFrom);
-    const matchTo     = !dateTo   || new Date(f.created_at) <= new Date(dateTo + 'T23:59:59.999');
-    return matchSearch && matchStatus && matchGroup && matchFrom && matchTo;
-  });
-
-  /* #7 — Sort */
   const sortLabels = { newest: 'Newest first', oldest: 'Oldest first', alpha: 'A → Z', edited: 'Recently edited' };
-  const sorted = [...filtered].sort((a, b) => {
-    const fa = a.latest, fb = b.latest;
-    if (sort === 'newest') return new Date(fb.created_at) - new Date(fa.created_at);
-    if (sort === 'oldest') return new Date(fa.created_at) - new Date(fb.created_at);
-    if (sort === 'alpha')  return fa.title.localeCompare(fb.title);
-    if (sort === 'edited') return new Date(fb.modified_at || fb.created_at) - new Date(fa.modified_at || fa.created_at);
-    return 0;
-  });
 
   const toggleHistory = (rootId) => {
     setExpandedHistory((prev) => { const n = new Set(prev); n.has(rootId) ? n.delete(rootId) : n.add(rootId); return n; });
@@ -235,20 +225,118 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
   const selectAll = () => {
-    if (selected.size === filtered.length) setSelected(new Set());
-    else setSelected(new Set(filtered.map(({ latest: f }) => f.form_id)));
+    if (selected.size === families.length) setSelected(new Set());
+    else setSelected(new Set(families.map(({ latest: f }) => f.form_id)));
   };
-  const clearFilters = () => { setDateFrom(''); setDateTo(''); setGroupFilter('ALL'); setShowFilters(false); };
+  const clearFilters = () => { setDateFrom(''); setDateTo(''); setGroupFilter('ALL'); setOwnershipFilter('ALL'); setShowFilters(false); };
 
-  useEffect(() => { setPage(1); }, [search, statusFilter, sort, groupFilter, dateFrom, dateTo]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, sort, groupFilter, ownershipFilter, dateFrom, dateTo]);
+  useEffect(() => { setSelected(new Set()); }, [page, statusFilter, search, sort, groupFilter, ownershipFilter, dateFrom, dateTo]);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const paginated  = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => {
+    let active = true;
+    setListLoading(true);
+    fetchForms({
+      page,
+      pageSize: PAGE_SIZE,
+      search,
+      statusFilter,
+      sort,
+      groupId: groupFilter,
+      dateFrom,
+      dateTo,
+      ownershipFilter,
+    }).then((data) => {
+      if (!active) return;
+      setForms(data?.items || []);
+      setCounts(data?.counts || { ALL: 0, DRAFT: 0, PUBLISHED: 0, ARCHIVED: 0 });
+      setTotalCount(Number(data?.total_count || 0));
+      setTotalPages(Math.max(1, Number(data?.total_pages || 1)));
+    }).catch(() => {
+      if (!active) return;
+      setForms([]);
+      setCounts({ ALL: 0, DRAFT: 0, PUBLISHED: 0, ARCHIVED: 0 });
+      setTotalCount(0);
+      setTotalPages(1);
+    }).finally(() => {
+      if (active) setListLoading(false);
+    });
+    return () => { active = false; };
+  }, [fetchForms, refreshKey, page, search, statusFilter, sort, groupFilter, ownershipFilter, dateFrom, dateTo]);
 
   const selectedForms     = forms.filter((f) => selected.has(f.form_id));
   const selectedDrafts    = selectedForms.filter((f) => f.status === 'DRAFT');
-  const selectedDraftsOwned = selectedDrafts.filter((f) => String(f.created_by || '') === String(currentUser?.user_id || ''));
+  const selectedOwnedForms = selectedForms.filter((f) => String(f.created_by || '') === String(currentUser?.user_id || ''));
   const selectedPublished = selectedForms.filter((f) => f.status === 'PUBLISHED');
+  const selectedDeletable = selectedOwnedForms.filter((f) => f.status !== 'PUBLISHED');
+
+  const getUnpublishableGroups = (form) => {
+    const ids = Array.isArray(form?.deployed_group_ids) ? form.deployed_group_ids : [];
+    const names = Array.isArray(form?.deployed_groups) ? form.deployed_groups : [];
+    return ids
+      .map((groupId, index) => {
+        const groupIdStr = String(groupId);
+        const deployedBy = form?.deployed_group_deployers?.[groupIdStr] || null;
+        const deployedAt = form?.deployed_group_deployed_at?.[groupIdStr] || null;
+        const isAuthor = String(form?.created_by || '') === String(currentUser?.user_id || '');
+        const isMine = deployedBy === String(currentUser?.user_id || '');
+        if (!isAuthor && !isMine) return null;
+        return {
+          group_id: groupId,
+          name: names[index] || 'Group',
+          deployed_by: deployedBy,
+          deployed_at: deployedAt,
+          isMine,
+        };
+      })
+      .filter(Boolean);
+  };
+
+  const getHistorySnapshot = (form, history = []) => {
+    const isAuthor = String(form?.created_by || '') === String(currentUser?.user_id || '');
+    const groupIds = Array.isArray(form?.deployed_group_ids) ? form.deployed_group_ids : [];
+    const groupNames = Array.isArray(form?.deployed_groups) ? form.deployed_groups : [];
+    const deploymentEvents = groupIds
+      .map((groupId, index) => {
+        const groupIdStr = String(groupId);
+        const deployedBy = form?.deployed_group_deployers?.[groupIdStr] || null;
+        const deployedAt = form?.deployed_group_deployed_at?.[groupIdStr] || null;
+        const mine = deployedBy === String(currentUser?.user_id || '');
+        return {
+          key: `deploy-${groupIdStr}`,
+          tone: mine ? 'emerald' : 'blue',
+          label: `Published to ${groupNames[index] || 'Group'}`,
+          detail: `${mine ? 'by you' : 'by another researcher'}${deployedAt ? ` on ${formatShortDate(deployedAt)}` : ''}`,
+        };
+      })
+      .slice(0, 2);
+
+    return [
+      {
+        key: 'created',
+        tone: isAuthor ? 'violet' : 'slate',
+        label: `Created ${isAuthor ? 'by you' : 'by another researcher'}`,
+        detail: formatShortDate(form.created_at),
+      },
+      ...(history.length > 0
+        ? [{
+            key: 'versions',
+            tone: 'amber',
+            label: `${history.length + 1} saved version${history.length > 0 ? 's' : ''} in this survey family`,
+            detail: `Current v${form.version || 1}${history.length > 0 ? ` with ${history.length} older version${history.length > 1 ? 's' : ''}` : ''}`,
+          }]
+        : []),
+      ...deploymentEvents,
+      ...(groupIds.length > 2
+        ? [{
+            key: 'more-groups',
+            tone: 'slate',
+            label: `${groupIds.length - 2} more deployed group${groupIds.length - 2 > 1 ? 's' : ''}`,
+            detail: 'Open the card to see the full deployment list',
+          }]
+        : []),
+    ];
+  };
 
   const handleConfirmDelete = (deleteAll = false) => {
     modal.ids.forEach((id) => onDelete(id, deleteAll));
@@ -267,17 +355,20 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
     setPublishGroups(new Set());
   };
   const handleConfirmUnpublish = () => {
+    if (unpublishGroups.size === 0) return;
     modal.ids.forEach((id) => {
       const f = forms.find((x) => x.form_id === id);
-      if (f && f.status === 'PUBLISHED') onUnpublish(id);
+      if (f && f.status === 'PUBLISHED') onUnpublish(id, [...unpublishGroups]);
     });
     setSelected((prev) => { const n = new Set(prev); modal.ids.forEach((id) => n.delete(id)); return n; });
     setModal(null);
+    setUnpublishGroups(new Set());
   };
 
 
   /* #9 — Empty state */
-  if (forms.length === 0) {
+  const hasActiveQuery = Boolean(search || dateFrom || dateTo || groupFilter !== 'ALL' || ownershipFilter !== 'ALL' || statusFilter !== 'ALL');
+  if (!listLoading && totalCount === 0 && !hasActiveQuery) {
     return (
       <div>
         <div className="flex items-center justify-between mb-6">
@@ -309,7 +400,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
             <span className="text-slate-400">Dashboard</span><span className="text-slate-300">/</span><span className="text-slate-600 font-medium">Surveys</span>
           </div>
           <h2 className="text-2xl font-bold text-slate-900">{pageTitle}</h2>
-          <p className="text-sm text-slate-500 mt-0.5">{families.length} form{families.length !== 1 ? 's' : ''} total</p>
+          <p className="text-sm text-slate-500 mt-0.5">{totalCount} form{totalCount !== 1 ? 's' : ''} total</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={() => setShowHelp(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition">
@@ -464,7 +555,20 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                   </div>
                 )}
               </div>
-              {(hasDateFilter || hasGroupFilter) && (
+              <div>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Ownership / Publisher</label>
+                <select
+                  value={ownershipFilter}
+                  onChange={(e) => setOwnershipFilter(e.target.value)}
+                  className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition min-w-[220px]">
+                  <option value="ALL">All forms</option>
+                  <option value="CREATED_BY_ME">Created by you</option>
+                  <option value="CREATED_BY_OTHERS">Created by others</option>
+                  <option value="PUBLISHED_BY_ME">Published by you</option>
+                  <option value="PUBLISHED_BY_OTHERS">Published by others</option>
+                </select>
+              </div>
+              {(hasDateFilter || hasGroupFilter || hasOwnershipFilter) && (
                 <button onClick={clearFilters} className="text-xs text-slate-400 hover:text-rose-500 font-medium transition pb-1">Clear all filters</button>
               )}
             </div>
@@ -483,7 +587,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
         selected.size > 0 ? 'border-blue-200 bg-blue-50/50' : 'border-slate-200'
       }`}>
         <label className="flex items-center gap-2.5 text-sm text-slate-600 cursor-pointer select-none">
-          <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={selectAll}
+          <input type="checkbox" checked={selected.size === families.length && families.length > 0} onChange={selectAll}
             className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-400" />
           {selected.size > 0
             ? <span className="font-medium text-blue-700">{selected.size} form{selected.size > 1 ? 's' : ''} selected</span>
@@ -493,39 +597,64 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
           <div className="flex items-center gap-2">
             {selectedDrafts.length > 0 && (
               <button
-                onClick={() => setModal({ type: 'publish', ids: selectedDraftsOwned.map((f) => f.form_id) })}
-                disabled={selectedDraftsOwned.length === 0}
-                title={selectedDraftsOwned.length === 0 ? 'Only the form author can publish' : undefined}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
-                  selectedDraftsOwned.length === 0
-                    ? 'text-slate-400 bg-slate-100 cursor-not-allowed'
-                    : 'text-emerald-700 bg-emerald-100 hover:bg-emerald-200'
-                }`}>
-                <CheckIco /> Publish{selectedDraftsOwned.length > 1 ? ` (${selectedDraftsOwned.length})` : selectedDraftsOwned.length === 1 ? '' : ''}
+                onClick={() => setModal({ type: 'publish', ids: selectedDrafts.map((f) => f.form_id) })}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition text-emerald-700 bg-emerald-100 hover:bg-emerald-200">
+                <CheckIco /> Publish{selectedDrafts.length > 1 ? ` (${selectedDrafts.length})` : ''}
               </button>
             )}
-            {selectedPublished.length > 0 && (
-              <button onClick={() => setModal({ type: 'unpublish', ids: [...selected] })}
+            {statusFilter === 'PUBLISHED' && selectedPublished.length === 1 && (
+              <button onClick={() => {
+                const form = selectedPublished[0];
+                const availableGroups = getUnpublishableGroups(form);
+                setUnpublishGroups(new Set(availableGroups.map((g) => g.group_id)));
+                setModal({ type: 'unpublish', ids: [form.form_id], formTitle: form.title, availableGroups });
+              }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-lg transition">
-                <UnpublishIco /> Unpublish{selectedPublished.length > 1 ? ` (${selectedPublished.length})` : ''}
+                <UnpublishIco /> Unpublish
               </button>
+            )}
+            {statusFilter === 'PUBLISHED' && selected.size > 0 && selectedPublished.length !== 1 && (
+              <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                Select exactly 1 published form to unpublish
+              </span>
             )}
             {selectedPublished.length === 0 && (
-              <button onClick={() => setModal({ type: 'delete', ids: [...selected], isPublished: false })}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-600 bg-rose-100 hover:bg-rose-200 rounded-lg transition">
-                <TrashIco /> Delete{selected.size > 1 ? ` (${selected.size})` : ''}
+              <button onClick={() => setModal({ type: 'delete', ids: selectedDeletable.map((f) => f.form_id), isPublished: false })}
+                disabled={selectedDeletable.length === 0}
+                title={selectedDeletable.length === 0 ? 'Only the form author can delete selected forms' : undefined}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                  selectedDeletable.length === 0
+                    ? 'text-slate-400 bg-slate-100 cursor-not-allowed'
+                    : 'text-rose-600 bg-rose-100 hover:bg-rose-200'
+                }`}>
+                <TrashIco /> Delete{selectedDeletable.length > 1 ? ` (${selectedDeletable.length})` : ''}
               </button>
             )}
           </div>
         )}
       </div>
 
+      {listLoading && (
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="bg-white rounded-xl border border-slate-200 p-5 animate-pulse">
+              <div className="flex items-center gap-2.5 mb-2"><div className="h-5 w-2/3 bg-slate-200 rounded" /><div className="h-5 w-16 bg-slate-100 rounded-full" /></div>
+              <div className="h-4 w-full bg-slate-100 rounded mb-3" />
+              <div className="h-20 w-full bg-slate-50 rounded-xl" />
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Form cards */}
+      {!listLoading && (
       <div className="space-y-3">
-        {paginated.map(({ latest: form, history, rootId }) => {
+        {families.map(({ latest: form, history, rootId }) => {
           const isSel = selected.has(form.form_id);
+          const isAuthor = String(form.created_by || '') === String(currentUser?.user_id || '');
           const fieldCount = form.field_count ?? (form.fields ? form.fields.length : 0);
           const histExpanded = expandedHistory.has(rootId);
+          const historySnapshot = getHistorySnapshot(form, history);
           return (
             <div key={rootId}
               className={`bg-white rounded-xl border shadow-sm transition-all group ${
@@ -547,15 +676,32 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 shrink-0">
                       v{form.version || 1}
                     </span>
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border shrink-0 ${
+                      isAuthor ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}>
+                      {isAuthor ? 'Owned by you' : 'Owned by another researcher'}
+                    </span>
                   </div>
                   {form.description && <p className="text-xs text-slate-500 line-clamp-1">{form.description}</p>}
                   {form.deployed_groups?.length > 0 && (
                     <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                      {form.deployed_groups.map((g) => (
-                        <span key={g} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                          <UsersIco />{g}
-                        </span>
-                      ))}
+                      {(form.deployed_group_ids || []).map((groupId, index) => {
+                        const groupIdStr = String(groupId);
+                        const groupName = form.deployed_groups?.[index] || 'Group';
+                        const deployedBy = form.deployed_group_deployers?.[groupIdStr];
+                        const deployedAt = form.deployed_group_deployed_at?.[groupIdStr];
+                        const mine = deployedBy === String(currentUser?.user_id || '');
+                        return (
+                          <span key={groupIdStr} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${
+                            mine ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>
+                            <UsersIco />{groupName}
+                            <span className="opacity-70">
+                              {mine ? 'by you' : 'by another researcher'}{deployedAt ? ` · ${new Date(deployedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+                            </span>
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                   <div className="flex items-center gap-3 mt-2 text-xs text-slate-400 flex-wrap">
@@ -574,19 +720,49 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                       <AlertIco /> Only {fieldCount} question{fieldCount !== 1 ? 's' : ''} — add more before publishing
                     </div>
                   )}
+                  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                        <InfoIco />
+                        Survey history
+                      </div>
+                      <span className="text-[11px] text-slate-400">
+                        Current state and ownership
+                      </span>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {historySnapshot.map((item) => (
+                        <div key={item.key} className={`rounded-lg border px-2.5 py-2 bg-white ${
+                          item.tone === 'emerald' ? 'border-emerald-200' :
+                          item.tone === 'blue' ? 'border-blue-200' :
+                          item.tone === 'violet' ? 'border-violet-200' :
+                          item.tone === 'amber' ? 'border-amber-200' :
+                          'border-slate-200'
+                        }`}>
+                          <div className={`text-[11px] font-semibold ${
+                            item.tone === 'emerald' ? 'text-emerald-700' :
+                            item.tone === 'blue' ? 'text-blue-700' :
+                            item.tone === 'violet' ? 'text-violet-700' :
+                            item.tone === 'amber' ? 'text-amber-700' :
+                            'text-slate-700'
+                          }`}>
+                            {item.label}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            {item.detail}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Quick actions on hover */}
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
                   {form.status === 'DRAFT' && (
                     <button
-                      className={`p-1.5 rounded-lg transition ${
-                        String(form.created_by || '') === String(currentUser?.user_id || '')
-                          ? 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
-                          : 'text-slate-300 bg-slate-50 cursor-not-allowed'
-                      }`}
-                      title={String(form.created_by || '') === String(currentUser?.user_id || '') ? 'Publish' : 'Only the form author can publish'}
-                      disabled={String(form.created_by || '') !== String(currentUser?.user_id || '')}
+                      className="p-1.5 rounded-lg transition text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                      title="Publish"
                       onClick={(e) => {
                         e.stopPropagation();
                         const count = form.field_count ?? (form.fields ? form.fields.length : 0);
@@ -603,33 +779,34 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                   )}
                   {form.status === 'PUBLISHED' && (
                     <>
-                      <button className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition" title="Unpublish"
-                        onClick={(e) => { e.stopPropagation(); setModal({ type: 'unpublish', ids: [form.form_id], formTitle: form.title }); }}>
-                        <UnpublishIco />
-                      </button>
-                      <button className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition text-[10px] font-bold px-2" title="Archive"
+                      <button className={`p-1.5 rounded-lg transition text-[10px] font-bold px-2 ${isAuthor ? 'text-slate-400 hover:text-slate-600 hover:bg-slate-100' : 'text-slate-300 bg-slate-50 cursor-not-allowed'}`} title={isAuthor ? 'Archive' : 'Only the form author can archive'}
+                        disabled={!isAuthor}
                         onClick={(e) => { e.stopPropagation(); setModal({ type: 'archive', ids: [form.form_id], formTitle: form.title, isPublished: true }); }}>
                         Archive
                       </button>
-                      <button className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition text-[10px] font-bold px-2" title="Update survey"
+                      <button className={`p-1.5 rounded-lg transition text-[10px] font-bold px-2 ${isAuthor ? 'text-slate-400 hover:text-violet-600 hover:bg-violet-50' : 'text-slate-300 bg-slate-50 cursor-not-allowed'}`} title={isAuthor ? 'Update survey' : 'Only the form author can create a new version'}
+                        disabled={!isAuthor}
                         onClick={(e) => { e.stopPropagation(); onBranch(form); }}>
                         Update
                       </button>
                     </>
                   )}
                   {form.status === 'DRAFT' && (
-                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition" title="Edit"
+                    <button className={`p-1.5 rounded-lg transition ${isAuthor ? 'text-slate-400 hover:text-blue-600 hover:bg-blue-50' : 'text-slate-300 bg-slate-50 cursor-not-allowed'}`} title={isAuthor ? 'Edit' : 'Only the form author can edit'}
+                      disabled={!isAuthor}
                       onClick={(e) => { e.stopPropagation(); onEdit(form); }}>
                       <EditIco />
                     </button>
                   )}
                   {form.status === 'ARCHIVED' && (
-                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition text-[10px] font-bold px-2" title="Create new version"
+                    <button className={`p-1.5 rounded-lg transition text-[10px] font-bold px-2 ${isAuthor ? 'text-slate-400 hover:text-violet-600 hover:bg-violet-50' : 'text-slate-300 bg-slate-50 cursor-not-allowed'}`} title={isAuthor ? 'Create new version' : 'Only the form author can create a new version'}
+                      disabled={!isAuthor}
                       onClick={(e) => { e.stopPropagation(); onBranch(form); }}>
                       New Version
                     </button>
                   )}
-                  <button className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition" title="Delete"
+                  <button className={`p-1.5 rounded-lg transition ${isAuthor ? 'text-slate-400 hover:text-rose-500 hover:bg-rose-50' : 'text-slate-300 bg-slate-50 cursor-not-allowed'}`} title={isAuthor ? 'Delete' : 'Only the form author can delete'}
+                    disabled={!isAuthor}
                     onClick={(e) => { e.stopPropagation(); setModal({ type: 'delete', ids: [form.form_id], formTitle: form.title, isPublished: form.status === 'PUBLISHED', hasFamily: history.length > 0, version: form.version || 1 }); }}>
                     <TrashIco />
                   </button>
@@ -679,7 +856,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
           );
         })}
 
-        {sorted.length === 0 && (
+        {families.length === 0 && (
           <div className="text-center py-16 text-slate-400">
             <p className="text-3xl mb-2">🔍</p>
             <p className="font-semibold">No forms found</p>
@@ -687,12 +864,13 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
           </div>
         )}
       </div>
+      )}
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {!listLoading && totalPages > 1 && (
         <div className="flex items-center justify-between pt-2">
           <span className="text-xs text-slate-400">
-            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} of {sorted.length} forms
+            Showing {totalCount === 0 ? 0 : ((page - 1) * PAGE_SIZE + 1)}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} forms
           </span>
           <div className="flex items-center gap-1.5">
             <button
@@ -848,13 +1026,45 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
       {/* ── UNPUBLISH MODAL ── */}
       {modal?.type === 'unpublish' && (
-        <ConfirmModal title={modal.formTitle ? `Unpublish "${toTitleCase(modal.formTitle)}"` : 'Unpublish Forms'}
-          message={modal.formTitle ? `Unpublish "${toTitleCase(modal.formTitle)}"? It will be archived.` : `Unpublish ${selectedPublished.length} form${selectedPublished.length > 1 ? 's' : ''}?`}
-          confirmLabel="Unpublish" confirmClass="bg-amber-600 hover:bg-amber-700" onConfirm={handleConfirmUnpublish} onClose={() => setModal(null)}>
-          <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600">
-            <div className="flex items-start gap-2">
-              <span className="shrink-0 mt-0.5"><InfoIco /></span>
-              <span>Unpublished forms are archived. Participants will lose access.</span>
+        <ConfirmModal title={modal.formTitle ? `Unpublish "${toTitleCase(modal.formTitle)}"` : 'Unpublish Form'}
+          message={modal.formTitle ? `Choose which deployed groups to remove from "${toTitleCase(modal.formTitle)}".` : 'Choose deployed groups to unpublish from.'}
+          confirmLabel={unpublishGroups.size > 1 ? `Unpublish ${unpublishGroups.size} Groups` : 'Unpublish'}
+          confirmClass="bg-amber-600 hover:bg-amber-700" onConfirm={handleConfirmUnpublish}
+          onClose={() => { setModal(null); setUnpublishGroups(new Set()); }} disabled={unpublishGroups.size === 0}>
+          <div className="space-y-3 text-sm text-slate-600">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600">
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 mt-0.5"><InfoIco /></span>
+                <span>
+                  {String(forms.find((f) => f.form_id === modal.ids[0])?.created_by || '') === String(currentUser?.user_id || '')
+                    ? 'As the form author, you can unpublish any deployed group.'
+                    : 'You can only unpublish groups you deployed to.'}
+                </span>
+              </div>
+            </div>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              {(modal.availableGroups || []).map((g) => {
+                const checked = unpublishGroups.has(g.group_id);
+                return (
+                  <label key={g.group_id}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
+                      checked ? 'border-amber-300 bg-amber-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}>
+                    <input type="checkbox" checked={checked}
+                      onChange={() => setUnpublishGroups((prev) => { const n = new Set(prev); n.has(g.group_id) ? n.delete(g.group_id) : n.add(g.group_id); return n; })}
+                      className="w-4 h-4 rounded border-slate-300 text-amber-600 focus:ring-amber-400" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-slate-700 truncate">{g.name}</div>
+                      <div className="text-xs text-slate-500">
+                        {g.isMine ? 'Deployed by you' : 'Deployed by another researcher'}{g.deployed_at ? ` · ${new Date(g.deployed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+              {(modal.availableGroups || []).length === 0 && (
+                <p className="text-xs text-slate-400 px-1 py-2">No deployed groups are available for you to unpublish.</p>
+              )}
             </div>
           </div>
         </ConfirmModal>
@@ -1544,7 +1754,6 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
    ══════════════════════════════════════════════ */
 export default function SurveyBuilderPage() {
   const { user } = useAuth();
-  const [forms, setForms]             = useState([]);
   const [groups, setGroups]           = useState([]);
   const [loading, setLoading]         = useState(true);
   const [view, setView]               = useState('list');
@@ -1553,19 +1762,9 @@ export default function SurveyBuilderPage() {
   const [dataElements, setDataElements] = useState([]);
   const [branchModal, setBranchModal] = useState(null); // { form }
   const [branching, setBranching]     = useState(false);
+  const [refreshKey, setRefreshKey]   = useState(0);
 
   useEffect(() => { api.listElements().then(setDataElements).catch(() => {}); }, []);
-
-  const loadForms = async () => {
-    try {
-      const data = await api.listForms();
-      setForms(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const loadGroups = async () => {
     try {
@@ -1577,10 +1776,12 @@ export default function SurveyBuilderPage() {
   };
 
   useEffect(() => {
-    loadForms();
     loadGroups();
-    // Restore builder session after a page refresh
+    // Only restore the editor after a browser refresh, not when navigating back to the forms page.
     try {
+      const navEntry = window.performance?.getEntriesByType?.('navigation')?.[0];
+      const isReload = navEntry?.type === 'reload';
+      if (!isReload) return;
       const session = localStorage.getItem('hdb_builder_session');
       if (session) {
         const { formId, form } = JSON.parse(session);
@@ -1596,6 +1797,7 @@ export default function SurveyBuilderPage() {
         setView('builder');
       }
     } catch { /* ignore */ }
+    setLoading(false);
   }, []);
 
   /* Infer role context from URL path for display purposes */
@@ -1651,7 +1853,7 @@ export default function SurveyBuilderPage() {
     localStorage.removeItem('hdb_builder_session');
     setView('list');
     setEditingForm(null);
-    loadForms();
+    setRefreshKey((v) => v + 1);
   };
 
   const handleSave = async (formData) => {
@@ -1699,15 +1901,11 @@ export default function SurveyBuilderPage() {
     try {
       if (deleteAll) {
         await api.deleteFormFamily(formId);
-        // Remove all forms in the same family
-        const target = forms.find((f) => f.form_id === formId);
-        const rootId = target?.parent_form_id || formId;
-        setForms((prev) => prev.filter((f) => f.form_id !== rootId && f.parent_form_id !== rootId && f.form_id !== formId));
       } else {
         await api.deleteForm(formId);
-        setForms((prev) => prev.filter((f) => f.form_id !== formId));
       }
       if (view === 'builder') handleBack();
+      else setRefreshKey((v) => v + 1);
       showToast('Form deleted');
     } catch (err) {
       showToast('Error deleting form');
@@ -1719,19 +1917,23 @@ export default function SurveyBuilderPage() {
       const ids = Array.isArray(groupIds) ? groupIds : [groupIds];
       await Promise.all(ids.map((gid) => api.publishForm(formId, gid)));
       showToast(ids.length > 1 ? `Published to ${ids.length} groups!` : 'Form published!');
-      loadForms();
+      setRefreshKey((v) => v + 1);
     } catch (err) {
       showToast('Error publishing form');
     }
   };
 
-  const handleUnpublish = async (formId) => {
+  const handleUnpublish = async (formId, groupIds = null) => {
     try {
-      await api.unpublishForm(formId);
+      if (Array.isArray(groupIds) && groupIds.length > 0) {
+        await Promise.all(groupIds.map((groupId) => api.unpublishFormFromGroup(formId, groupId)));
+      } else {
+        await api.unpublishForm(formId);
+      }
       showToast('Form unpublished');
-      loadForms();
+      setRefreshKey((v) => v + 1);
     } catch (err) {
-      showToast('Error unpublishing form');
+      showToast(err.message || 'Error unpublishing form');
     }
   };
 
@@ -1744,7 +1946,7 @@ export default function SurveyBuilderPage() {
         setView('list');
         setEditingForm(null);
       }
-      loadForms();
+      setRefreshKey((v) => v + 1);
     } catch (err) {
       showToast(err.message || 'Error archiving form');
     }
@@ -1770,7 +1972,8 @@ export default function SurveyBuilderPage() {
     <div className="max-w-4xl mx-auto">
       {view === 'list' && (
         <FormListView
-          forms={forms}
+          fetchForms={api.listFormsPaged}
+          refreshKey={refreshKey}
           groups={groups}
           currentUser={user}
           onEdit={handleEdit}

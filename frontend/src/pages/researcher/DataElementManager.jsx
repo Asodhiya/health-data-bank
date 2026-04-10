@@ -27,7 +27,6 @@ const TYPE_FILTERS = ["All", "Number", "Boolean", "Text", "Date"];
 
 const DataElementManager = () => {
   const [elements, setElements]     = useState([]);
-  const [deletedElements, setDeletedElements] = useState([]);
   const [loading, setLoading]       = useState(true);
   const [search, setSearch]         = useState("");
   const [showDeleted, setShowDeleted] = useState(false);
@@ -59,6 +58,8 @@ const DataElementManager = () => {
 
   // Pagination
   const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const PAGE_SIZE = 15;
 
   // Delete confirmation
@@ -66,7 +67,9 @@ const DataElementManager = () => {
   const [deleting, setDeleting]         = useState(false);
   const [restoringId, setRestoringId] = useState(null);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { buildSurveyCounts(); }, []);
+  useEffect(() => { setPage(1); }, [search, showDeleted, typeFilter, mappingFilter, sort]);
+  useEffect(() => { loadData(); }, [page, search, showDeleted, typeFilter, mappingFilter, sort]);
 
   // ── Data loading ────────────────────────────────────────────────────────────
 
@@ -74,16 +77,24 @@ const DataElementManager = () => {
     setLoading(true);
     setLoadError(false);
     try {
-      const [activeEls, inactiveEls] = await Promise.all([
-        api.listElements(),
-        api.listDeletedElements(),
-      ]);
-      setElements(activeEls || []);
-      setDeletedElements(inactiveEls || []);
-      await buildSurveyCounts();
+      const response = await api.listElementsPaged({
+        deleted: showDeleted,
+        page,
+        pageSize: PAGE_SIZE,
+        search,
+        typeFilter,
+        mappingFilter,
+        sort,
+      });
+      setElements(response?.items || []);
+      setTotalCount(Number(response?.total_count || 0));
+      setTotalPages(Math.max(1, Number(response?.total_pages || 1)));
     } catch (err) {
       console.error("Load error:", err);
       setLoadError(true);
+      setElements([]);
+      setTotalCount(0);
+      setTotalPages(1);
     } finally {
       setLoading(false);
     }
@@ -136,36 +147,12 @@ const DataElementManager = () => {
 
   // ── Filtered list ───────────────────────────────────────────────────────────
 
-  const visibleElements = showDeleted ? deletedElements : elements;
   const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return visibleElements.filter((el) => {
+    return elements.filter((el) => {
       const id = el.element_id || el.id;
-      const isMapped = (surveyCountMap[id] || 0) > 0 || (goalCountMap[id] || 0) > 0;
-      const matchSearch =
-        !q ||
-        (el.label || "").toLowerCase().includes(q) ||
-        (el.code || "").toLowerCase().includes(q);
-      const matchType =
-        typeFilter === "All" ||
-        normalizeType(el.datatype) === typeFilter.toLowerCase();
-      const matchMapping =
-        mappingFilter === "All" ||
-        (mappingFilter === "Mapped" && isMapped) ||
-        (mappingFilter === "Unmapped" && !isMapped);
-      return matchSearch && matchType && matchMapping;
-    }).sort((a, b) => {
-      if (sort === "alpha") return (a.label || a.name || "").localeCompare(b.label || b.name || "");
-      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return tb - ta;
+      return el && id;
     });
-  }, [visibleElements, search, typeFilter, mappingFilter, surveyCountMap, goalCountMap, sort]);
-
-  useEffect(() => { setPage(1); }, [search, showDeleted, typeFilter, mappingFilter, sort, goalCountMap]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  }, [elements]);
 
   // ── Create ──────────────────────────────────────────────────────────────────
 
@@ -180,9 +167,10 @@ const DataElementManager = () => {
         unit: supportsUnit(newEl.datatype) ? newEl.unit.trim() || null : null,
         description: newEl.description.trim() || null,
       });
-      setElements((p) => [...p, res]);
       setNewEl({ code: "", name: "", datatype: "number", unit: "", description: "" });
       setShowCreate(false);
+      setPage(1);
+      await loadData();
     } catch (err) {
       alert(err.message || "Code already exists.");
     } finally {
@@ -200,10 +188,10 @@ const DataElementManager = () => {
     setDeleting(true);
     try {
       await api.deleteElement(id);
-      setElements((p) => p.filter((el) => (el.element_id || el.id) !== id));
       if (selectedEl && (selectedEl.element_id || selectedEl.id) === id)
         setSelectedEl(null);
       setDeleteTarget(null);
+      await loadData();
     } catch (err) {
       alert("Delete failed: " + err.message);
     } finally {
@@ -216,11 +204,10 @@ const DataElementManager = () => {
     setRestoringId(id);
     try {
       const restored = await api.restoreElement(id);
-      setDeletedElements((prev) => prev.filter((item) => (item.element_id || item.id) !== id));
-      setElements((prev) => [restored, ...prev]);
       if (selectedEl && (selectedEl.element_id || selectedEl.id) === id) {
         setSelectedEl(restored);
       }
+      await loadData();
     } catch (err) {
       alert("Restore failed: " + err.message);
     } finally {
@@ -360,26 +347,26 @@ const DataElementManager = () => {
 
         {/* Stats row */}
         {(() => {
-          const total = elements.length;
-          const mapped = elements.filter((el) => (surveyCountMap[el.element_id || el.id] || 0) > 0 || (goalCountMap[el.element_id || el.id] || 0) > 0).length;
-          const unmapped = total - mapped;
+          const pageTotal = filtered.length;
+          const mapped = filtered.filter((el) => (surveyCountMap[el.element_id || el.id] || 0) > 0 || (goalCountMap[el.element_id || el.id] || 0) > 0).length;
+          const unmapped = pageTotal - mapped;
           return (
             <div className="grid grid-cols-4 gap-3 mb-5">
               <div className="bg-slate-50 rounded-xl px-4 py-3">
-                <p className="text-xs text-slate-400 font-medium mb-0.5">Total elements</p>
-                <p className="text-2xl font-bold text-slate-900">{total}</p>
+                <p className="text-xs text-slate-400 font-medium mb-0.5">{showDeleted ? "Deleted total" : "Active total"}</p>
+                <p className="text-2xl font-bold text-slate-900">{totalCount}</p>
               </div>
               <div className="bg-slate-50 rounded-xl px-4 py-3">
-                <p className="text-xs text-slate-400 font-medium mb-0.5">Mapped</p>
+                <p className="text-xs text-slate-400 font-medium mb-0.5">Mapped on this page</p>
                 <p className="text-2xl font-bold text-slate-900">{mapped}</p>
               </div>
               <div className="bg-slate-100 rounded-xl px-4 py-3">
-                <p className="text-xs text-slate-400 font-medium mb-0.5">Unmapped</p>
+                <p className="text-xs text-slate-400 font-medium mb-0.5">Unmapped on this page</p>
                 <p className="text-2xl font-bold text-slate-500">{unmapped}</p>
               </div>
               <div className="bg-amber-50 rounded-xl px-4 py-3">
-                <p className="text-xs text-amber-700 font-medium mb-0.5">Deleted</p>
-                <p className="text-2xl font-bold text-amber-700">{deletedElements.length}</p>
+                <p className="text-xs text-amber-700 font-medium mb-0.5">Shown on this page</p>
+                <p className="text-2xl font-bold text-amber-700">{pageTotal}</p>
               </div>
             </div>
           );
@@ -456,7 +443,7 @@ const DataElementManager = () => {
         </div>
 
         <div className="flex items-center justify-between pb-2">
-          <p className="text-sm text-slate-400">{filtered.length} {showDeleted ? "deleted" : "active"} elements</p>
+          <p className="text-sm text-slate-400">{totalCount} {showDeleted ? "deleted" : "active"} elements</p>
           <div className="flex items-center gap-1 text-xs text-slate-400">
             <span>Sort:</span>
             {[{ key: "newest", label: "Newest" }, { key: "alpha", label: "A → Z" }].map(({ key, label }) => (
@@ -483,7 +470,7 @@ const DataElementManager = () => {
             <p className="text-slate-400">Failed to load data elements.</p>
             <button onClick={loadData} className="mt-2 text-xs text-blue-500 hover:underline">Retry</button>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : totalCount === 0 ? (
           <div className="py-20 text-center text-slate-300 text-sm">{showDeleted ? "No deleted elements found." : "No elements found."}</div>
         ) : (
           <table className="w-full text-sm">
@@ -497,7 +484,7 @@ const DataElementManager = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {paginated.map((el) => {
+              {filtered.map((el) => {
                 const id = el.element_id || el.id;
                 const count = surveyCountMap[id] || 0;
                 const goalCount = goalCountMap[id] || 0;
@@ -585,7 +572,7 @@ const DataElementManager = () => {
         {!loading && !loadError && totalPages > 1 && (
           <div className="flex items-center justify-between pt-4 pb-2">
             <p className="text-xs text-slate-400">
-              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+              Showing {totalCount === 0 ? 0 : ((page - 1) * PAGE_SIZE + 1)}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount}
             </p>
             <div className="flex items-center gap-1">
               <button
