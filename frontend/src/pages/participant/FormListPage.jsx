@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useCallback } from "react";
+import { usePolling } from "../../hooks/usePolling";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 
@@ -387,38 +388,21 @@ export default function FormListPage() {
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [showSort, setShowSort] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadForms = async () => {
-      try {
-        setLoading(true);
-        // 🟢 Using the exact same endpoint as your Dashboard!
-        const data = await api.getAssignedSurveys();
-
-        if (!cancelled) {
-          // If data exists, transform it. Otherwise, use an empty array.
-          const validData = Array.isArray(data) ? data : [];
-          setForms(validData.map(transformAssigned));
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error("🚨 API Error fetching survey list:", err);
-          setForms([]); // Show empty state if API fails
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    loadForms();
-
-    return () => {
-      cancelled = true;
-    };
+  const loadForms = useCallback(async ({ background = false } = {}) => {
+    try {
+      if (!background) setLoading(true);
+      const data = await api.getAssignedSurveys();
+      const validData = Array.isArray(data) ? data : [];
+      setForms(validData.map(transformAssigned));
+    } catch (err) {
+      console.error("API Error fetching survey list:", err);
+      setForms([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  usePolling(loadForms, 60_000);
 
   const handleStart = (formId) => navigate(`/participant/surveys/${formId}`);
 

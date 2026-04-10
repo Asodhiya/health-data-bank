@@ -1,5 +1,6 @@
 import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import HDBLogo from '../components/HDBLogo';
 
 export default function AuthLayout() {
   const { user, role, loading } = useAuth();
@@ -10,9 +11,9 @@ export default function AuthLayout() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-slate-100 flex items-center justify-center p-4 sm:p-8">
       <div className="w-full max-w-md flex flex-col items-center">
         {/* Brand */}
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-800 tracking-tight mb-6 text-center">
-          Health Data Bank
-        </h1>
+        <div className="mb-6">
+          <HDBLogo size="lg" />
+        </div>
 
         {/* Card */}
         <div className="w-full bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-slate-200/60 p-8 sm:p-10">

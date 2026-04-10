@@ -2,6 +2,7 @@ import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { PARTICIPANT_NAV } from "../config/navigation";
 import NotificationBell from "../components/NotificationBell";
+import HDBLogo from "../components/HDBLogo";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function NoSidebarDashboardLayout() {
@@ -65,12 +66,7 @@ export default function NoSidebarDashboardLayout() {
             </svg>
           </button>
           {/* Logo is clickable that redirects to dashboard */}
-          <Link
-            to="/participant"
-            className="font-bold text-xl text-blue-600 hover:text-blue-700 transition-colors"
-          >
-            Health Data Bank
-          </Link>
+          <HDBLogo to="/participant" size="md" />
         </div>
 
         {/* CENTER: Desktop Navigation (Hidden on Mobile) */}

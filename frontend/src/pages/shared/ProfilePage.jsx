@@ -760,41 +760,126 @@ function ChangePasswordSection() {
 }
 
 function DangerZoneSection({ role, onDeactivate }) {
+  const [step, setStep] = useState(0); // 0 = idle, 1 = confirm modal, 2 = type confirm
+  const [typed, setTyped] = useState('');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const CONFIRM_WORD = 'DEACTIVATE';
 
-  async function handleDeactivate() {
+  function openModal() { setStep(1); setTyped(''); setError(''); }
+  function closeModal() { if (loading) return; setStep(0); setTyped(''); setError(''); }
+
+  async function handleConfirm() {
+    if (typed !== CONFIRM_WORD) { setError(`Type ${CONFIRM_WORD} exactly to confirm.`); return; }
     if (loading) return;
     setLoading(true);
-    setMessage('');
+    setError('');
     try {
       await onDeactivate?.();
-      setMessage('Account deactivated successfully. Redirecting to login...');
     } catch (err) {
-      setMessage(err?.message || 'Could not deactivate account.');
+      setError(err?.message || 'Could not deactivate account. Please try again.');
       setLoading(false);
     }
   }
 
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-rose-200 mb-5">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-rose-600"><TrashIcon /></span>
-        <h2 className="text-base font-bold text-rose-600">Danger Zone</h2>
+    <>
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-rose-200 mb-5">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-rose-600"><TrashIcon /></span>
+          <h2 className="text-base font-bold text-rose-600">Danger Zone</h2>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          Deactivating your account will disable login access while keeping your records in the system.
+          An admin can still review and reactivate the account later if needed.
+        </p>
+        <button
+          onClick={openModal}
+          className="px-4 py-2.5 text-sm font-medium text-rose-600 border border-rose-200 rounded-xl hover:bg-rose-50 transition-colors"
+        >
+          Deactivate Account
+        </button>
       </div>
-      <p className="text-sm text-slate-500 mb-4">
-        Deactivating your account will disable login access while keeping your records in the system.
-        An admin can still review and reactivate the account later if needed.
-      </p>
-      <button
-        onClick={handleDeactivate}
-        disabled={loading}
-        className="px-4 py-2.5 text-sm font-medium text-rose-600 border border-rose-200 rounded-xl hover:bg-rose-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        {loading ? 'Deactivating…' : 'Deactivate'}
-      </button>
-      {!!message && <p className="text-xs text-slate-500 mt-2">{message}</p>}
-    </div>
+
+      {/* ── Confirmation Modal ── */}
+      {step > 0 && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50"
+            onClick={closeModal}
+          />
+
+          {/* Modal */}
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={closeModal}>
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-start gap-4">
+                <div className="w-11 h-11 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e11d48" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">Deactivate your account?</h3>
+                  <p className="text-sm text-slate-500 mt-1 leading-relaxed">
+                    This will immediately lock you out. Your data stays in the system and an admin can reactivate the account later.
+                  </p>
+                </div>
+              </div>
+
+              {/* What happens list */}
+              <ul className="bg-rose-50 rounded-xl px-4 py-3 space-y-1.5 text-xs text-rose-700 font-medium border border-rose-100">
+                <li className="flex items-center gap-2"><span>✕</span> You will be logged out immediately</li>
+                <li className="flex items-center gap-2"><span>✕</span> Login access will be disabled</li>
+                <li className="flex items-center gap-2"><span>✓</span> Your health data and records are kept safe</li>
+                <li className="flex items-center gap-2"><span>✓</span> An admin can reactivate the account</li>
+              </ul>
+
+              {/* Type to confirm */}
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1.5">
+                  Type <span className="font-black text-rose-600 tracking-widest">{CONFIRM_WORD}</span> to confirm
+                </label>
+                <input
+                  type="text"
+                  value={typed}
+                  onChange={(e) => { setTyped(e.target.value); setError(''); }}
+                  onKeyDown={(e) => e.key === 'Enter' && handleConfirm()}
+                  placeholder={CONFIRM_WORD}
+                  autoFocus
+                  className={`w-full px-3 py-2.5 rounded-xl border text-sm font-mono font-bold tracking-widest focus:outline-none focus:ring-2 transition-all ${
+                    error ? 'border-rose-400 focus:ring-rose-200' : 'border-slate-200 focus:ring-rose-100 focus:border-rose-400'
+                  }`}
+                />
+                {error && <p className="text-xs text-rose-500 font-medium mt-1.5">{error}</p>}
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={closeModal}
+                  disabled={loading}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-all disabled:opacity-40"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirm}
+                  disabled={loading || typed !== CONFIRM_WORD}
+                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-rose-600 hover:bg-rose-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Deactivating…' : 'Yes, deactivate'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </>
   );
 }
 
@@ -836,9 +921,13 @@ export default function ProfilePage({ role = 'participant' }) {
         // Load participant profile data
         if (role === 'participant') {
           try {
-            const p = await api.participantGetProfile().catch(() => null);
+            const [p, careTeam] = await Promise.all([
+              api.participantGetProfile().catch(() => null),
+              api.participantGetCareTeam().catch(() => null),
+            ]);
             if (cancelled) return;
             if (p) {
+              const firstGroup = careTeam?.groups?.[0] || null;
               setProfile((prev) => ({
                 ...prev,
                 dob: p.dob || '',
@@ -852,6 +941,8 @@ export default function ProfilePage({ role = 'participant' }) {
                 marital_status: p.marital_status || '',
                 highest_education_level: p.highest_education_level || '',
                 enrolled_at: p.program_enrolled_at || prev.enrolled_at || '',
+                program_group: firstGroup?.group_name || '',
+                caretaker: firstGroup?.caretaker?.name || '',
               }));
             }
           } catch {

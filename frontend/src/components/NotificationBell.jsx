@@ -66,6 +66,14 @@ export default function NotificationBell({ role }) {
   }, [open]);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
+  const prevUnreadRef = useRef(unreadCount);
+  useEffect(() => {
+    if (unreadCount > prevUnreadRef.current) {
+      window.dispatchEvent(new CustomEvent("hdb:new-notification", { detail: { role } }));
+    }
+    prevUnreadRef.current = unreadCount;
+  }, [unreadCount, role]);
+
   const recent = notifications.slice(0, 8);
 
   async function handleMarkRead(id) {

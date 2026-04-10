@@ -1003,6 +1003,7 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+  participantGetCareTeam: () => request("/participant/my-care-team"),
 
   // ── Participant: Surveys ──
   getAssignedSurveys: () => request("/participant/surveys/assigned"),

@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -16,6 +17,8 @@ const CloseIco   = () => <Svg d="M18 6L6 18M6 6l12 12" size={20} />;
 const AlertIco   = () => <Svg size={13} d={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />;
 const TargetIco  = ({ size = 22 }) => <Svg size={size} d={<><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></>} />;
 const PencilIco  = () => <Svg d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" size={14} />;
+const MenuIco    = () => <Svg d="M4 6h16M4 12h16M4 18h16" size={18} />;
+const ChevronIco = () => <Svg d="M9 18l6-6-6-6" size={16} sw={2.5} />;
 const GripIco    = () => (
   <Svg size={12} stroke="none" fill="currentColor" d={
     <>
@@ -90,13 +93,14 @@ export default function HealthGoals() {
   });
   const [draggedId, setDraggedId]         = useState(null);
   const [dragOverId, setDragOverId]       = useState(null);
+  const [isGoalSheetOpen, setIsGoalSheetOpen] = useState(false);
 
   const MAX_GOALS = 10;
   const isAtLimit = activeGoals.length >= MAX_GOALS;
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async ({ background = false } = {}) => {
     try {
-      setLoading(true);
+      if (!background) setLoading(true);
       const [goalsData, templatesData, tsData] = await Promise.all([
         api.listParticipantGoals().catch(() => []),
         api.browseGoalTemplates().catch(() => []),
@@ -106,7 +110,6 @@ export default function HealthGoals() {
       setActiveGoals(goals);
       setTemplates(Array.isArray(templatesData) ? templatesData : []);
       setTimeseries(Array.isArray(tsData) ? tsData : []);
-      // Sync order: keep custom positions, append new goals, drop deleted ones
       setGoalOrder((prev) => {
         const ids = goals.map((g) => g.goal_id);
         const kept = prev.filter((id) => ids.includes(id));
@@ -120,9 +123,9 @@ export default function HealthGoals() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchData(); }, []);
+  usePolling(fetchData, 30_000);
 
   // Sorted goals — respects user-defined drag order
   const sortedGoals = [...activeGoals].sort((a, b) => {
@@ -313,10 +316,130 @@ export default function HealthGoals() {
         </div>
       ) : (
         /* ── Sidebar + Detail layout ── */
-        <div className="flex gap-4 min-h-[520px]">
+        <div className="flex flex-col lg:flex-row gap-4 min-h-[520px]">
 
-          {/* Sidebar */}
-          <div className="w-48 shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+          {/* ── Mobile goal selector bar (tap to open bottom sheet) ── */}
+          <div className="lg:hidden">
+            <button
+              onClick={() => setIsGoalSheetOpen(true)}
+              className="w-full flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3 shadow-sm"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <MenuIco />
+                <div className="min-w-0 text-left">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-0.5">Current Goal</p>
+                  <p className="text-sm font-bold text-slate-800 truncate">
+                    {activeGoal?.name ?? activeGoal?.element?.label ?? "Select a goal"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-semibold text-slate-400">
+                  {sortedGoals.filter((g) => g.is_completed).length}/{sortedGoals.length}
+                </span>
+                <ChevronIco />
+              </div>
+            </button>
+          </div>
+
+          {/* ── Mobile bottom sheet backdrop ── */}
+          {isGoalSheetOpen && (
+            <div
+              className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 lg:hidden"
+              onClick={() => setIsGoalSheetOpen(false)}
+            />
+          )}
+
+          {/* ── Mobile bottom sheet ── */}
+          <div className={`fixed inset-x-0 bottom-0 z-50 lg:hidden bg-white rounded-t-2xl shadow-2xl border-t border-slate-200 flex flex-col transition-transform duration-300 ease-out ${isGoalSheetOpen ? "translate-y-0" : "translate-y-full"}`}
+            style={{ maxHeight: "75vh" }}>
+            {/* Sheet header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">My Goals</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {sortedGoals.filter((g) => g.is_completed).length} of {sortedGoals.length} completed
+                </p>
+              </div>
+              <button
+                onClick={() => setIsGoalSheetOpen(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 transition-all"
+              >
+                <CloseIco />
+              </button>
+            </div>
+            {/* Progress bar */}
+            <div className="px-5 py-2 border-b border-slate-100">
+              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-400 rounded-full transition-all duration-500"
+                  style={{ width: `${sortedGoals.length ? (sortedGoals.filter((g) => g.is_completed).length / sortedGoals.length) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+            {/* Goal list */}
+            <div className="flex-1 overflow-y-auto py-2">
+              {sortedGoals.map((g) => {
+                const isActive = g.goal_id === resolvedGoalId;
+                const done = g.is_completed;
+                const isConfirming = confirmDeleteId === g.goal_id;
+                const isDragging = draggedId === g.goal_id;
+                const isOver = dragOverId === g.goal_id;
+                return (
+                  <div
+                    key={g.goal_id}
+                    className="relative group"
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, g.goal_id)}
+                    onDragOver={(e) => handleDragOver(e, g.goal_id)}
+                    onDrop={(e) => handleDrop(e, g.goal_id)}
+                    onDragEnd={handleDragEnd}
+                    style={{ opacity: isDragging ? 0.4 : 1 }}
+                  >
+                    {isOver && !isDragging && (
+                      <div className="absolute top-0 left-3 right-3 h-0.5 bg-blue-500 rounded-full z-10" />
+                    )}
+                    <button
+                      onClick={() => { setActiveGoalId(g.goal_id); setConfirmDeleteId(null); setIsGoalSheetOpen(false); }}
+                      className={`w-full text-left px-5 py-3.5 flex items-center gap-3 transition-all border-l-2 ${
+                        isActive ? "bg-blue-50 border-blue-500" : "border-transparent hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className="text-slate-300 shrink-0 cursor-grab active:cursor-grabbing"><GripIco /></span>
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${done ? "bg-emerald-400" : "bg-blue-400"}`} />
+                      <span className={`text-sm leading-tight flex-1 text-left ${isActive ? "font-bold text-blue-700" : "font-medium text-slate-700"}`}>
+                        {g.name ?? g.element?.label ?? "Goal"}
+                      </span>
+                      {done && <span className="text-xs font-bold text-emerald-600 shrink-0">✓ Done</span>}
+                    </button>
+                    {/* Delete in sheet */}
+                    {!isConfirming ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(g.goal_id); setActiveGoalId(g.goal_id); }}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
+                      >
+                        <TrashIco />
+                      </button>
+                    ) : (
+                      <div className="px-5 pb-3 flex items-center gap-2">
+                        <span className="text-xs text-slate-500 font-semibold">Remove this goal?</span>
+                        <button onClick={() => setConfirmDeleteId(null)} className="text-xs font-bold text-slate-400 hover:text-slate-600 px-2 py-0.5 rounded-lg hover:bg-slate-100 transition-all">Cancel</button>
+                        <button
+                          onClick={() => { handleDeleteGoal(g.goal_id); setIsGoalSheetOpen(false); }}
+                          className="text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 px-3 py-1 rounded-lg transition-all"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Sidebar — hidden on mobile, shown on lg+ */}
+          <div className="hidden lg:flex w-48 shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex-col">
             <div className="px-4 py-3 border-b border-slate-100">
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">My Goals</p>
             </div>
@@ -627,8 +750,8 @@ function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actio
   return (
     <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-w-0">
       {/* Header */}
-      <div className="px-6 py-5 border-b border-slate-100">
-        <div className="flex items-start justify-between gap-3">
+      <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 className="text-lg font-bold text-slate-800 leading-tight truncate">{name}</h3>
             <p className="text-xs text-slate-400 mt-0.5">

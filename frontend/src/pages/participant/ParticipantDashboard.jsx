@@ -1,13 +1,16 @@
 import { Link, useOutletContext } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
-import { PieChart, Pie, Cell } from "recharts";
+import { PieChart, Pie } from "recharts";
+import MedicalCrossIcon from "../../components/MedicalCrossIcon";
 
 const DonutRing = ({ filled, total, color, label, sublabel, children }) => {
   const remaining = Math.max(0, total - filled);
   const isEmpty = total === 0;
-  const data = isEmpty ? [{ value: 1 }] : [{ value: filled }, { value: remaining }];
-  const ringColors = isEmpty ? ["#e2e8f0"] : [color, "#e2e8f0"];
+  const data = isEmpty
+    ? [{ value: 1, fill: "#e2e8f0" }]
+    : [{ value: filled, fill: color }, { value: remaining, fill: "#e2e8f0" }];
   const pct = total > 0 ? Math.round((filled / total) * 100) : 0;
 
   return (
@@ -26,9 +29,7 @@ const DonutRing = ({ filled, total, color, label, sublabel, children }) => {
             strokeWidth={3}
             stroke="#f8fafc"
             animationDuration={900}
-          >
-            {ringColors.map((c, i) => <Cell key={i} fill={c} />)}
-          </Pie>
+          />
         </PieChart>
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
           <span className="text-4xl font-black text-slate-800 leading-none">
@@ -53,27 +54,27 @@ export default function ParticipantDashboard() {
   const [goals, setGoals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [weather, setWeather] = useState(null);
+  const [careTeam, setCareTeam] = useState(null);
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        setLoading(true);
-        const [surveyData, goalsData] = await Promise.all([
-          api.getAssignedSurveys(),
-          api.listParticipantGoals().catch(() => []),
-        ]);
-
-        setSurveys(surveyData || []);
-        setGoals(Array.isArray(goalsData) ? goalsData : []);
-      } catch (err) {
-        console.error("Dashboard Sync Error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDashboardData();
+  const fetchDashboardData = useCallback(async ({ background = false } = {}) => {
+    try {
+      if (!background) setLoading(true);
+      const [surveyData, goalsData, careTeamData] = await Promise.all([
+        api.getAssignedSurveys(),
+        api.listParticipantGoals().catch(() => []),
+        api.participantGetCareTeam().catch(() => null),
+      ]);
+      setSurveys(surveyData || []);
+      setGoals(Array.isArray(goalsData) ? goalsData : []);
+      setCareTeam(careTeamData);
+    } catch (err) {
+      console.error("Dashboard Sync Error:", err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  usePolling(fetchDashboardData, 30_000);
 
   // Weather — Open-Meteo (free, no API key), falls back to time-of-day if denied
   useEffect(() => {
@@ -216,20 +217,17 @@ export default function ParticipantDashboard() {
     <div className="max-w-6xl mx-auto space-y-6 p-2 md:p-0 bg-slate-50 min-h-screen">
       {/* STEP 1: TOP WELCOME BANNER */}
       <div className="bg-white rounded-2xl p-6 shadow-md shadow-slate-100 border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-        {/* Left Side: Greeting & Pill */}
+        {/* Left: Greeting & tip */}
         <div className="space-y-3">
           <h1 className="text-2xl md:text-3xl font-bold text-slate-800">
             {greetings.text}, {user?.first_name || "there"}! {greetings.icon}
           </h1>
-
-          {/* Dynamic Health Tip Pill */}
           <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-500 ${healthTip.color}`}>
             <span>{healthTip.icon}</span>
             {healthTip.text}
           </div>
         </div>
-
-        {/* Right Side: Weather & Date */}
+        {/* Right: Weather & Date */}
         <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100 w-full md:w-auto">
           <div className={`text-4xl leading-none ${weather?.color ?? "text-slate-300"}`}>
             {weather ? weather.icon : "…"}
@@ -237,9 +235,7 @@ export default function ParticipantDashboard() {
           <div>
             <p className="text-sm font-medium text-slate-500">
               {weather ? weather.label : "Loading…"}
-              {weather?.temp != null && (
-                <span className="ml-1.5 text-slate-700 font-semibold">{weather.temp}°C</span>
-              )}
+              {weather?.temp != null && <span className="ml-1.5 text-slate-700 font-semibold">{weather.temp}°C</span>}
             </p>
             <p className="text-lg font-bold text-slate-800">{todayFormatted}</p>
           </div>
@@ -395,6 +391,72 @@ export default function ParticipantDashboard() {
           </div>
         </div>
       </div>
+      {/* STEP 2.5: CARE TEAM */}
+      {careTeam?.groups?.length > 0 && (() => {
+        const group = careTeam.groups[0];
+        const caretaker = group.caretaker;
+        return (
+          <div className="bg-white rounded-2xl p-6 shadow-md shadow-slate-100 border border-slate-100">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              {/* Group info */}
+              <div className="flex items-center gap-4">
+                {/* HDB icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 64 64" fill="none" className="shrink-0">
+                  <defs>
+                    <linearGradient id="ct-bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+                      <stop offset="0%" stopColor="#38bdf8" />
+                      <stop offset="100%" stopColor="#0284c7" />
+                    </linearGradient>
+                    <clipPath id="ct-clip">
+                      <rect x="4" y="4" width="56" height="56" rx="14" />
+                    </clipPath>
+                  </defs>
+                  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#ct-bg)" />
+                  <rect x="4" y="4" width="56" height="28" rx="14" fill="white" fillOpacity="0.08" />
+                  <g clipPath="url(#ct-clip)">
+                    <polyline points="4,30 14,30 18,18 23,40 27,24 31,33 34,28 38,28 42,30 60,30" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.95" />
+                  </g>
+                  <line x1="12" y1="40" x2="52" y2="40" stroke="white" strokeWidth="0.75" strokeOpacity="0.3" />
+                  <text x="32" y="54" textAnchor="middle" fontFamily="'Arial Black', Arial, sans-serif" fontWeight="900" fontSize="13" letterSpacing="1.5" fill="white" fillOpacity="0.97">HDB</text>
+                </svg>
+                <div>
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Your Group</p>
+                  <p className="text-base font-bold text-slate-800 leading-tight">{group.group_name}</p>
+                  {group.group_description && (
+                    <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{group.group_description}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Caretaker */}
+              {caretaker ? (
+                <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 sm:ml-auto">
+                  <MedicalCrossIcon size={36} />
+                  <div>
+                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest leading-none mb-0.5">Care Lead</p>
+                    <p className="text-sm font-bold text-slate-800 leading-tight">{caretaker.name}</p>
+                    {(caretaker.title || caretaker.specialty) && (
+                      <p className="text-xs text-slate-400 leading-tight mt-0.5">
+                        {[caretaker.title, caretaker.specialty].filter(Boolean).join(" · ")}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 sm:ml-auto">
+                  <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                  </div>
+                  <p className="text-sm text-slate-400 font-medium">No caretaker assigned yet</p>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* STEP 3: SURVEY TEMPLATES CAROUSEL */}
       <div className="bg-slate-800 rounded-2xl p-6 md:p-8 shadow-sm relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -translate-y-1/2 translate-x-1/4 pointer-events-none"></div>

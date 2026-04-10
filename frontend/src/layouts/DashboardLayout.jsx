@@ -2,6 +2,7 @@ import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { DASHBOARD_NAV } from "../config/navigation";
 import NotificationBell from "../components/NotificationBell";
+import HDBLogo from "../components/HDBLogo";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function DashboardLayout({ role }) {
@@ -62,12 +63,7 @@ export default function DashboardLayout({ role }) {
               />
             </svg>
           </button>
-          <Link
-            to={`/${role.toLowerCase()}`}
-            className="font-bold text-xl text-blue-600 hover:text-blue-700 transition-colors"
-          >
-            Health Data Bank
-          </Link>
+          <HDBLogo to={`/${role.toLowerCase()}`} size="md" />
         </div>
 
         {/* Bell + Avatar */}

@@ -1,6 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useCallback } from "react";
+import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
 import NotificationsPanel from "../../components/NotificationsPanel";
+
+const BellIco = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>
+  </svg>
+);
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const formatDate = (iso) =>
@@ -44,15 +51,20 @@ export default function ParticipantFeedback() {
   const [feedback, setFeedback] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [notifOpen, setNotifOpen] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    api.participantListFeedback()
-      .then((data) => { if (active) setFeedback(Array.isArray(data) ? data : []); })
-      .catch((err) => { if (active) setError(err.message); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+  const fetchFeedback = useCallback(async () => {
+    try {
+      const data = await api.participantListFeedback();
+      setFeedback(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  usePolling(fetchFeedback, 60_000);
 
   const filtered = feedback.filter((fb) => {
     if (filter === "On Submissions") return fb.submission_id !== null;
@@ -75,9 +87,42 @@ export default function ParticipantFeedback() {
             Notes and feedback from your caretaker on your health progress.
           </p>
         </div>
-        <span className="self-start sm:self-center inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-sm font-semibold border border-blue-100">
-          💬 {feedback.length} total
-        </span>
+        <div className="flex items-center gap-3 self-start sm:self-center">
+          <span className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-sm font-semibold border border-blue-100">
+            💬 {feedback.length} total
+          </span>
+          {/* Bell button — mobile only */}
+          <button
+            onClick={() => setNotifOpen(true)}
+            className="lg:hidden relative w-9 h-9 flex items-center justify-center rounded-full bg-white border border-slate-200 shadow-sm text-slate-600 hover:text-blue-600 hover:border-blue-300 transition-all"
+            aria-label="Open notifications"
+          >
+            <BellIco />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Notifications mobile sheet ── */}
+      {notifOpen && (
+        <div
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 lg:hidden"
+          onClick={() => setNotifOpen(false)}
+        />
+      )}
+      <div className={`fixed inset-x-0 bottom-0 z-50 lg:hidden bg-white rounded-t-2xl shadow-2xl border-t border-slate-200 flex flex-col transition-transform duration-300 ease-out ${notifOpen ? "translate-y-0" : "translate-y-full"}`}
+        style={{ maxHeight: "80vh" }}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0">
+          <h3 className="text-base font-bold text-slate-800">Notifications</h3>
+          <button
+            onClick={() => setNotifOpen(false)}
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 transition-all text-slate-500"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          <NotificationsPanel role="participant" />
+        </div>
       </div>
 
       {/* Error */}
@@ -88,7 +133,7 @@ export default function ParticipantFeedback() {
       )}
 
       {/* Two-column layout: feedback left, notifications right */}
-      <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
 
         {/* ── Left: Feedback timeline ── */}
         <div className="space-y-6">
@@ -164,7 +209,7 @@ export default function ParticipantFeedback() {
                           {items.map((fb) => {
                             const isGeneral = !fb.submission_id;
                             return (
-                              <div key={fb.feedback_id} className="flex gap-5 relative">
+                              <div key={fb.feedback_id} className="flex gap-3 sm:gap-5 relative">
                                 <div
                                   className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-sm z-10 border-2 border-white shadow-sm ${
                                     isGeneral ? "bg-slate-100 text-slate-500" : "bg-blue-100 text-blue-600"
@@ -173,7 +218,7 @@ export default function ParticipantFeedback() {
                                   {isGeneral ? "📝" : "📋"}
                                 </div>
 
-                                <div className="flex-1 bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all p-5 space-y-3">
+                                <div className="flex-1 bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all p-4 sm:p-5 space-y-3 min-w-0">
                                   <div className="flex items-start justify-between gap-2 flex-wrap">
                                     <div className="space-y-0.5">
                                       <p className="text-sm font-bold text-slate-800">Your Caretaker</p>
@@ -209,8 +254,8 @@ export default function ParticipantFeedback() {
           )}
         </div>
 
-        {/* ── Right: Notifications ── */}
-        <div>
+        {/* ── Right: Notifications (desktop only) ── */}
+        <div className="hidden lg:block sticky top-4 self-start">
           <NotificationsPanel role="participant" />
         </div>
 

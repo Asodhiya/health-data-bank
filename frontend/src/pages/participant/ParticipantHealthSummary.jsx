@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { generatePDFReport, generateCSVReport } from "../../utils/healthReportExport";
@@ -110,29 +111,28 @@ export default function ParticipantHealthSummary() {
     setExportOpen(false);
   };
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setLoading(true);
-        const [elementsData, vsGroupData, timeseriesData] = await Promise.all([
-          api.getMyElementsData(),
-          api.getMyVsGroupStats().catch(() => null),
-          api.getMyHealthTimeseries().catch(() => []),
-        ]);
-        setElements(elementsData || []);
-        setVsGroup(vsGroupData);
-        setTimeseries(timeseriesData || []);
-        if (vsGroupData?.elements?.length) {
-          setSelectedElement(vsGroupData.elements[0].element_id);
-        }
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+  const load = useCallback(async ({ background = false } = {}) => {
+    try {
+      if (!background) setLoading(true);
+      const [elementsData, vsGroupData, timeseriesData] = await Promise.all([
+        api.getMyElementsData(),
+        api.getMyVsGroupStats().catch(() => null),
+        api.getMyHealthTimeseries().catch(() => []),
+      ]);
+      setElements(elementsData || []);
+      setVsGroup(vsGroupData);
+      setTimeseries(timeseriesData || []);
+      if (vsGroupData?.elements?.length) {
+        setSelectedElement(vsGroupData.elements[0].element_id);
       }
-    };
-    load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  usePolling(load, 60_000);
 
   const totalDataPoints = elements.reduce((s, e) => s + (e.count ?? 0), 0);
   const vsElements = vsGroup?.elements ?? [];
@@ -385,40 +385,38 @@ function LineChart({ points, color = "#3b82f6", unit = "" }) {
         <path d={linePath} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
 
         {/* Max marker */}
-        {maxIdx !== minIdx && (
-          <>
-            <circle cx={pts[maxIdx].x} cy={pts[maxIdx].y} r="4.5" fill="white" stroke={color} strokeWidth="2" />
-            <text
-              x={pts[maxIdx].x}
-              y={pts[maxIdx].y - 9}
-              textAnchor="middle"
-              fontSize="9"
-              fill={color}
-              fontWeight="700"
-              fontFamily="system-ui,sans-serif"
-            >
-              ↑ {fmtVal(vals[maxIdx])}
-            </text>
-          </>
-        )}
+        {maxIdx !== minIdx && (() => {
+          const mx = pts[maxIdx].x;
+          const my = pts[maxIdx].y;
+          // If too close to top, show label below; otherwise above
+          const labelY = my < PT + 16 ? my + 17 : my - 9;
+          const anchor = mx < PL + 30 ? "start" : mx > W - PR - 30 ? "end" : "middle";
+          return (
+            <>
+              <circle cx={mx} cy={my} r="4.5" fill="white" stroke={color} strokeWidth="2" />
+              <text x={mx} y={labelY} textAnchor={anchor} fontSize="9" fill={color} fontWeight="700" fontFamily="system-ui,sans-serif">
+                ↑ {fmtVal(vals[maxIdx])}
+              </text>
+            </>
+          );
+        })()}
 
         {/* Min marker */}
-        {maxIdx !== minIdx && (
-          <>
-            <circle cx={pts[minIdx].x} cy={pts[minIdx].y} r="4.5" fill="white" stroke="#f59e0b" strokeWidth="2" />
-            <text
-              x={pts[minIdx].x}
-              y={pts[minIdx].y + 17}
-              textAnchor="middle"
-              fontSize="9"
-              fill="#f59e0b"
-              fontWeight="700"
-              fontFamily="system-ui,sans-serif"
-            >
-              ↓ {fmtVal(vals[minIdx])}
-            </text>
-          </>
-        )}
+        {maxIdx !== minIdx && (() => {
+          const mx = pts[minIdx].x;
+          const my = pts[minIdx].y;
+          // If too close to bottom (would overlap x-axis), show label above; otherwise below
+          const labelY = my + 17 > PT + CH - 2 ? my - 9 : my + 17;
+          const anchor = mx < PL + 30 ? "start" : mx > W - PR - 30 ? "end" : "middle";
+          return (
+            <>
+              <circle cx={mx} cy={my} r="4.5" fill="white" stroke="#f59e0b" strokeWidth="2" />
+              <text x={mx} y={labelY} textAnchor={anchor} fontSize="9" fill="#f59e0b" fontWeight="700" fontFamily="system-ui,sans-serif">
+                ↓ {fmtVal(vals[minIdx])}
+              </text>
+            </>
+          );
+        })()}
 
         {/* Latest dot */}
         <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="5" fill={color} />
