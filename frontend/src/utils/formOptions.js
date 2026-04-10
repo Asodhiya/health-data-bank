@@ -53,3 +53,8 @@ export const COUNTRIES = [
   'Uruguay', 'Uzbekistan', 'Vanuatu', 'Vatican City', 'Venezuela',
   'Vietnam', 'Yemen', 'Zambia', 'Zimbabwe',
 ];
+
+export const PREDEFINED_LISTS = {
+  languages: LANGUAGES,
+  countries: COUNTRIES,
+};

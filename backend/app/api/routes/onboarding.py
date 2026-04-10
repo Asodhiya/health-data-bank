@@ -105,6 +105,7 @@ def _serialize_intake_field(field: FormField) -> dict[str, Any]:
         "is_required": field.is_required,
         "display_order": field.display_order,
         "profile_field": field.profile_field,
+        "config": field.config,
         "options": [
             {
                 "label": o.label,
@@ -114,6 +115,56 @@ def _serialize_intake_field(field: FormField) -> dict[str, Any]:
             for o in sorted(field.options, key=lambda x: x.display_order)
         ],
     }
+
+
+_VALID_CONFIG_KEYS = {"searchable", "creatable", "predefined_list", "conditional", "min", "max", "max_date_rule"}
+_VALID_PREDEFINED_LISTS = {"languages", "countries"}
+_VALID_DATE_RULES = {"adult_18"}
+
+
+def _validate_field_config(field_type: str, config: dict | None) -> None:
+    """Validate the config dict for a form field. Raises HTTPException on invalid config."""
+    if not config:
+        return
+
+    unknown = set(config.keys()) - _VALID_CONFIG_KEYS
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown config keys: {', '.join(sorted(unknown))}")
+
+    if "searchable" in config and not isinstance(config["searchable"], bool):
+        raise HTTPException(status_code=400, detail="config.searchable must be a boolean.")
+
+    if "creatable" in config and not isinstance(config["creatable"], bool):
+        raise HTTPException(status_code=400, detail="config.creatable must be a boolean.")
+
+    if "predefined_list" in config and config["predefined_list"] not in _VALID_PREDEFINED_LISTS:
+        raise HTTPException(status_code=400, detail=f"config.predefined_list must be one of: {', '.join(sorted(_VALID_PREDEFINED_LISTS))}")
+
+    if "min" in config and not isinstance(config["min"], (int, float)):
+        raise HTTPException(status_code=400, detail="config.min must be a number.")
+
+    if "max" in config and not isinstance(config["max"], (int, float)):
+        raise HTTPException(status_code=400, detail="config.max must be a number.")
+
+    if "max_date_rule" in config and config["max_date_rule"] not in _VALID_DATE_RULES:
+        raise HTTPException(status_code=400, detail=f"config.max_date_rule must be one of: {', '.join(sorted(_VALID_DATE_RULES))}")
+
+    if "conditional" in config:
+        cond = config["conditional"]
+        if not isinstance(cond, dict):
+            raise HTTPException(status_code=400, detail="config.conditional must be an object.")
+        if "trigger_value" not in cond or not isinstance(cond["trigger_value"], str):
+            raise HTTPException(status_code=400, detail="config.conditional.trigger_value is required and must be a string.")
+        if "sub_field_type" not in cond or cond["sub_field_type"] not in {"number"}:
+            raise HTTPException(status_code=400, detail="config.conditional.sub_field_type is required and must be 'number'.")
+        sub = cond.get("sub_config")
+        if sub is not None:
+            if not isinstance(sub, dict):
+                raise HTTPException(status_code=400, detail="config.conditional.sub_config must be an object.")
+            if "min" in sub and not isinstance(sub["min"], (int, float)):
+                raise HTTPException(status_code=400, detail="config.conditional.sub_config.min must be a number.")
+            if "max" in sub and not isinstance(sub["max"], (int, float)):
+                raise HTTPException(status_code=400, detail="config.conditional.sub_config.max must be a number.")
 
 
 def _minimum_adult_dob(today: date | None = None) -> date:
@@ -156,6 +207,10 @@ def _normalize_profile_field_value(profile_field: str, value: Any) -> Any:
         return parsed
 
     if isinstance(value, list):
+        # For primary_language, store only the first selection in the profile column;
+        # the full array is preserved in SubmissionAnswer and HealthDataPoint.
+        if profile_field == "primary_language" and value:
+            return str(value[0]).strip() or None
         return ", ".join(str(v).strip() for v in value if str(v).strip())
 
     if isinstance(value, dict):
@@ -508,6 +563,8 @@ async def update_intake_form_route(
         profile_field = field_data.get("profile_field") or None
         if profile_field is not None and profile_field not in PROFILE_FIELD_NAMES:
             raise HTTPException(status_code=400, detail=f"Unsupported profile field mapping: {profile_field}")
+        field_config = field_data.get("config") or None
+        _validate_field_config(field_data["field_type"], field_config)
         new_field = FormField(
             form_id=form.form_id,
             label=field_data["label"],
@@ -515,6 +572,7 @@ async def update_intake_form_route(
             profile_field=profile_field,
             is_required=field_data.get("is_required", False),
             display_order=field_data.get("display_order", i + 1),
+            config=field_config,
         )
         db.add(new_field)
         await db.flush()

@@ -366,8 +366,21 @@ function IntakeEditor({ intakeFields, setIntakeFields }) {
   const updateField = (idx, key, value) => {
     const next = [...intakeFields];
     next[idx] = { ...next[idx], [key]: value };
-    if (key === "field_type" && !hasSelectOptions(value)) {
-      next[idx].options = [];
+    if (key === "field_type") {
+      if (!hasSelectOptions(value)) next[idx].options = [];
+      next[idx].config = {};
+    }
+    setIntakeFields(next);
+  };
+
+  const updateConfig = (idx, configKey, configValue) => {
+    const next = [...intakeFields];
+    const prev = next[idx].config || {};
+    if (configValue === undefined || configValue === null || configValue === false) {
+      const { [configKey]: _, ...rest } = prev;
+      next[idx] = { ...next[idx], config: rest };
+    } else {
+      next[idx] = { ...next[idx], config: { ...prev, [configKey]: configValue } };
     }
     setIntakeFields(next);
   };
@@ -375,7 +388,7 @@ function IntakeEditor({ intakeFields, setIntakeFields }) {
   const addField = () => {
     setIntakeFields([
       ...intakeFields,
-      { label: "", field_type: "text", is_required: true, display_order: intakeFields.length + 1, profile_field: "", options: [] },
+      { label: "", field_type: "text", is_required: true, display_order: intakeFields.length + 1, profile_field: "", config: {}, options: [] },
     ]);
   };
 
@@ -506,6 +519,162 @@ function IntakeEditor({ intakeFields, setIntakeFields }) {
                       >
                         + Add option
                       </button>
+                    </div>
+                  )}
+
+                  {/* ── Field config panel ── */}
+                  {(field.field_type === "number" || field.field_type === "date" || field.field_type === "dropdown" || field.field_type === "multi_select" || field.field_type === "single_select") && (
+                    <div className="pl-2 border-l-2 border-blue-200 space-y-2.5 mt-1">
+                      <span className="text-xs font-medium text-blue-600">Field configuration</span>
+
+                      {/* Number: min / max */}
+                      {field.field_type === "number" && (
+                        <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                            Min
+                            <input
+                              type="number"
+                              value={field.config?.min ?? ""}
+                              onChange={(e) => updateConfig(idx, "min", e.target.value === "" ? undefined : Number(e.target.value))}
+                              className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            />
+                          </label>
+                          <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                            Max
+                            <input
+                              type="number"
+                              value={field.config?.max ?? ""}
+                              onChange={(e) => updateConfig(idx, "max", e.target.value === "" ? undefined : Number(e.target.value))}
+                              className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            />
+                          </label>
+                        </div>
+                      )}
+
+                      {/* Date: validation rule */}
+                      {field.field_type === "date" && (
+                        <label className="flex items-center gap-2 text-xs text-slate-500">
+                          Validation
+                          <select
+                            value={field.config?.max_date_rule || ""}
+                            onChange={(e) => updateConfig(idx, "max_date_rule", e.target.value || undefined)}
+                            className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          >
+                            <option value="">None</option>
+                            <option value="adult_18">Must be 18+</option>
+                          </select>
+                        </label>
+                      )}
+
+                      {/* Dropdown / Multi-select: searchable, predefined list, creatable */}
+                      {(field.field_type === "dropdown" || field.field_type === "multi_select") && (
+                        <>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!field.config?.searchable}
+                              onChange={(e) => {
+                                updateConfig(idx, "searchable", e.target.checked || undefined);
+                                if (!e.target.checked) {
+                                  updateConfig(idx, "creatable", undefined);
+                                  updateConfig(idx, "predefined_list", undefined);
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-xs text-slate-600">Searchable</span>
+                          </label>
+                          {field.config?.searchable && (
+                            <>
+                              <label className="flex items-center gap-2 text-xs text-slate-500 ml-6">
+                                Predefined list
+                                <select
+                                  value={field.config?.predefined_list || ""}
+                                  onChange={(e) => updateConfig(idx, "predefined_list", e.target.value || undefined)}
+                                  className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                >
+                                  <option value="">None (use manual options)</option>
+                                  <option value="languages">Languages</option>
+                                  <option value="countries">Countries</option>
+                                </select>
+                              </label>
+                              {field.field_type === "multi_select" && (
+                                <label className="flex items-center gap-2 cursor-pointer ml-6">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!field.config?.creatable}
+                                    onChange={(e) => updateConfig(idx, "creatable", e.target.checked || undefined)}
+                                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className="text-xs text-slate-600">Allow custom entries</span>
+                                </label>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )}
+
+                      {/* Single select: conditional sub-field */}
+                      {field.field_type === "single_select" && (
+                        <>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!field.config?.conditional}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  updateConfig(idx, "conditional", { trigger_value: "Yes", sub_field_type: "number", sub_config: { min: 0, max: 10 } });
+                                } else {
+                                  updateConfig(idx, "conditional", undefined);
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-xs text-slate-600">Conditional sub-field</span>
+                          </label>
+                          {field.config?.conditional && (
+                            <div className="ml-6 space-y-2 p-2.5 bg-white border border-slate-200 rounded-lg">
+                              <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                                Trigger value
+                                <input
+                                  type="text"
+                                  value={field.config.conditional.trigger_value || ""}
+                                  onChange={(e) => updateConfig(idx, "conditional", { ...field.config.conditional, trigger_value: e.target.value })}
+                                  className="w-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                  placeholder="Yes"
+                                />
+                              </label>
+                              <p className="text-[11px] text-slate-400">Sub-field type: Number</p>
+                              <div className="flex items-center gap-3">
+                                <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                                  Min
+                                  <input
+                                    type="number"
+                                    value={field.config.conditional.sub_config?.min ?? ""}
+                                    onChange={(e) => updateConfig(idx, "conditional", {
+                                      ...field.config.conditional,
+                                      sub_config: { ...(field.config.conditional.sub_config || {}), min: e.target.value === "" ? undefined : Number(e.target.value) },
+                                    })}
+                                    className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                  />
+                                </label>
+                                <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                                  Max
+                                  <input
+                                    type="number"
+                                    value={field.config.conditional.sub_config?.max ?? ""}
+                                    onChange={(e) => updateConfig(idx, "conditional", {
+                                      ...field.config.conditional,
+                                      sub_config: { ...(field.config.conditional.sub_config || {}), max: e.target.value === "" ? undefined : Number(e.target.value) },
+                                    })}
+                                    className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -755,6 +924,8 @@ export default function OnboardingManagementPage() {
               is_required: f.is_required,
               display_order: f.display_order,
               profile_field: f.profile_field || "",
+              config: f.config || {},
+              element_id: f.element_id || null,
               options: (f.options || []).map((o) => ({
                 label: o.label || "",
                 value: o.value,
