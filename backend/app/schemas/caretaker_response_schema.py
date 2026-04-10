@@ -178,7 +178,16 @@ class SubmissionDetailItem(BaseModel):
 class ReportListItem(BaseModel):
     report_id: UUID
     scope: str
+    group_id: Optional[UUID] = None
+    group_name: Optional[str] = None
+    participant_id: Optional[UUID] = None
     created_at: datetime
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    participant_status: Optional[str] = None
+    compare_with: Optional[str] = None
+    element_count: int = 0
+    element_labels: List[str] = Field(default_factory=list)
 
 
 class NoteCreateRequest(BaseModel):
@@ -197,19 +206,18 @@ class NoteItem(BaseModel):
 
 
 class NoteUpdateRequest(BaseModel):
-    text: Optional[str] = None
+    text: Optional[str] = Field(default=None, min_length=1)
     tag: Optional[str] = None
 
 
 class ReportGenerateRequest(BaseModel):
     date_from: Optional[date] = None
     date_to: Optional[date] = None
-    element_ids: list[UUID] = Field(default_factory=list)  # filter by data elements
-    report_type: Literal["numeric", "graph"] = "numeric"
-    # Reports v2: filter the underlying participant set by activity status.
-    # "all" includes everyone, "active" only highly_active+moderately_active,
-    # "inactive" only inactive (matches the dashboard's bucket definitions).
+    element_ids: list[UUID] = Field(default_factory=list)
     participant_status: Literal["all", "active", "inactive"] = "all"
+    gender: Optional[str] = None
+    age_min: Optional[int] = Field(default=None, ge=0, le=150)
+    age_max: Optional[int] = Field(default=None, ge=0, le=150)
 
 
 class ComparisonReportRequest(BaseModel):
@@ -231,9 +239,10 @@ class ComparisonReportRequest(BaseModel):
 
 class ReportResponse(BaseModel):
     report_id: UUID
-    scope: Literal["participant", "group", "comparison"]
+    scope: str
     created_at: datetime
     payload: dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
 
 
 class GroupDataElementItem(BaseModel):

@@ -194,9 +194,36 @@ async def _deactivate_participant_group_memberships(db: AsyncSession, user_id: U
     if not memberships:
         return 0
 
+    # Fetch participant name and affected caretakers before closing memberships
+    participant_user = await db.scalar(select(User).where(User.user_id == user_id))
+    participant_name = f"{participant_user.first_name or ''} {participant_user.last_name or ''}".strip() if participant_user else "A participant"
+
+    group_ids = [m.group_id for m in memberships]
+    caretaker_rows = (await db.execute(
+        select(CaretakerProfile.user_id, Group.group_id, Group.name)
+        .join(Group, Group.caretaker_id == CaretakerProfile.caretaker_id)
+        .where(Group.group_id.in_(group_ids))
+    )).all()
+
     now = datetime.now(timezone.utc)
     for membership in memberships:
         membership.left_at = now
+
+    # Notify each affected caretaker
+    for ct_user_id, group_id, group_name in caretaker_rows:
+        if ct_user_id:
+            await create_notification(
+                db=db,
+                user_id=ct_user_id,
+                notification_type="flag",
+                title="Participant removed from your group",
+                message=f"{participant_name}'s account was deactivated and removed from group '{group_name}'.",
+                link="/caretaker/participants",
+                role_target="caretaker",
+                source_type="group_membership_changed",
+                source_id=group_id,
+            )
+
     return len(memberships)
 
 
@@ -801,6 +828,22 @@ async def move_participant_group(user_id: UUID, new_group_id: UUID | None, db: A
         group_name = group.name if group else "selected group"
         return {"detail": f"Participant is already in '{group_name}'"}
 
+    # Look up old group's caretaker BEFORE closing the membership
+    old_caretaker_user_id = None
+    old_group_name = None
+    if previous_group_id:
+        old_group = await db.scalar(select(Group).where(Group.group_id == previous_group_id))
+        if old_group:
+            old_group_name = old_group.name
+            if old_group.caretaker_id:
+                old_caretaker_user_id = await db.scalar(
+                    select(CaretakerProfile.user_id).where(CaretakerProfile.caretaker_id == old_group.caretaker_id)
+                )
+
+    # Fetch participant name for notification message
+    participant_user = await db.scalar(select(User).where(User.user_id == user_id))
+    participant_name = f"{participant_user.first_name or ''} {participant_user.last_name or ''}".strip() if participant_user else "A participant"
+
     # Close current active membership
     await db.execute(
         update(GroupMember)
@@ -808,6 +851,20 @@ async def move_participant_group(user_id: UUID, new_group_id: UUID | None, db: A
         .where(GroupMember.left_at == None)
         .values(left_at=now)
     )
+
+    # Notify old caretaker that participant left their group
+    if old_caretaker_user_id:
+        await create_notification(
+            db=db,
+            user_id=old_caretaker_user_id,
+            notification_type="flag",
+            title="Participant removed from your group",
+            message=f"{participant_name} has been removed from group '{old_group_name}'.",
+            link="/caretaker/participants",
+            role_target="caretaker",
+            source_type="group_membership_changed",
+            source_id=previous_group_id,
+        )
 
     if new_group_id is None:
         if participant.user_id and previous_group_id:
