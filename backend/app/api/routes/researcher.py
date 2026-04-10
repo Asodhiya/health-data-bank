@@ -131,6 +131,8 @@ async def get_submission_detail(
             SubmissionAnswerItem(
                 field_id=a.field_id,
                 field_label=a.field_label,
+                element_label=getattr(a, "element_label", None),
+                element_unit=getattr(a, "element_unit", None),
                 value_text=a.value_text,
                 value_number=float(a.value_number) if a.value_number is not None else None,
                 value_date=str(a.value_date) if a.value_date else None,

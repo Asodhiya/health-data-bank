@@ -576,9 +576,26 @@ class GoalTemplateQuery:
         ]
 
     async def create_template(self, payload: GoalTemplateCreate, created_by: uuid.UUID):
+        existing_active_template = await self.db.scalar(
+            select(GoalTemplate.template_id)
+            .where(GoalTemplate.element_id == payload.element_id)
+            .where(GoalTemplate.is_active == True)
+            .limit(1)
+        )
+        if existing_active_template:
+            raise HTTPException(
+                status_code=409,
+                detail="A goal template already exists for this data element.",
+            )
         template = GoalTemplate(**payload.model_dump(), created_by=created_by)
         self.db.add(template)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            raise HTTPException(
+                status_code=409,
+                detail="A goal template already exists for this data element.",
+            )
         await self.db.refresh(template)
         return template
 
@@ -586,9 +603,29 @@ class GoalTemplateQuery:
         template = await self.db.get(GoalTemplate, template_id)
         if not template:
             raise HTTPException(status_code=404, detail="Goal template not found")
+        next_element_id = payload.element_id if payload.element_id is not None else template.element_id
+        if next_element_id is not None:
+            existing_active_template = await self.db.scalar(
+                select(GoalTemplate.template_id)
+                .where(GoalTemplate.element_id == next_element_id)
+                .where(GoalTemplate.is_active == True)
+                .where(GoalTemplate.template_id != template_id)
+                .limit(1)
+            )
+            if existing_active_template:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A goal template already exists for this data element.",
+                )
         for field, value in payload.model_dump(exclude_none=True).items():
            setattr(template, field, value)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            raise HTTPException(
+                status_code=409,
+                detail="A goal template already exists for this data element.",
+            )
         await self.db.refresh(template)
         return template
 
@@ -627,8 +664,27 @@ class GoalTemplateQuery:
             raise HTTPException(status_code=404, detail="Goal template not found")
         if template.is_active:
             raise HTTPException(status_code=400, detail="Template is already active")
+        existing_active_template = await self.db.scalar(
+            select(GoalTemplate.template_id)
+            .where(GoalTemplate.element_id == template.element_id)
+            .where(GoalTemplate.is_active == True)
+            .where(GoalTemplate.template_id != template_id)
+            .limit(1)
+        )
+        if existing_active_template:
+            raise HTTPException(
+                status_code=409,
+                detail="A goal template already exists for this data element.",
+            )
         template.is_active = True
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="A goal template already exists for this data element.",
+            )
         return {"msg": "Template restored"}
 
     async def get_template_stats(self, template_id: uuid.UUID, granularity: str = "month"):
@@ -980,22 +1036,31 @@ class DataElementQuery:
         if not element.is_active:
             raise HTTPException(status_code=400, detail="Data element is inactive and cannot be mapped")
 
-        # Check if this exact mapping already exists
         existing = await self.db.execute(
-            select(FieldElementMap).where(
-                FieldElementMap.field_id == field_id,
-                FieldElementMap.element_id == element_id,
-            )
+            select(FieldElementMap).where(FieldElementMap.field_id == field_id)
         )
-        if existing.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="This field is already mapped to the specified element")
+        mapping = existing.scalar_one_or_none()
+        if mapping:
+            if mapping.element_id == element_id:
+                mapping.transform_rule = transform_rule
+                await self.db.flush()
+                await self.db.refresh(mapping)
+                return mapping
+            mapping.element_id = element_id
+            mapping.transform_rule = transform_rule
+            try:
+                await self.db.flush()
+            except IntegrityError:
+                raise HTTPException(status_code=409, detail="This field is already mapped to another data element")
+            await self.db.refresh(mapping)
+            return mapping
 
         mapping = FieldElementMap(field_id=field_id, element_id=element_id, transform_rule=transform_rule)
         self.db.add(mapping)
         try:
             await self.db.flush()
         except IntegrityError:
-            raise HTTPException(status_code=409, detail="This field is already mapped to the specified element")
+            raise HTTPException(status_code=409, detail="This field is already mapped to another data element")
         await self.db.refresh(mapping)
         return mapping
 
@@ -2650,12 +2715,16 @@ class CaretakersQuery:
                 SubmissionAnswer.field_id,
                 FormField.label.label("field_label"),
                 FormField.field_type.label("field_type"),
+                DataElement.label.label("element_label"),
+                DataElement.unit.label("element_unit"),
                 SubmissionAnswer.value_text,
                 SubmissionAnswer.value_number,
                 SubmissionAnswer.value_date,
                 SubmissionAnswer.value_json,
             )
             .join(FormField, FormField.field_id == SubmissionAnswer.field_id)
+            .outerjoin(FieldElementMap, FieldElementMap.field_id == SubmissionAnswer.field_id)
+            .outerjoin(DataElement, DataElement.element_id == FieldElementMap.element_id)
             .where(SubmissionAnswer.submission_id == submission_id)
         )).all()
 
@@ -2719,6 +2788,8 @@ class CaretakersQuery:
                     field_id=answer.field_id,
                     field_label=answer.field_label,
                     field_type=answer.field_type,
+                    element_label=answer.element_label,
+                    element_unit=answer.element_unit,
                     value_text=value_text,
                     value_number=answer.value_number,
                     value_date=answer.value_date,

@@ -160,6 +160,8 @@ class GroupDeployedFormItem(BaseModel):
 class SubmissionAnswerItem(BaseModel):
     field_id: Optional[UUID] = None
     field_label: Optional[str] = None
+    element_label: Optional[str] = None
+    element_unit: Optional[str] = None
     value_text: Optional[str] = None
     value_number: Optional[float] = None
     value_date: Optional[str] = None

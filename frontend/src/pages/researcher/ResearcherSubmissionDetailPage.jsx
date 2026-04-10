@@ -10,6 +10,13 @@ function displayAnswerValue(answer) {
   return "—";
 }
 
+function displayAnswerLabel(answer) {
+  if (answer.element_label) {
+    return `${answer.element_label}${answer.element_unit ? ` (${answer.element_unit})` : ""}`;
+  }
+  return answer.field_label || answer.field_id || "Unnamed field";
+}
+
 export default function ResearcherSubmissionDetailPage() {
   const { participantId, submissionId } = useParams();
   const [detail, setDetail] = useState(null);
@@ -79,7 +86,7 @@ export default function ResearcherSubmissionDetailPage() {
                   {(detail.answers || []).map((answer, index) => (
                     <tr key={`${answer.field_id || "field"}-${index}`} className="hover:bg-slate-50">
                       <td className="px-4 py-3 text-slate-700">
-                        {answer.field_label || answer.field_id || "Unnamed field"}
+                        {displayAnswerLabel(answer)}
                       </td>
                       <td className="px-4 py-3 text-slate-700">{displayAnswerValue(answer)}</td>
                     </tr>
