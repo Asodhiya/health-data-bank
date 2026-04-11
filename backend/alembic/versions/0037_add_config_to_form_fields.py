@@ -7,6 +7,7 @@ Create Date: 2026-04-10
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 from sqlalchemy.dialects.postgresql import JSONB
 
 
@@ -17,7 +18,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("form_fields", sa.Column("config", JSONB, nullable=True))
+    conn = op.get_bind()
+    columns = [c["name"] for c in inspect(conn).get_columns("form_fields")]
+    if "config" not in columns:
+        op.add_column("form_fields", sa.Column("config", JSONB, nullable=True))
 
 
 def downgrade() -> None:

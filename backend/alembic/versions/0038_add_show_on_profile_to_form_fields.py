@@ -7,6 +7,7 @@ Create Date: 2026-04-11
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 revision = "0038"
@@ -16,10 +17,13 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "form_fields",
-        sa.Column("show_on_profile", sa.Boolean(), server_default=sa.text("FALSE")),
-    )
+    conn = op.get_bind()
+    columns = [c["name"] for c in inspect(conn).get_columns("form_fields")]
+    if "show_on_profile" not in columns:
+        op.add_column(
+            "form_fields",
+            sa.Column("show_on_profile", sa.Boolean(), server_default=sa.text("FALSE")),
+        )
 
 
 def downgrade() -> None:
