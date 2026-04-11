@@ -267,8 +267,50 @@ async def get_intake_form(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_current_user),
 ):
-    """Return the intake form structure (form_id + fields + options) so the frontend knows field IDs."""
+    """Return the intake form structure (form_id + fields + options) so the frontend knows field IDs.
+
+    If the participant has a previous (possibly invalidated) submission, its
+    answers are returned as ``previous_answers`` so the frontend can pre-fill
+    unchanged fields instead of making the participant redo everything.
+    """
     form = await _get_intake_form(db)
+
+    # Look for previous answers to pre-fill the form
+    previous_answers = None
+    participant = await _get_participant(current_user.user_id, db)
+    if participant:
+        sub_result = await db.execute(
+            select(FormSubmission)
+            .where(
+                FormSubmission.form_id == form.form_id,
+                FormSubmission.participant_id == participant.participant_id,
+            )
+            .order_by(FormSubmission.submitted_at.desc().nulls_last())
+            .limit(1)
+        )
+        submission = sub_result.scalar_one_or_none()
+        if submission:
+            ans_result = await db.execute(
+                select(SubmissionAnswer).where(
+                    SubmissionAnswer.submission_id == submission.submission_id,
+                )
+            )
+            current_field_ids = {f.field_id for f in form.fields}
+            prev = {}
+            for answer in ans_result.scalars().all():
+                if answer.field_id not in current_field_ids:
+                    continue
+                if answer.value_json is not None:
+                    value = answer.value_json
+                elif answer.value_number is not None:
+                    num = answer.value_number
+                    value = int(num) if num == int(num) else num
+                else:
+                    value = answer.value_text
+                prev[str(answer.field_id)] = value
+            if prev:
+                previous_answers = prev
+
     return {
         "form_id": form.form_id,
         "title": form.title,
@@ -277,6 +319,7 @@ async def get_intake_form(
             _serialize_intake_field(f)
             for f in sorted(form.fields, key=lambda x: x.display_order)
         ],
+        "previous_answers": previous_answers,
     }
 
 

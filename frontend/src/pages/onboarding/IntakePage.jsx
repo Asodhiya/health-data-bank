@@ -507,7 +507,18 @@ export default function IntakePage() {
         if (cancelled) return;
         const nextFields = Array.isArray(data?.fields) ? data.fields : [];
         setFields(nextFields);
-        setAnswers(buildInitialAnswers(nextFields));
+
+        // Pre-fill with previous answers when available (e.g. after form update)
+        const initial = buildInitialAnswers(nextFields);
+        if (data.previous_answers) {
+          for (const field of nextFields) {
+            const prev = data.previous_answers[field.field_id];
+            if (prev !== undefined && prev !== null) {
+              initial[field.field_id] = prev;
+            }
+          }
+        }
+        setAnswers(initial);
       } catch (error) {
         if (!cancelled) {
           setFetchError(error.message || "Form not configured. Please contact an administrator.");

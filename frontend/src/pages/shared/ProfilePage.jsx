@@ -336,22 +336,16 @@ function ParticipantFields({ form, set, editing, profile, intakeProfileFields = 
         </span>
       </div>
 
-      {intakeProfileFields.length > 0 && (
-        <>
-          <hr className="border-slate-100 my-5" />
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Additional Information</p>
-          {intakeProfileFields.map((field, i) => (
-            <div key={i} className="mb-3.5">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                {field.label.toUpperCase()}
-              </span>
-              <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
-                {field.value || '—'}
-              </span>
-            </div>
-          ))}
-        </>
-      )}
+      {intakeProfileFields.map((field, i) => (
+        <div key={i} className="mb-3.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            {field.label.toUpperCase()}
+          </span>
+          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
+            {field.value || '—'}
+          </span>
+        </div>
+      ))}
     </>
   );
 }
