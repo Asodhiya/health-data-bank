@@ -84,6 +84,7 @@ function SearchableSelect({ value, onChange, options, placeholder = "Start typin
         type="text"
         value={query}
         onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
         onChange={(event) => {
           setQuery(event.target.value);
           setOpen(true);
@@ -116,14 +117,6 @@ function SearchableSelect({ value, onChange, options, placeholder = "Start typin
             ))
           )}
         </div>
-      )}
-      {open && (
-        <button
-          type="button"
-          aria-label="Close dropdown"
-          className="fixed inset-0 z-10 cursor-default"
-          onClick={() => setOpen(false)}
-        />
       )}
     </div>
   );
@@ -202,6 +195,7 @@ function SearchableMultiSelect({ value, onChange, options, placeholder = "Start 
           type="text"
           value={query}
           onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
           onChange={(e) => {
             setQuery(e.target.value);
             setOpen(true);
@@ -240,14 +234,6 @@ function SearchableMultiSelect({ value, onChange, options, placeholder = "Start 
             </button>
           ))}
         </div>
-      )}
-      {open && (
-        <button
-          type="button"
-          aria-label="Close dropdown"
-          className="fixed inset-0 z-10 cursor-default"
-          onClick={() => setOpen(false)}
-        />
       )}
     </div>
   );

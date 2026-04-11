@@ -446,7 +446,25 @@ async def submit_intake(
     if existing_sub:
         return {"message": "Intake already submitted.", "submission_id": str(existing_sub.submission_id)}
 
-    # 3. Create the form submission (no deployment check — intake is open to all participants)
+    # 3. Remove old invalidated submissions (submitted_at IS NULL) so stale
+    #    answers don't resurface during pre-fill after repeated admin resets.
+    old_subs = await db.execute(
+        select(FormSubmission.submission_id).where(
+            FormSubmission.form_id == form.form_id,
+            FormSubmission.participant_id == participant.participant_id,
+            FormSubmission.submitted_at.is_(None),
+        )
+    )
+    old_sub_ids = list(old_subs.scalars().all())
+    if old_sub_ids:
+        await db.execute(
+            sa_delete(SubmissionAnswer).where(SubmissionAnswer.submission_id.in_(old_sub_ids))
+        )
+        await db.execute(
+            sa_delete(FormSubmission).where(FormSubmission.submission_id.in_(old_sub_ids))
+        )
+
+    # 4. Create the form submission (no deployment check — intake is open to all participants)
     submission = FormSubmission(
         form_id=form.form_id,
         participant_id=participant.participant_id,
