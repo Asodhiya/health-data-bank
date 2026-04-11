@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../../services/api";
@@ -15,7 +15,6 @@ const IconUp = () => <I d="M5 15l7-7 7 7" />;
 const IconDown = () => <I d="M19 9l-7 7-7-7" />;
 const IconEdit = () => <I d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />;
 const IconEye = () => <I d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />;
-const IconSave = () => <I d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />;
 const Spinner = () => (
   <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -36,17 +35,17 @@ const FIELD_TYPES = [
   { value: "number", label: "Number" },
   { value: "date", label: "Date" },
   { value: "single_select", label: "Single select" },
-  { value: "multi_select", label: "Multi select" },
-  { value: "dropdown", label: "Dropdown" },
+  { value: "multi_select", label: "Dropdown Multi select" },
+  { value: "dropdown", label: "Dropdown Single select" },
   { value: "textarea", label: "Text area" },
 ];
 
-const PROFILE_FIELD_OPTIONS = [
+const PROFILE_FIELD_FALLBACK = [
   { value: "", label: "None" },
   { value: "dob", label: "Date of birth" },
   { value: "gender", label: "Gender" },
   { value: "pronouns", label: "Pronouns" },
-  { value: "primary_language", label: "Primary language" },
+  { value: "primary_language", label: "Primary languages" },
   { value: "country_of_origin", label: "Country of origin" },
   { value: "marital_status", label: "Marital status" },
   { value: "highest_education_level", label: "Highest education level" },
@@ -95,7 +94,7 @@ function ConsentEditor({ consent, setConsent }) {
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
         <h3 className="text-sm font-bold text-slate-700 mb-1">Consent form template</h3>
         <p className="text-xs text-slate-400 mb-5">
-          Each item becomes a checkbox the participant must agree to during onboarding
+          All items are required — each becomes a checkbox the participant must agree to during onboarding
         </p>
 
         <div className="space-y-4">
@@ -149,15 +148,6 @@ function ConsentEditor({ consent, setConsent }) {
                     rows={2}
                     placeholder="Enter consent item text..."
                   />
-                  <label className="flex items-center gap-2 mt-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={item.required}
-                      onChange={(e) => updateItem(idx, "required", e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-xs font-medium text-slate-500">Required</span>
-                  </label>
                 </div>
 
                 {/* Action buttons */}
@@ -353,9 +343,93 @@ function BackgroundEditor({ background, setBackground }) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+//  PROFILE FIELD SEARCH MODAL
+// ═════════════════════════════════════════════════════════════════════════════
+function ProfileFieldModal({ value, dataElements, onSelect, onClose }) {
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return dataElements.filter(
+      (e) =>
+        e.label?.toLowerCase().includes(q) ||
+        e.code?.toLowerCase().includes(q) ||
+        e.description?.toLowerCase().includes(q)
+    );
+  }, [search, dataElements]);
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 border-b border-slate-100">
+          <h3 className="text-lg font-bold text-slate-800">Profile Field Mapping</h3>
+          <p className="text-sm text-slate-500 mt-0.5">Select a data element to link this field to.</p>
+          <input
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by label, code or description…"
+            className="w-full mt-3 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
+          />
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-3 space-y-2">
+          {/* None option */}
+          <button
+            onClick={() => { onSelect(""); onClose(); }}
+            className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${
+              !value ? "border-blue-300 bg-blue-50 ring-1 ring-blue-200" : "border-slate-200 hover:border-blue-200 hover:bg-blue-50/40"
+            }`}
+          >
+            <span className="text-sm font-semibold text-slate-400 italic">None</span>
+          </button>
+
+          {filtered.length === 0 && (
+            <div className="text-center py-10 text-slate-400">
+              <p className="text-sm">No elements found</p>
+              <p className="text-xs mt-1">Try a different search</p>
+            </div>
+          )}
+          {filtered.map((e) => {
+            const isSelected = e.code === value;
+            return (
+              <button
+                key={e.element_id || e.code}
+                onClick={() => { onSelect(e.code); onClose(); }}
+                className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${
+                  isSelected ? "border-blue-300 bg-blue-50 ring-1 ring-blue-200" : "border-slate-200 hover:border-blue-200 hover:bg-blue-50/40"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-slate-800 truncate">{e.label || e.code}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {e.unit && <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{e.unit}</span>}
+                    <span className="text-xs text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded">{e.datatype || "text"}</span>
+                    {isSelected && <span className="text-xs text-emerald-600 font-semibold">✓ Linked</span>}
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5 font-mono">{e.code}</p>
+                {e.description && (
+                  <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">{e.description}</p>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="p-4 border-t border-slate-100 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg transition">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 //  INTAKE FORM EDITOR
 // ═════════════════════════════════════════════════════════════════════════════
-function IntakeEditor({ intakeFields, setIntakeFields }) {
+function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, dataElements }) {
+  const [profileModalIdx, setProfileModalIdx] = useState(null);
   const hasSelectOptions = (type) => ["single_select", "multi_select", "dropdown"].includes(type);
   const mappedCounts = intakeFields.reduce((acc, field) => {
     if (!field.profile_field) return acc;
@@ -366,16 +440,31 @@ function IntakeEditor({ intakeFields, setIntakeFields }) {
   const updateField = (idx, key, value) => {
     const next = [...intakeFields];
     next[idx] = { ...next[idx], [key]: value };
-    if (key === "field_type" && !hasSelectOptions(value)) {
-      next[idx].options = [];
+    if (key === "field_type") {
+      if (!hasSelectOptions(value)) next[idx].options = [];
+      next[idx].config = {};
     }
     setIntakeFields(next);
+  };
+
+  const updateConfig = (idx, configKey, configValue) => {
+    setIntakeFields((prev) => {
+      const next = [...prev];
+      const prevConfig = next[idx].config || {};
+      if (configValue === undefined || configValue === null || configValue === false) {
+        const { [configKey]: _, ...rest } = prevConfig;
+        next[idx] = { ...next[idx], config: rest };
+      } else {
+        next[idx] = { ...next[idx], config: { ...prevConfig, [configKey]: configValue } };
+      }
+      return next;
+    });
   };
 
   const addField = () => {
     setIntakeFields([
       ...intakeFields,
-      { label: "", field_type: "text", is_required: true, display_order: intakeFields.length + 1, profile_field: "", options: [] },
+      { label: "", field_type: "text", is_required: true, display_order: intakeFields.length + 1, profile_field: "", show_on_profile: false, config: {}, options: [] },
     ]);
   };
 
@@ -458,27 +547,63 @@ function IntakeEditor({ intakeFields, setIntakeFields }) {
                       />
                       <span className="text-xs font-medium text-slate-500">Required</span>
                     </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={field.show_on_profile || false}
+                        onChange={(e) => updateField(idx, "show_on_profile", e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span className="text-xs font-medium text-slate-500">Show on profile</span>
+                    </label>
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                       Profile field mapping
                     </label>
-                    <div className="flex items-center gap-3">
-                      <select
-                        value={field.profile_field || ""}
-                        onChange={(e) => updateField(idx, "profile_field", e.target.value)}
-                        className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                    <div className="flex items-center gap-2">
+                      <div
+                        onClick={() => setProfileModalIdx(idx)}
+                        className={`flex-1 flex items-center justify-between px-3 py-2 text-sm border rounded-lg cursor-pointer transition ${
+                          field.profile_field
+                            ? "border-blue-300 bg-blue-50 text-blue-800"
+                            : "border-slate-200 bg-white text-slate-400 hover:border-slate-300"
+                        }`}
                       >
-                        {PROFILE_FIELD_OPTIONS.map((opt) => (
-                          <option key={opt.value || "none"} value={opt.value}>{opt.label}</option>
-                        ))}
-                      </select>
+                        <span className="truncate">
+                          {field.profile_field
+                            ? profileFieldOptions.find((o) => o.value === field.profile_field)?.label || field.profile_field
+                            : "Select a data element…"}
+                        </span>
+                        <svg className="h-4 w-4 shrink-0 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 9l6 6 6-6" />
+                        </svg>
+                      </div>
+                      {field.profile_field && (
+                        <button
+                          onClick={() => updateField(idx, "profile_field", "")}
+                          title="Remove mapping"
+                          className="p-2 text-slate-400 hover:text-rose-500 transition shrink-0"
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
                       {field.profile_field && mappedCounts[field.profile_field] > 1 && (
                         <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700">
                           Duplicate mapping
                         </span>
                       )}
                     </div>
+                    {profileModalIdx === idx && (
+                      <ProfileFieldModal
+                        value={field.profile_field}
+                        dataElements={dataElements}
+                        onSelect={(code) => updateField(idx, "profile_field", code)}
+                        onClose={() => setProfileModalIdx(null)}
+                      />
+                    )}
                   </div>
                   {hasSelectOptions(field.field_type) && (
                     <div className="pl-2 border-l-2 border-violet-200 space-y-2">
@@ -506,6 +631,162 @@ function IntakeEditor({ intakeFields, setIntakeFields }) {
                       >
                         + Add option
                       </button>
+                    </div>
+                  )}
+
+                  {/* ── Field config panel ── */}
+                  {(field.field_type === "number" || field.field_type === "date" || field.field_type === "dropdown" || field.field_type === "multi_select" || field.field_type === "single_select") && (
+                    <div className="pl-2 border-l-2 border-blue-200 space-y-2.5 mt-1">
+                      <span className="text-xs font-medium text-blue-600">Field configuration</span>
+
+                      {/* Number: min / max */}
+                      {field.field_type === "number" && (
+                        <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                            Min
+                            <input
+                              type="number"
+                              value={field.config?.min ?? ""}
+                              onChange={(e) => updateConfig(idx, "min", e.target.value === "" ? undefined : Number(e.target.value))}
+                              className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            />
+                          </label>
+                          <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                            Max
+                            <input
+                              type="number"
+                              value={field.config?.max ?? ""}
+                              onChange={(e) => updateConfig(idx, "max", e.target.value === "" ? undefined : Number(e.target.value))}
+                              className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            />
+                          </label>
+                        </div>
+                      )}
+
+                      {/* Date: validation rule */}
+                      {field.field_type === "date" && (
+                        <label className="flex items-center gap-2 text-xs text-slate-500">
+                          Validation
+                          <select
+                            value={field.config?.max_date_rule || ""}
+                            onChange={(e) => updateConfig(idx, "max_date_rule", e.target.value || undefined)}
+                            className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          >
+                            <option value="">None</option>
+                            <option value="adult_18">Must be 18+</option>
+                          </select>
+                        </label>
+                      )}
+
+                      {/* Dropdown / Multi-select: searchable, predefined list, creatable */}
+                      {(field.field_type === "dropdown" || field.field_type === "multi_select") && (
+                        <>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!field.config?.searchable}
+                              onChange={(e) => {
+                                updateConfig(idx, "searchable", e.target.checked || undefined);
+                                if (!e.target.checked) {
+                                  updateConfig(idx, "creatable", undefined);
+                                  updateConfig(idx, "predefined_list", undefined);
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-xs text-slate-600">Searchable</span>
+                          </label>
+                          {field.config?.searchable && (
+                            <>
+                              <label className="flex items-center gap-2 text-xs text-slate-500 ml-6">
+                                Predefined list
+                                <select
+                                  value={field.config?.predefined_list || ""}
+                                  onChange={(e) => updateConfig(idx, "predefined_list", e.target.value || undefined)}
+                                  className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                >
+                                  <option value="">None (use manual options)</option>
+                                  <option value="languages">Languages</option>
+                                  <option value="countries">Countries</option>
+                                </select>
+                              </label>
+                              {field.field_type === "multi_select" && (
+                                <label className="flex items-center gap-2 cursor-pointer ml-6">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!field.config?.creatable}
+                                    onChange={(e) => updateConfig(idx, "creatable", e.target.checked || undefined)}
+                                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className="text-xs text-slate-600">Allow custom entries</span>
+                                </label>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )}
+
+                      {/* Single select: conditional sub-field */}
+                      {field.field_type === "single_select" && (
+                        <>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!field.config?.conditional}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  updateConfig(idx, "conditional", { trigger_value: "Yes", sub_field_type: "number", sub_config: { min: 0, max: 10 } });
+                                } else {
+                                  updateConfig(idx, "conditional", undefined);
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-xs text-slate-600">Conditional sub-field</span>
+                          </label>
+                          {field.config?.conditional && (
+                            <div className="ml-6 space-y-2 p-2.5 bg-white border border-slate-200 rounded-lg">
+                              <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                                Trigger value
+                                <input
+                                  type="text"
+                                  value={field.config.conditional.trigger_value || ""}
+                                  onChange={(e) => updateConfig(idx, "conditional", { ...field.config.conditional, trigger_value: e.target.value })}
+                                  className="w-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                  placeholder="Yes"
+                                />
+                              </label>
+                              <p className="text-[11px] text-slate-400">Sub-field type: Number</p>
+                              <div className="flex items-center gap-3">
+                                <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                                  Min
+                                  <input
+                                    type="number"
+                                    value={field.config.conditional.sub_config?.min ?? ""}
+                                    onChange={(e) => updateConfig(idx, "conditional", {
+                                      ...field.config.conditional,
+                                      sub_config: { ...(field.config.conditional.sub_config || {}), min: e.target.value === "" ? undefined : Number(e.target.value) },
+                                    })}
+                                    className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                  />
+                                </label>
+                                <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                                  Max
+                                  <input
+                                    type="number"
+                                    value={field.config.conditional.sub_config?.max ?? ""}
+                                    onChange={(e) => updateConfig(idx, "conditional", {
+                                      ...field.config.conditional,
+                                      sub_config: { ...(field.config.conditional.sub_config || {}), max: e.target.value === "" ? undefined : Number(e.target.value) },
+                                    })}
+                                    className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -553,7 +834,7 @@ function IntakeEditor({ intakeFields, setIntakeFields }) {
 // ═════════════════════════════════════════════════════════════════════════════
 //  PREVIEW (participant view)
 // ═════════════════════════════════════════════════════════════════════════════
-function Preview({ consent, background, intakeFields }) {
+function Preview({ consent, background, intakeFields, profileFieldOptions }) {
   const [previewTab, setPreviewTab] = useState("consent");
 
   return (
@@ -609,9 +890,6 @@ function ConsentPreview({ consent }) {
             <input type="checkbox" disabled className="w-4 h-4 mt-0.5 rounded border-slate-300" />
             <div className="flex-1">
               <p className="text-sm text-slate-700">{item.text || "(empty)"}</p>
-              {item.required && (
-                <span className="text-xs font-bold text-rose-500 mt-1 inline-block">Required *</span>
-              )}
             </div>
           </div>
         ))}
@@ -676,7 +954,7 @@ function IntakePreview({ intakeFields }) {
             </p>
             {field.profile_field && (
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-blue-600">
-                Maps to {PROFILE_FIELD_OPTIONS.find((opt) => opt.value === field.profile_field)?.label || field.profile_field}
+                Maps to {profileFieldOptions.find((opt) => opt.value === field.profile_field)?.label || field.profile_field}
               </p>
             )}
             {["single_select", "multi_select", "dropdown"].includes(field.field_type) ? (
@@ -712,6 +990,7 @@ export default function OnboardingManagementPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [confirmModal, setConfirmModal] = useState(null); // { count, onConfirm }
   const [dirty, setDirty] = useState(false);
 
   // Consent state
@@ -720,23 +999,36 @@ export default function OnboardingManagementPage() {
   const [background, setBackgroundRaw] = useState({ title: "", subtitle: "", sections: [] });
   // Intake state
   const [intakeFields, setIntakeFieldsRaw] = useState([]);
+  const [profileFieldOptions, setProfileFieldOptions] = useState(PROFILE_FIELD_FALLBACK);
+  const [dataElements, setDataElements] = useState([]);
 
   // Wrap setters to track dirty state
   const setConsent = useCallback((val) => { setConsentRaw(val); setDirty(true); setSuccess(""); }, []);
   const setBackground = useCallback((val) => { setBackgroundRaw(val); setDirty(true); setSuccess(""); }, []);
-  const setIntakeFields = useCallback((val) => { setIntakeFieldsRaw(val); setDirty(true); setSuccess(""); }, []);
+  const setIntakeFields = useCallback((val) => {
+    setIntakeFieldsRaw(typeof val === "function" ? (prev) => { const next = val(prev); setDirty(true); setSuccess(""); return next; } : val);
+    if (typeof val !== "function") { setDirty(true); setSuccess(""); }
+  }, []);
 
   // Fetch both templates on mount
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [consentData, bgData, intakeData] = await Promise.all([
+        const [consentData, bgData, intakeData, elements] = await Promise.all([
           api.getConsentForm(),
           api.getBackgroundInfo(),
           api.getAdminIntakeForm().catch(() => null),
+          api.listElements().catch(() => []),
         ]);
         if (cancelled) return;
+        if (elements.length > 0) {
+          setDataElements(elements);
+          setProfileFieldOptions([
+            { value: "", label: "None" },
+            ...elements.map((el) => ({ value: el.code, label: el.label })),
+          ]);
+        }
         setConsentRaw({
           title: consentData.title || "",
           subtitle: consentData.subtitle || "",
@@ -750,11 +1042,14 @@ export default function OnboardingManagementPage() {
         if (intakeData) {
           setIntakeFieldsRaw(
             (intakeData.fields || []).map((f) => ({
+              field_id: f.field_id || null,
               label: f.label,
               field_type: f.field_type,
               is_required: f.is_required,
               display_order: f.display_order,
               profile_field: f.profile_field || "",
+              config: f.config || {},
+              element_id: f.element_id || null,
               options: (f.options || []).map((o) => ({
                 label: o.label || "",
                 value: o.value,
@@ -771,6 +1066,39 @@ export default function OnboardingManagementPage() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  const doPublish = async () => {
+    setError("");
+    setSaving(true);
+    try {
+      const [,, intakeResult] = await Promise.all([
+        api.updateConsentTemplate({
+          title: consent.title,
+          subtitle: consent.subtitle || null,
+          items: consent.items,
+        }),
+        api.updateBackgroundTemplate({
+          title: background.title,
+          subtitle: background.subtitle || null,
+          sections: background.sections,
+        }),
+        api.updateIntakeForm({
+          fields: intakeFields.map((f, i) => ({ ...f, display_order: i + 1 })),
+        }),
+      ]);
+      const resetCount = intakeResult?.participants_reset || 0;
+      setSuccess(
+        resetCount > 0
+          ? `Published. ${resetCount} participant${resetCount === 1 ? "" : "s"} will need to redo the intake form.`
+          : "Onboarding templates published successfully."
+      );
+      setDirty(false);
+    } catch (err) {
+      setError(err.message || "Failed to publish templates.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleSave = async () => {
     // Validate
@@ -795,31 +1123,18 @@ export default function OnboardingManagementPage() {
       return;
     }
 
-    setError("");
-    setSaving(true);
+    // Check if any completed participants would be affected
     try {
-      await Promise.all([
-        api.updateConsentTemplate({
-          title: consent.title,
-          subtitle: consent.subtitle || null,
-          items: consent.items,
-        }),
-        api.updateBackgroundTemplate({
-          title: background.title,
-          subtitle: background.subtitle || null,
-          sections: background.sections,
-        }),
-        api.updateIntakeForm({
-          fields: intakeFields.map((f, i) => ({ ...f, display_order: i + 1 })),
-        }),
-      ]);
-      setSuccess("Onboarding templates saved successfully. A new version has been created.");
-      setDirty(false);
-    } catch (err) {
-      setError(err.message || "Failed to save templates.");
-    } finally {
-      setSaving(false);
+      const { count } = await api.getIntakeAffectedCount();
+      if (count > 0) {
+        setConfirmModal({ count, onConfirm: doPublish });
+        return;
+      }
+    } catch {
+      // If the check fails, proceed without confirmation
     }
+
+    await doPublish();
   };
 
   if (loading) {
@@ -834,6 +1149,34 @@ export default function OnboardingManagementPage() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
+      {/* Confirmation modal */}
+      {confirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-bold text-slate-800 mb-2">Confirm publish</h3>
+            <p className="text-sm text-slate-600 mb-5">
+              Publishing changes will require{" "}
+              <span className="font-semibold text-amber-700">{confirmModal.count} participant{confirmModal.count === 1 ? "" : "s"}</span>{" "}
+              to redo the intake form. Are you sure?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmModal(null)}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setConfirmModal(null); confirmModal.onConfirm(); }}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
+              >
+                Publish anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Page header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -847,12 +1190,16 @@ export default function OnboardingManagementPage() {
           disabled={saving || !dirty}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
             dirty && !saving
-              ? "bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+              ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
               : "bg-slate-100 text-slate-400 cursor-not-allowed"
           }`}
         >
-          {saving ? <Spinner /> : <IconSave />}
-          {saving ? "Saving..." : "Save changes"}
+          {saving ? <Spinner /> : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          )}
+          {saving ? "Publishing..." : "Publish"}
         </button>
       </div>
 
@@ -890,8 +1237,8 @@ export default function OnboardingManagementPage() {
       {/* Tab content */}
       {activeTab === "consent" && <ConsentEditor consent={consent} setConsent={setConsent} />}
       {activeTab === "background" && <BackgroundEditor background={background} setBackground={setBackground} />}
-      {activeTab === "intake" && <IntakeEditor intakeFields={intakeFields} setIntakeFields={setIntakeFields} />}
-      {activeTab === "preview" && <Preview consent={consent} background={background} intakeFields={intakeFields} />}
+      {activeTab === "intake" && <IntakeEditor intakeFields={intakeFields} setIntakeFields={setIntakeFields} profileFieldOptions={profileFieldOptions} dataElements={dataElements} />}
+      {activeTab === "preview" && <Preview consent={consent} background={background} intakeFields={intakeFields} profileFieldOptions={profileFieldOptions} />}
     </div>
   );
 }

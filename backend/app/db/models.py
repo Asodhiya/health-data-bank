@@ -345,8 +345,11 @@ class FormField(Base):
     profile_field: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_required: Mapped[bool | None] = mapped_column(Boolean, server_default=text("FALSE"))
     display_order: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
+    config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    show_on_profile: Mapped[bool | None] = mapped_column(Boolean, server_default=text("FALSE"))
     parent_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("form_fields.field_id"))
     options: Mapped[List["FieldOption"]] = relationship("FieldOption", back_populates="field", cascade="all, delete-orphan", foreign_keys="[FieldOption.field_id]")
+    element_maps: Mapped[List["FieldElementMap"]] = relationship("FieldElementMap", foreign_keys="[FieldElementMap.field_id]", cascade="all, delete-orphan")
     form: Mapped["SurveyForm"] = relationship("SurveyForm", back_populates="fields")
 
 class FieldOption(Base):

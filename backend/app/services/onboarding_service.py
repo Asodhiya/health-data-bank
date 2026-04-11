@@ -83,9 +83,9 @@ async def submit_consent(
         raise ValueError("Consent template not found.")
 
     for item in template.items:
-        if item.get("required") and answers.get(item["id"]) != "yes":
+        if answers.get(item["id"]) != "yes":
             raise ValueError(
-                f"Required consent item '{item['id']}' must be answered 'yes'."
+                f"Consent item '{item['id']}' must be agreed to."
             )
 
     consent = ParticipantConsent(

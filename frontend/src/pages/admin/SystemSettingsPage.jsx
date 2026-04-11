@@ -317,7 +317,7 @@ export default function SystemSettingsPage() {
                   disabled={maintenanceSaving}
                   className="px-5 py-2 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors flex items-center gap-2 disabled:opacity-70"
                 >
-                  {maintenanceSaving ? <><Spinner /> Saving…</> : <><IconCheck /> Save</>}
+                {maintenanceSaving ? <><Spinner /> Saving…</> : <><IconCheck /> {maintenance.enabled ? (maintenanceOriginal?.enabled ? "Save Changes" : "Start Maintenance Mode") : "Disable Maintenance Mode"}</>}
                 </button>
               </div>
             )}

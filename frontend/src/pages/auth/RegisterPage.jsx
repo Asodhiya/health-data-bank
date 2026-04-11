@@ -52,6 +52,7 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm,  setShowConfirm]  = useState(false);
   const [error,        setError]        = useState('');
+  const [fieldError,   setFieldError]   = useState(''); // 'username' | 'email' | ''
   const [loading,      setLoading]      = useState(false);
 
   // ── Validate token on mount ──
@@ -84,6 +85,7 @@ export default function RegisterPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setFieldError('');
 
     const failedRules = PASSWORD_RULES.filter((r) => !r.test(form.password));
     if (failedRules.length > 0) {
@@ -118,7 +120,10 @@ export default function RegisterPage() {
       // Registration successful — send to login with a success flag
       navigate('/login', { state: { registered: true } });
     } catch (err) {
-      setError(err.message || 'Registration failed');
+      const msg = err.message || 'Registration failed';
+      setError(msg);
+      if (msg.toLowerCase().includes('username')) setFieldError('username');
+      else if (msg.toLowerCase().includes('email')) setFieldError('email');
     } finally {
       setLoading(false);
     }
@@ -291,14 +296,17 @@ export default function RegisterPage() {
             </svg>
           </span>
           <input
-            className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+            className={`w-full pl-12 pr-4 py-3 bg-slate-50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-shadow ${fieldError === 'username' ? 'border-2 border-rose-400 focus:ring-rose-300' : 'border border-slate-200 focus:ring-blue-500'}`}
             placeholder="Username"
             value={form.username}
-            onChange={set('username')}
+            onChange={(e) => { setFieldError(''); set('username')(e); }}
             required
             autoComplete="username"
           />
         </div>
+        {fieldError === 'username' && (
+          <p className="text-xs text-rose-500 mt-1 ml-1">This username is already taken. Please choose a different one.</p>
+        )}
 
         {/* Password */}
         <div className="relative">

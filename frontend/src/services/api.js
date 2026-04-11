@@ -264,10 +264,14 @@ export const api = {
   },
 
 // ── Admin: Audit Logs ──
-  getAuditLogs: ({ limit = 20, offset = 0, action, user_id } = {}) => {
+  getAuditLogs: ({ limit = 20, offset = 0, action, user_id, search, date_from, date_to, actor_role } = {}) => {
     const params = new URLSearchParams({ limit, offset });
     if (action) params.set("action", action);
     if (user_id) params.set("user_id", user_id);
+    if (search?.trim()) params.set("search", search.trim());
+    if (date_from) params.set("date_from", date_from);
+    if (date_to) params.set("date_to", date_to);
+    if (actor_role && actor_role !== "all") params.set("actor_role", actor_role);
     return request(`/admin_only/audit-logs?${params.toString()}`);
   },
 
@@ -396,6 +400,9 @@ export const api = {
   adminGetUserGoals: (userId) =>
     request(`/admin_only/users/${userId}/goals`),
 
+  adminGetGroupGoals: (groupId) =>
+    request(`/admin_only/groups/${groupId}/goals`),
+
   // ── Admin: Invites ──
   adminListInvites: (limit, offset = 0) => {
     const params = new URLSearchParams();
@@ -411,7 +418,7 @@ export const api = {
   // ── Admin: User Management ──
   adminListUsers: () => request("/admin_only/users"),
   adminGetUserById: (userId) => request(`/admin_only/users/by-id/${userId}`),
-  adminListUsersPaged: async (limit = 50, offset = 0, search = "", sortField = "joined", sortDir = "desc") => {
+  adminListUsersPaged: async (limit = 50, offset = 0, search = "", sortField = "joined", sortDir = "desc", role = null, excludeGroupId = null, activeOnly = false) => {
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
@@ -421,6 +428,9 @@ export const api = {
     if (String(search || "").trim()) {
       params.set("search", String(search).trim());
     }
+    if (role) params.set("role", role);
+    if (excludeGroupId != null) params.set("exclude_group_id", String(excludeGroupId));
+    if (activeOnly) params.set("active_only", "true");
 
     try {
       return await request(`/admin_only/users/paged?${params.toString()}`);
@@ -536,6 +546,7 @@ export const api = {
 
   // ── Intake (onboarding) ──
   getIntakeForm: () => request('/onboarding/form'),
+  getProfileIntakeFields: () => request('/onboarding/profile-fields'),
 
   submitIntake: (payload) =>
     request('/onboarding', {
@@ -576,6 +587,8 @@ export const api = {
     }),
 
   getAdminIntakeForm: () => request('/onboarding/admin/intake-form'),
+
+  getIntakeAffectedCount: () => request('/onboarding/admin/intake-form/affected-count'),
 
   updateIntakeForm: (payload) =>
     request('/onboarding/admin/intake-form', {

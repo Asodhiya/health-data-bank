@@ -6,7 +6,7 @@ from app.core.security import PasswordHash, verify_password_async, generate_rese
 from app.schemas.schemas import UserSignup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.db.models import User, Role, GroupMember, ParticipantProfile, UserRole
+from app.db.models import User, Role, GroupMember, ParticipantProfile, CaretakerProfile, Group, UserRole
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone, timedelta
 from app.schemas.schemas import ForgotPasswordIn,Role_user_link
@@ -78,6 +78,17 @@ async def register_user_from_invite(
                     participant_id=participant_profile.participant_id,
                 )
             )
+
+    elif role.role_name == "caretaker" and invite.group_id:
+        caretaker_profile = await db.scalar(
+            select(CaretakerProfile).where(CaretakerProfile.user_id == new_user.user_id)
+        )
+        if caretaker_profile:
+            group = await db.scalar(
+                select(Group).where(Group.group_id == invite.group_id)
+            )
+            if group:
+                group.caretaker_id = caretaker_profile.caretaker_id
 
     await db.commit()
 
@@ -214,7 +225,11 @@ async def create_user_with_role(payload: UserSignup, role_name: str, db: AsyncSe
 
     user = await user_query.get_user(payload.username)
     if user:
-        raise HTTPException(status_code=409, detail="User already exists")
+        raise HTTPException(status_code=409, detail="Username is already taken. Please choose a different one.")
+
+    existing_email = await db.scalar(select(User).where(User.email == payload.email))
+    if existing_email:
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
 
     role = await role_query.get_role(role_name)
     if not role:

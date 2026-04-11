@@ -74,3 +74,33 @@ Your App Team
         server.starttls()
         server.login(EMAIL_USER, EMAIL_PASS)
         server.send_message(msg)
+
+
+def send_email_update_notification(to_email: str):
+    EMAIL_USER = os.getenv("EMAIL_USER")
+    EMAIL_PASS = os.getenv("EMAIL_PASS")
+
+    if not EMAIL_USER or not EMAIL_PASS:
+        raise RuntimeError("Email credentials not set")
+
+    msg = EmailMessage()
+    msg["Subject"] = "Your account email has been updated"
+    msg["From"] = f"Your App <{EMAIL_USER}>"
+    msg["To"] = to_email
+
+    msg.set_content(
+        f"""
+Hello,
+
+Your account email address has been successfully updated to this email address by an administrator.
+
+If you did not request or expect this change, please contact support immediately.
+
+Your App Team
+"""
+    )
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(EMAIL_USER, EMAIL_PASS)
+        server.send_message(msg)

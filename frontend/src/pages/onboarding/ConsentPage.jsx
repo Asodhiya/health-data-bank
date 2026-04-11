@@ -13,35 +13,6 @@ function formatDate() {
   });
 }
 
-/* Reusable YES / NO toggle component */
-function YesNoToggle({ value, onChange }) {
-  return (
-    <div className="flex gap-2 shrink-0">
-      <button
-        type="button"
-        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors border ${
-          value === 'yes'
-            ? 'bg-blue-600 text-white border-blue-600'
-            : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-        }`}
-        onClick={() => onChange('yes')}
-      >
-        Yes
-      </button>
-      <button
-        type="button"
-        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors border ${
-          value === 'no'
-            ? 'bg-slate-600 text-white border-slate-600'
-            : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-        }`}
-        onClick={() => onChange('no')}
-      >
-        No
-      </button>
-    </div>
-  );
-}
 
 export default function ConsentPage() {
   const navigate = useNavigate();
@@ -79,21 +50,17 @@ export default function ConsentPage() {
   useEffect(() => { sessionStorage.setItem('consent_answers', JSON.stringify(answers)); }, [answers]);
   useEffect(() => { sessionStorage.setItem('consent_signature', signature); }, [signature]);
 
-  const setAnswer = (id, val) => setAnswers({ ...answers, [id]: val });
+  const toggleAnswer = (id) => {
+    setAnswers((prev) => ({ ...prev, [id]: prev[id] === 'yes' ? 'no' : 'yes' }));
+  };
 
   /* Validation checks */
-  const allAnswered = consentItems.length > 0 && consentItems.every((c) => answers[c.id] !== undefined);
-  const requiredItems = consentItems.filter((c) => c.required);
-  const allRequiredYes = requiredItems.every((c) => answers[c.id] === 'yes');
-  const canSubmit = allAnswered && allRequiredYes && signature.trim().length > 0;
+  const allAgreed = consentItems.length > 0 && consentItems.every((c) => answers[c.id] === 'yes');
+  const canSubmit = allAgreed && signature.trim().length > 0;
 
   const handleSubmit = async () => {
-    if (!allAnswered) {
-      setError('Please answer all consent items before proceeding.');
-      return;
-    }
-    if (!allRequiredYes) {
-      setError('You must select YES on all required items to participate in this study.');
+    if (!allAgreed) {
+      setError('You must agree to all consent items to participate in this study.');
       return;
     }
     if (!signature.trim()) {
@@ -155,36 +122,25 @@ export default function ConsentPage() {
 
       <div className="space-y-3 mb-6">
         {consentItems.map((item) => {
-          const val = answers[item.id];
-          const isRequiredNo = item.required && val === 'no';
+          const checked = answers[item.id] === 'yes';
 
           return (
-            <div
+            <label
               key={item.id}
-              className={`border rounded-xl p-4 transition-colors ${
-                isRequiredNo
-                  ? 'border-rose-200 bg-rose-50/30'
-                  : val === 'yes'
-                    ? 'border-blue-200 bg-blue-50/30'
-                    : 'border-slate-100'
+              className={`flex items-start gap-3 border rounded-xl p-4 transition-colors cursor-pointer ${
+                checked
+                  ? 'border-blue-200 bg-blue-50/30'
+                  : 'border-slate-100 hover:border-slate-200'
               }`}
             >
-              <div className="flex gap-3 items-start">
-                <div className="flex-1">
-                  <p className="text-sm text-slate-700">{item.text}</p>
-                  {item.required && (
-                    <span
-                      className={`inline-block text-xs font-bold mt-1.5 ${
-                        isRequiredNo ? 'text-rose-500' : 'text-rose-500'
-                      }`}
-                    >
-                      {isRequiredNo ? '⚠ Required — must be YES to participate' : 'Required'}
-                    </span>
-                  )}
-                </div>
-                <YesNoToggle value={val} onChange={(v) => setAnswer(item.id, v)} />
-              </div>
-            </div>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggleAnswer(item.id)}
+                className="w-5 h-5 mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
+              />
+              <span className="text-sm text-slate-700">{item.text}</span>
+            </label>
           );
         })}
       </div>
@@ -236,7 +192,7 @@ export default function ConsentPage() {
       {/* ── Progress counter ── */}
       <div className="flex items-center justify-between text-xs text-slate-400 mb-4">
         <span>
-          {Object.keys(answers).length} of {consentItems.length} items answered
+          {consentItems.filter((c) => answers[c.id] === 'yes').length} of {consentItems.length} items agreed
         </span>
         {canSubmit && (
           <span className="text-emerald-600 font-bold">✓ Ready to submit</span>

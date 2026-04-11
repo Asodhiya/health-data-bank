@@ -236,7 +236,7 @@ function PasswordField({ label, placeholder, value, show, onToggle, onChange }) 
    database profile table.
    ══════════════════════════════════════════════ */
 
-function ParticipantFields({ form, set, editing, profile }) {
+function ParticipantFields({ form, set, editing, profile, intakeProfileFields = [] }) {
   const pronounsDisplay = profile.pronouns === 'Other' && profile.pronounsCustom
     ? profile.pronounsCustom : (profile.pronouns || '—');
 
@@ -335,6 +335,17 @@ function ParticipantFields({ form, set, editing, profile }) {
           {profile.highest_education_level || '—'}
         </span>
       </div>
+
+      {intakeProfileFields.map((field, i) => (
+        <div key={i} className="mb-3.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            {field.label.toUpperCase()}
+          </span>
+          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
+            {field.value || '—'}
+          </span>
+        </div>
+      ))}
     </>
   );
 }
@@ -505,7 +516,7 @@ function AdminFields({ form, set, editing, profile }) {
    MAIN SECTIONS
    ══════════════════════════════════════════════ */
 
-function PersonalInfoSection({ profile, onSave, role }) {
+function PersonalInfoSection({ profile, onSave, role, intakeProfileFields = [] }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ ...profile });
 
@@ -644,7 +655,7 @@ function PersonalInfoSection({ profile, onSave, role }) {
           value={editing ? form.address : profile.address} editing={editing} onChange={set('address')} />
       </div>
 
-      <RoleFields form={form} set={set} editing={editing} profile={profile} />
+      <RoleFields form={form} set={set} editing={editing} profile={profile} intakeProfileFields={intakeProfileFields} />
     </div>
   );
 }
@@ -894,6 +905,7 @@ export default function ProfilePage({ role = 'participant' }) {
   const [tab, setTab] = useState(location.hash === '#settings' ? 'settings' : 'profile');
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState({ ...EMPTY_PROFILE });
+  const [intakeProfileFields, setIntakeProfileFields] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -921,9 +933,10 @@ export default function ProfilePage({ role = 'participant' }) {
         // Load participant profile data
         if (role === 'participant') {
           try {
-            const [p, careTeam] = await Promise.all([
+            const [p, careTeam, intakeFields] = await Promise.all([
               api.participantGetProfile().catch(() => null),
               api.participantGetCareTeam().catch(() => null),
+              api.getProfileIntakeFields().catch(() => null),
             ]);
             if (cancelled) return;
             if (p) {
@@ -944,6 +957,9 @@ export default function ProfilePage({ role = 'participant' }) {
                 program_group: firstGroup?.group_name || '',
                 caretaker: firstGroup?.caretaker?.name || '',
               }));
+            }
+            if (intakeFields?.fields?.length) {
+              setIntakeProfileFields(intakeFields.fields);
             }
           } catch {
             // Non-critical
@@ -1097,7 +1113,7 @@ export default function ProfilePage({ role = 'participant' }) {
       {/* Tab content */}
       {tab === 'profile' ? (
         <>
-          <PersonalInfoSection profile={profile} onSave={setProfile} role={role} />
+          <PersonalInfoSection profile={profile} onSave={setProfile} role={role} intakeProfileFields={intakeProfileFields} />
           <AccountDetailsSection profile={profile} role={role} />
         </>
       ) : (

@@ -24,6 +24,7 @@ class IntakeFieldOut(BaseModel):
     is_required: Optional[bool] = None
     display_order: Optional[int] = None
     profile_field: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
     options: List[IntakeFieldOptionOut] = []
 
 
