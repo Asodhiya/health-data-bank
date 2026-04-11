@@ -1,9 +1,10 @@
 """
 Onboarding routes — intake form discovery and submission, consent, background info.
 """
+import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete as sa_delete, func, or_
 from sqlalchemy.orm import selectinload
 from datetime import datetime, date, timezone
 from typing import Any
@@ -13,7 +14,8 @@ from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import ONBOARDING_READ, ONBOARDING_SUBMIT, ONBOARDING_EDIT
 from app.db.models import (
     User, Role, UserRole, SurveyForm, FormField, FieldOption, FormSubmission,
-    ParticipantProfile, FieldElementMap, HealthDataPoint
+    ParticipantProfile, FieldElementMap, HealthDataPoint, SubmissionAnswer,
+    DataElement
 )
 from app.services.participant_survey_service import (
     _get_participant,
@@ -44,25 +46,22 @@ from app.services.notification_service import create_notifications_bulk
 router = APIRouter()
 
 INTAKE_FORM_TITLE = "Intake Form"
-PROFILE_FIELD_NAMES = {
-    "dob",
-    "gender",
-    "pronouns",
-    "primary_language",
-    "country_of_origin",
-    "marital_status",
-    "highest_education_level",
-    "living_arrangement",
-    "dependents",
-    "occupation_status",
-}
+async def _get_valid_profile_field_names(db: AsyncSession) -> set[str]:
+    """Return all active data element codes — these are valid profile_field values."""
+    result = await db.execute(
+        select(DataElement.code).where(DataElement.is_active == True)
+    )
+    return set(result.scalars().all())
 
 
 async def _get_intake_form(db: AsyncSession) -> SurveyForm:
     result = await db.execute(
         select(SurveyForm)
         .where(SurveyForm.title == INTAKE_FORM_TITLE)
-        .options(selectinload(SurveyForm.fields).selectinload(FormField.options))
+        .options(
+            selectinload(SurveyForm.fields).selectinload(FormField.options),
+            selectinload(SurveyForm.fields).selectinload(FormField.element_maps),
+        )
     )
     form = result.scalar_one_or_none()
     if not form:
@@ -74,7 +73,10 @@ async def _find_intake_form(db: AsyncSession) -> SurveyForm | None:
     result = await db.execute(
         select(SurveyForm)
         .where(SurveyForm.title == INTAKE_FORM_TITLE)
-        .options(selectinload(SurveyForm.fields).selectinload(FormField.options))
+        .options(
+            selectinload(SurveyForm.fields).selectinload(FormField.options),
+            selectinload(SurveyForm.fields).selectinload(FormField.element_maps),
+        )
     )
     return result.scalar_one_or_none()
 
@@ -98,6 +100,9 @@ async def _get_or_create_intake_form(db: AsyncSession, created_by) -> SurveyForm
 
 
 def _serialize_intake_field(field: FormField) -> dict[str, Any]:
+    element_id = None
+    if field.element_maps:
+        element_id = str(field.element_maps[0].element_id)
     return {
         "field_id": str(field.field_id),
         "label": field.label,
@@ -105,7 +110,9 @@ def _serialize_intake_field(field: FormField) -> dict[str, Any]:
         "is_required": field.is_required,
         "display_order": field.display_order,
         "profile_field": field.profile_field,
+        "show_on_profile": bool(field.show_on_profile),
         "config": field.config,
+        "element_id": element_id,
         "options": [
             {
                 "label": o.label,
@@ -121,15 +128,34 @@ _VALID_CONFIG_KEYS = {"searchable", "creatable", "predefined_list", "conditional
 _VALID_PREDEFINED_LISTS = {"languages", "countries"}
 _VALID_DATE_RULES = {"adult_18"}
 
+_FIELD_TYPE_CONFIG_KEYS: dict[str, set[str]] = {
+    "text":          set(),
+    "textarea":      set(),
+    "number":        {"min", "max"},
+    "date":          {"max_date_rule"},
+    "single_select": {"conditional"},
+    "multi_select":  {"searchable", "creatable", "predefined_list"},
+    "dropdown":      {"searchable", "predefined_list"},
+}
+
 
 def _validate_field_config(field_type: str, config: dict | None) -> None:
     """Validate the config dict for a form field. Raises HTTPException on invalid config."""
     if not config:
         return
 
-    unknown = set(config.keys()) - _VALID_CONFIG_KEYS
-    if unknown:
-        raise HTTPException(status_code=400, detail=f"Unknown config keys: {', '.join(sorted(unknown))}")
+    # Type-aware key validation
+    allowed = _FIELD_TYPE_CONFIG_KEYS.get(field_type, _VALID_CONFIG_KEYS)
+    invalid_for_type = set(config.keys()) - allowed
+    if invalid_for_type:
+        unknown = invalid_for_type - _VALID_CONFIG_KEYS
+        wrong_type = invalid_for_type - unknown
+        parts = []
+        if unknown:
+            parts.append(f"Unknown config keys: {', '.join(sorted(unknown))}")
+        if wrong_type:
+            parts.append(f"Config keys not valid for {field_type}: {', '.join(sorted(wrong_type))}")
+        raise HTTPException(status_code=400, detail=". ".join(parts))
 
     if "searchable" in config and not isinstance(config["searchable"], bool):
         raise HTTPException(status_code=400, detail="config.searchable must be a boolean.")
@@ -254,6 +280,93 @@ async def get_intake_form(
     }
 
 
+@router.get("/profile-fields")
+async def get_profile_intake_fields(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
+    """Return intake submission answers for fields marked show_on_profile=true."""
+    participant = await _get_participant(current_user.user_id, db)
+    if not participant:
+        return {"fields": []}
+
+    # Find the intake form
+    form = await _find_intake_form(db)
+    if not form:
+        return {"fields": []}
+
+    # Find the participant's submitted intake
+    sub_result = await db.execute(
+        select(FormSubmission).where(
+            FormSubmission.form_id == form.form_id,
+            FormSubmission.participant_id == participant.participant_id,
+            FormSubmission.submitted_at.isnot(None),
+        )
+    )
+    submission = sub_result.scalar_one_or_none()
+    if not submission:
+        return {"fields": []}
+
+    # Profile columns already rendered by the hardcoded ParticipantFields component.
+    # Exclude these to avoid showing the same field twice.
+    _HARDCODED_PROFILE_COLUMNS = {
+        "dob", "gender", "pronouns", "primary_language", "country_of_origin",
+        "living_arrangement", "dependents", "occupation_status",
+        "marital_status", "highest_education_level",
+    }
+
+    # Get fields marked show_on_profile with their options
+    fields_result = await db.execute(
+        select(FormField)
+        .where(
+            FormField.form_id == form.form_id,
+            FormField.show_on_profile.is_(True),
+            or_(FormField.profile_field.notin_(_HARDCODED_PROFILE_COLUMNS), FormField.profile_field.is_(None)),
+        )
+        .options(selectinload(FormField.options))
+        .order_by(FormField.display_order)
+    )
+    profile_fields = fields_result.scalars().all()
+    if not profile_fields:
+        return {"fields": []}
+
+    # Get answers for those fields
+    field_ids = [f.field_id for f in profile_fields]
+    answers_result = await db.execute(
+        select(SubmissionAnswer).where(
+            SubmissionAnswer.submission_id == submission.submission_id,
+            SubmissionAnswer.field_id.in_(field_ids),
+        )
+    )
+    answers_by_field = {a.field_id: a for a in answers_result.scalars().all()}
+
+    result_fields = []
+    for field in profile_fields:
+        answer = answers_by_field.get(field.field_id)
+        if not answer:
+            continue
+
+        # Resolve display value
+        raw = answer.value_json if answer.value_json is not None else (
+            answer.value_number if answer.value_number is not None else answer.value_text
+        )
+        display_value = _resolve_profile_field_raw_value(field, raw)
+
+        # Format arrays as comma-separated strings for display
+        if isinstance(display_value, list):
+            display_value = ", ".join(str(v) for v in display_value)
+        elif display_value is not None:
+            display_value = str(display_value)
+
+        result_fields.append({
+            "label": field.label,
+            "value": display_value,
+            "field_type": field.field_type,
+        })
+
+    return {"fields": result_fields}
+
+
 @router.post("")
 async def submit_intake(
     payload: IntakeSubmission,
@@ -299,6 +412,7 @@ async def submit_intake(
     # 4. Save answers and collect mapped profile updates
     answer_records = _build_answer_records([answer.model_dump() for answer in payload.answers], submission.submission_id)
     field_meta = await _load_field_meta([field_uuid for _, field_uuid, *_ in answer_records], db)
+    valid_profile_fields = await _get_valid_profile_field_names(db)
     profile_updates: dict[str, Any] = {
         "program_enrolled_at": datetime.now(timezone.utc),
     }
@@ -309,7 +423,7 @@ async def submit_intake(
         field = form_fields.get(field_uuid)
         if not field or not field.profile_field:
             continue
-        if field.profile_field not in PROFILE_FIELD_NAMES:
+        if field.profile_field not in valid_profile_fields:
             continue
 
         val_text, val_num, val_json = _resolve_answer_value(field_uuid, val_text, val_num, val_json, field_meta)
@@ -541,49 +655,199 @@ async def get_admin_intake_form(
     }
 
 
+@router.get("/admin/intake-form/affected-count", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
+async def get_affected_participant_count(
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(check_current_user),
+):
+    """Return count of completed participants who would need to redo intake if the form changes."""
+    result = await db.execute(
+        select(func.count()).select_from(ParticipantProfile)
+        .where(ParticipantProfile.onboarding_status == "COMPLETED")
+    )
+    return {"count": result.scalar() or 0}
+
+
 @router.put("/admin/intake-form", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
 async def update_intake_form_route(
     payload: IntakeFormUpdateIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_current_user),
 ):
-    """Update the intake form fields in-place (replaces all fields)."""
+    """Update intake fields in-place, auto-link to data elements, reset participants if changed."""
     form = await _get_or_create_intake_form(db, current_user.user_id)
 
-    # Delete existing fields (cascades to options via FK)
+    # Load current fields/options once so we can update in place.
     existing_fields = (await db.execute(
-        select(FormField).where(FormField.form_id == form.form_id)
+        select(FormField)
+        .where(FormField.form_id == form.form_id)
+        .options(selectinload(FormField.options))
     )).scalars().all()
-    for f in existing_fields:
-        await db.delete(f)
-    await db.flush()
+    existing_by_id = {field.field_id: field for field in existing_fields}
+    incoming_ids: set[uuid.UUID] = set()
 
-    # Create new fields and options
+    # Validate incoming field IDs up front to avoid partial mutations.
+    for i, field_data in enumerate(payload.fields):
+        raw_field_id = field_data.get("field_id")
+        if raw_field_id in (None, ""):
+            continue
+        try:
+            field_uuid = uuid.UUID(str(raw_field_id))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid field_id at index {i}.") from exc
+
+        if field_uuid in incoming_ids:
+            raise HTTPException(status_code=400, detail=f"Duplicate field_id at index {i}.")
+        if field_uuid not in existing_by_id:
+            raise HTTPException(status_code=400, detail=f"field_id at index {i} does not belong to intake form.")
+
+        incoming_ids.add(field_uuid)
+
+    # Fields omitted from payload are removal requests. Clean up their
+    # submission answers so the FK doesn't block deletion, then delete.
+    to_remove = [field for field in existing_fields if field.field_id not in incoming_ids]
+    to_remove_ids = [field.field_id for field in to_remove]
+    if to_remove_ids:
+        # Delete submission answers that reference the removed fields.
+        # The FormSubmission record and answers for other fields are preserved.
+        await db.execute(
+            sa_delete(SubmissionAnswer)
+            .where(SubmissionAnswer.field_id.in_(to_remove_ids))
+        )
+
+    # ── Change detection ──────────────────────────────────────────────────
+    form_changed = bool(to_remove) or len(payload.fields) != len(existing_fields)
+
+    # Track all saved fields for auto-linking after the loop.
+    saved_fields: list[FormField] = []
+
+    # Update existing fields in place, create only new fields, and replace options.
+    valid_profile_fields = await _get_valid_profile_field_names(db)
     for i, field_data in enumerate(payload.fields):
         profile_field = field_data.get("profile_field") or None
-        if profile_field is not None and profile_field not in PROFILE_FIELD_NAMES:
+        if profile_field is not None and profile_field not in valid_profile_fields:
             raise HTTPException(status_code=400, detail=f"Unsupported profile field mapping: {profile_field}")
         field_config = field_data.get("config") or None
         _validate_field_config(field_data["field_type"], field_config)
-        new_field = FormField(
-            form_id=form.form_id,
-            label=field_data["label"],
-            field_type=field_data["field_type"],
-            profile_field=profile_field,
-            is_required=field_data.get("is_required", False),
-            display_order=field_data.get("display_order", i + 1),
-            config=field_config,
+
+        raw_field_id = field_data.get("field_id")
+        if raw_field_id not in (None, ""):
+            field_uuid = uuid.UUID(str(raw_field_id))
+            target_field = existing_by_id[field_uuid]
+
+            # Detect property changes on existing field
+            if not form_changed:
+                existing_opts = sorted(target_field.options, key=lambda o: o.display_order)
+                incoming_opts = field_data.get("options") or []
+                opts_changed = len(existing_opts) != len(incoming_opts) or any(
+                    eo.label != io.get("label", "")
+                    for eo, io in zip(existing_opts, incoming_opts)
+                )
+                if (target_field.label != field_data["label"]
+                        or target_field.field_type != field_data["field_type"]
+                        or target_field.is_required != field_data.get("is_required", False)
+                        or target_field.profile_field != profile_field
+                        or target_field.config != field_config
+                        or opts_changed):
+                    form_changed = True
+
+            target_field.label = field_data["label"]
+            target_field.field_type = field_data["field_type"]
+            target_field.profile_field = profile_field
+            target_field.is_required = field_data.get("is_required", False)
+            target_field.display_order = field_data.get("display_order", i + 1)
+            target_field.config = field_config
+            target_field.show_on_profile = field_data.get("show_on_profile", False)
+        else:
+            form_changed = True  # New field = form changed
+            target_field = FormField(
+                form_id=form.form_id,
+                label=field_data["label"],
+                field_type=field_data["field_type"],
+                profile_field=profile_field,
+                is_required=field_data.get("is_required", False),
+                display_order=field_data.get("display_order", i + 1),
+                config=field_config,
+                show_on_profile=field_data.get("show_on_profile", False),
+            )
+            db.add(target_field)
+            await db.flush()
+
+        saved_fields.append(target_field)
+
+        await db.execute(
+            sa_delete(FieldOption).where(FieldOption.field_id == target_field.field_id)
         )
-        db.add(new_field)
-        await db.flush()
 
         for j, opt in enumerate(field_data.get("options") or []):
             db.add(FieldOption(
-                field_id=new_field.field_id,
+                field_id=target_field.field_id,
                 label=opt.get("label", ""),
                 value=opt.get("value", j),
                 display_order=opt.get("display_order", j),
             ))
 
+    # Delete fields omitted from payload (submission answers already cleaned up above).
+    for field in to_remove:
+        await db.execute(
+            sa_delete(FieldElementMap).where(FieldElementMap.field_id == field.field_id)
+        )
+        await db.execute(
+            sa_delete(FieldOption).where(FieldOption.field_id == field.field_id)
+        )
+        await db.delete(field)
+
+    # ── Auto-link profile fields to data elements ─────────────────────────
+    profile_field_codes = [
+        f.profile_field for f in saved_fields if f.profile_field
+    ]
+    if profile_field_codes:
+        el_result = await db.execute(
+            select(DataElement).where(DataElement.code.in_(profile_field_codes))
+        )
+        code_to_element = {el.code: el for el in el_result.scalars().all()}
+    else:
+        code_to_element = {}
+
+    all_saved_ids = [f.field_id for f in saved_fields]
+    if all_saved_ids:
+        await db.execute(
+            sa_delete(FieldElementMap).where(FieldElementMap.field_id.in_(all_saved_ids))
+        )
+
+    for field in saved_fields:
+        if field.profile_field:
+            element = code_to_element.get(field.profile_field)
+            if element:
+                db.add(FieldElementMap(
+                    field_id=field.field_id,
+                    element_id=element.element_id,
+                ))
+
+    await db.flush()
+
+    # ── Reset participants if form actually changed ───────────────────────
+    participants_reset = 0
+    if form_changed:
+        reset_result = await db.execute(
+            update(ParticipantProfile)
+            .where(ParticipantProfile.onboarding_status == "COMPLETED")
+            .values(onboarding_status="CONSENT_GIVEN")
+        )
+        participants_reset = reset_result.rowcount
+
+        # Null out submitted_at so participants can re-submit intake
+        await db.execute(
+            update(FormSubmission)
+            .where(
+                FormSubmission.form_id == form.form_id,
+                FormSubmission.submitted_at.isnot(None),
+            )
+            .values(submitted_at=None)
+        )
+
     await db.commit()
-    return {"message": "Intake form updated."}
+    return {
+        "message": "Intake form published.",
+        "participants_reset": participants_reset,
+    }

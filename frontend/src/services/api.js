@@ -532,6 +532,7 @@ export const api = {
 
   // ── Intake (onboarding) ──
   getIntakeForm: () => request('/onboarding/form'),
+  getProfileIntakeFields: () => request('/onboarding/profile-fields'),
 
   submitIntake: (payload) =>
     request('/onboarding', {
@@ -572,6 +573,8 @@ export const api = {
     }),
 
   getAdminIntakeForm: () => request('/onboarding/admin/intake-form'),
+
+  getIntakeAffectedCount: () => request('/onboarding/admin/intake-form/affected-count'),
 
   updateIntakeForm: (payload) =>
     request('/onboarding/admin/intake-form', {

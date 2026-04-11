@@ -11,6 +11,9 @@ function normalizeFieldValue(field, value) {
   if (field.field_type === "multi_select") {
     return Array.isArray(value) ? value : [];
   }
+  if (field.config?.conditional) {
+    return value ?? null;
+  }
   return value ?? "";
 }
 
@@ -19,8 +22,8 @@ function isAnswered(field, value) {
     return Array.isArray(value) && value.length > 0;
   }
   if (field.config?.conditional) {
-    // For conditional fields the value is a number (including 0 for "No")
-    return value !== null && value !== undefined && value !== "";
+    // null = unanswered, 0 = "No", "" = "Yes" awaiting number, number = "Yes" + value
+    return value !== null && value !== undefined;
   }
   return value !== null && value !== undefined && String(value).trim() !== "";
 }
@@ -36,7 +39,7 @@ function buildInitialAnswers(fields) {
     if (field.field_type === "multi_select") {
       acc[field.field_id] = [];
     } else if (field.config?.conditional) {
-      acc[field.field_id] = "";
+      acc[field.field_id] = null;
     } else {
       acc[field.field_id] = "";
     }
@@ -259,20 +262,13 @@ function ConditionalField({ field, value, onChange }) {
   const subConfig = cond.sub_config || {};
 
   // Derive toggle state from value
-  // value === "" means not answered, value === 0 means "No", value > 0 means "Yes" + number
-  const isTriggered = value !== "" && value !== 0 && value !== "0";
-  const toggleState = value === "" ? null : isTriggered ? triggerValue : noValue;
-  const numberValue = isTriggered ? value : "";
+  // null = unanswered, 0 = "No", "" = "Yes" awaiting number, number = "Yes" + value
+  const isTriggered = value !== null && value !== 0 && value !== "0";
+  const toggleState = value === null ? null : isTriggered ? triggerValue : noValue;
+  const numberValue = (isTriggered && value !== "") ? value : "";
 
   const handleToggle = (selected) => {
     if (selected === triggerValue) {
-      // Switch to Yes — set empty string so number input appears but isn't submitted yet
-      onChange(field, "");
-      // Actually we need a way to show the number input. Let's use a sentinel.
-      // We'll treat the state as: null = unanswered, "TRIGGERED" = yes but no number yet, number = yes + value, 0 = no
-      // Simpler: just set to "" temporarily — the user must enter a number
-      // Actually let's rethink: when No is selected, value = 0. When Yes is selected but no number yet, value = "".
-      // When Yes + number, value = the number.
       onChange(field, "");
     } else {
       onChange(field, 0);
@@ -548,11 +544,15 @@ export default function IntakePage() {
       }
 
       // Conditional field validation
-      if (config.conditional && value !== "" && value !== 0 && value !== "0") {
-        const sub = config.conditional.sub_config || {};
-        const num = Number(value);
-        if (!Number.isInteger(num) || (sub.min != null && num < sub.min) || (sub.max != null && num > sub.max)) {
-          next[field.field_id] = `Must be a whole number${sub.min != null ? ` (min ${sub.min}` : ""}${sub.max != null ? `${sub.min != null ? ", " : " ("}max ${sub.max})` : sub.min != null ? ")" : ""}.`;
+      if (config.conditional && value !== null && value !== 0 && value !== "0") {
+        if (value === "") {
+          next[field.field_id] = "Please enter a number.";
+        } else {
+          const sub = config.conditional.sub_config || {};
+          const num = Number(value);
+          if (!Number.isInteger(num) || (sub.min != null && num < sub.min) || (sub.max != null && num > sub.max)) {
+            next[field.field_id] = `Must be a whole number${sub.min != null ? ` (min ${sub.min}` : ""}${sub.max != null ? `${sub.min != null ? ", " : " ("}max ${sub.max})` : sub.min != null ? ")" : ""}.`;
+          }
         }
       }
 

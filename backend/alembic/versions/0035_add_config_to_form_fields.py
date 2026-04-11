@@ -1,6 +1,6 @@
 """Add config JSONB column to form_fields
 
-Revision ID: 0033
+Revision ID: 0035
 Revises: 0032
 Create Date: 2026-04-10
 """
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
 
-revision = "0033"
-down_revision = "0032"
+revision = "0035"
+down_revision = "0034"
 branch_labels = None
 depends_on = None
 
