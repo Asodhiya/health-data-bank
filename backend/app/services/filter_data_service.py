@@ -4,8 +4,9 @@ from fastapi import HTTPException
 from app.db.models import (
     User, FormSubmission, ParticipantProfile, SurveyForm,
     HealthDataPoint, DataElement, UserRole, Role, FormDeployment, Group, GroupMember,
-    FormField, FieldElementMap,
+    FormField, FieldElementMap, SubmissionAnswer,
 )
+from sqlalchemy.orm import selectinload
 from app.schemas.filter_data_schema import ParticipantFilter
 from datetime import date, datetime, timedelta, timezone, time
 import csv
@@ -13,6 +14,166 @@ import io
 from typing import Optional, Set
 from uuid import UUID
 from starlette.responses import StreamingResponse
+
+
+PROFILE_DEMOGRAPHIC_FIELDS = {
+    "dob",
+    "gender",
+    "pronouns",
+    "primary_language",
+    "living_arrangement",
+    "dependents",
+    "occupation_status",
+    "marital_status",
+    "highest_education_level",
+}
+
+
+def _normalize_profile_field_fallback(profile_field: str, value):
+    if value is None:
+        return None
+
+    if profile_field == "dob":
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        try:
+            return date.fromisoformat(str(value)[:10])
+        except (TypeError, ValueError):
+            return None
+
+    if profile_field == "dependents":
+        if isinstance(value, str) and not value.lstrip("-").isdigit():
+            if value.lower() in ("no", "false", "none", "0"):
+                return 0
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    if isinstance(value, list):
+        if profile_field == "primary_language":
+            return str(value[0]).strip() if value else None
+        joined = ", ".join(str(v).strip() for v in value if str(v).strip())
+        return joined or None
+
+    if isinstance(value, dict):
+        return None
+
+    text = str(value).strip()
+    return text or None
+
+
+def _resolve_profile_field_answer(field: FormField, answer: SubmissionAnswer):
+    raw_value = (
+        answer.value_json
+        if answer.value_json is not None
+        else answer.value_number
+        if answer.value_number is not None
+        else answer.value_date
+        if answer.value_date is not None
+        else answer.value_text
+    )
+
+    if field.options:
+        option_map = {
+            option.value: option.label
+            for option in field.options
+            if option.label is not None
+        }
+        if isinstance(raw_value, list):
+            raw_value = [option_map.get(value, value) for value in raw_value]
+        else:
+            raw_value = option_map.get(raw_value, raw_value)
+
+    return _normalize_profile_field_fallback(field.profile_field or "", raw_value)
+
+
+async def _load_intake_profile_fallbacks(
+    db: AsyncSession,
+    participant_ids: list,
+) -> dict[str, dict[str, object]]:
+    if not participant_ids:
+        return {}
+
+    intake_form_id = await db.scalar(
+        select(SurveyForm.form_id).where(SurveyForm.title == "Intake Form").limit(1)
+    )
+    if not intake_form_id:
+        return {}
+
+    fields_result = await db.execute(
+        select(FormField)
+        .where(FormField.form_id == intake_form_id)
+        .where(FormField.profile_field.in_(PROFILE_DEMOGRAPHIC_FIELDS))
+        .options(selectinload(FormField.options))
+    )
+    intake_fields = fields_result.scalars().all()
+    if not intake_fields:
+        return {}
+
+    field_map = {field.field_id: field for field in intake_fields}
+
+    submissions_result = await db.execute(
+        select(FormSubmission)
+        .where(FormSubmission.form_id == intake_form_id)
+        .where(FormSubmission.participant_id.in_(participant_ids))
+        .where(FormSubmission.submitted_at.is_not(None))
+        .order_by(FormSubmission.participant_id, FormSubmission.submitted_at.desc())
+    )
+    latest_submissions = {}
+    for submission in submissions_result.scalars().all():
+        latest_submissions.setdefault(submission.participant_id, submission)
+
+    if not latest_submissions:
+        return {}
+
+    submission_ids = [submission.submission_id for submission in latest_submissions.values()]
+    answers_result = await db.execute(
+        select(SubmissionAnswer).where(SubmissionAnswer.submission_id.in_(submission_ids))
+    )
+
+    answers_by_submission: dict = {}
+    for answer in answers_result.scalars().all():
+        answers_by_submission.setdefault(answer.submission_id, []).append(answer)
+
+    fallback_map: dict[str, dict[str, object]] = {}
+    for participant_id, submission in latest_submissions.items():
+        participant_key = str(participant_id)
+        fallback_values: dict[str, object] = {}
+        for answer in answers_by_submission.get(submission.submission_id, []):
+            field = field_map.get(answer.field_id)
+            if not field or not field.profile_field:
+                continue
+            fallback_value = _resolve_profile_field_answer(field, answer)
+            if fallback_value is not None:
+                fallback_values[field.profile_field] = fallback_value
+        if fallback_values:
+            fallback_map[participant_key] = fallback_values
+
+    return fallback_map
+
+
+async def _ensure_survey_access(
+    db: AsyncSession,
+    survey_id: str | UUID | None,
+    current_user_id: UUID | None,
+) -> None:
+    if not survey_id or current_user_id is None:
+        return
+    survey = await db.execute(
+        select(SurveyForm.form_id).where(
+            SurveyForm.form_id == survey_id,
+            or_(
+                SurveyForm.created_by == current_user_id,
+                SurveyForm.title == "Intake Form",
+            ),
+        )
+    )
+    if survey.scalar_one_or_none() is None:
+        raise HTTPException(status_code=403, detail="You do not have access to this survey.")
 
 
 def _utc_today() -> date:
@@ -523,11 +684,16 @@ async def resolve_participant_ids(
     return [participant_id for participant_id in base_participant_ids if participant_id in base_id_set]
 
 
-async def get_available_surveys(db: AsyncSession):
+async def get_available_surveys(db: AsyncSession, current_user_id: UUID):
     """Fetches forms (any status) that have at least one completed submission."""
     stmt = (
         select(SurveyForm)
-        .where(SurveyForm.status.in_(['PUBLISHED', 'ARCHIVED', 'DELETED']))
+        .where(SurveyForm.status.in_(['PUBLISHED', 'ARCHIVED']))
+        .where(
+            or_(
+                SurveyForm.created_by == current_user_id,
+            )
+        )
         .where(SurveyForm.title != "Intake Form")
         .where(
             exists(
@@ -562,7 +728,12 @@ async def get_available_surveys(db: AsyncSession):
 
 
 
-async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, filters: ParticipantFilter = None):
+async def get_survey_results_pivoted(
+    db: AsyncSession,
+    survey_id: str = None,
+    filters: ParticipantFilter = None,
+    current_user_id: UUID | None = None,
+):
     """
     Returns participant demographics + health data points, pivoted by DataElement.
 
@@ -570,6 +741,7 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
     When survey_id is provided, only health data points that originated from
     submissions of that survey are included.
     """
+    await _ensure_survey_access(db, survey_id, current_user_id)
 
     demographic_columns = [
         ParticipantProfile.participant_id.label("participant_id"),
@@ -717,6 +889,10 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
 
         result = await db.execute(stmt)
         data = result.all()
+        intake_fallbacks = await _load_intake_profile_fallbacks(
+            db,
+            [row.participant_id for row in data],
+        )
 
         columns_list = [
             {"id": "gender", "text": "Gender"},
@@ -732,15 +908,15 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
         paged_rows = [
             {
                 "_participant_id": str(row.participant_id),
-                "gender": row.gender,
-                "pronouns": row.pronouns,
-                "primary_language": row.primary_language,
-                "occupation_status": row.occupation_status,
-                "living_arrangement": row.living_arrangement,
-                "highest_education_level": row.highest_education_level,
-                "dependents": row.dependents,
-                "marital_status": row.marital_status,
-                "age": calculate_age(row.dob),
+                "gender": row.gender or intake_fallbacks.get(str(row.participant_id), {}).get("gender"),
+                "pronouns": row.pronouns or intake_fallbacks.get(str(row.participant_id), {}).get("pronouns"),
+                "primary_language": row.primary_language or intake_fallbacks.get(str(row.participant_id), {}).get("primary_language"),
+                "occupation_status": row.occupation_status or intake_fallbacks.get(str(row.participant_id), {}).get("occupation_status"),
+                "living_arrangement": row.living_arrangement or intake_fallbacks.get(str(row.participant_id), {}).get("living_arrangement"),
+                "highest_education_level": row.highest_education_level or intake_fallbacks.get(str(row.participant_id), {}).get("highest_education_level"),
+                "dependents": row.dependents if row.dependents is not None else intake_fallbacks.get(str(row.participant_id), {}).get("dependents"),
+                "marital_status": row.marital_status or intake_fallbacks.get(str(row.participant_id), {}).get("marital_status"),
+                "age": calculate_age(row.dob or intake_fallbacks.get(str(row.participant_id), {}).get("dob")),
             }
             for row in data
         ]
@@ -952,6 +1128,7 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
 
     result = await db.execute(stmt)
     data = result.all()
+    intake_fallbacks = await _load_intake_profile_fallbacks(db, paged_participant_ids)
 
     element_meta_result = await db.execute(
         select(
@@ -991,17 +1168,18 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
                 row_key = f"{participant_id}:{row.data_id}"
 
         if row_key not in pivoted_data:
+            fallback_values = intake_fallbacks.get(participant_id, {})
             base_row = {
                 "_participant_id": participant_id,
-                "gender": row.gender,
-                "pronouns": row.pronouns,
-                "primary_language": row.primary_language,
-                "occupation_status": row.occupation_status,
-                "living_arrangement": row.living_arrangement,
-                "highest_education_level": row.highest_education_level,
-                "dependents": row.dependents,
-                "marital_status": row.marital_status,
-                "age": calculate_age(row.dob),
+                "gender": row.gender or fallback_values.get("gender"),
+                "pronouns": row.pronouns or fallback_values.get("pronouns"),
+                "primary_language": row.primary_language or fallback_values.get("primary_language"),
+                "occupation_status": row.occupation_status or fallback_values.get("occupation_status"),
+                "living_arrangement": row.living_arrangement or fallback_values.get("living_arrangement"),
+                "highest_education_level": row.highest_education_level or fallback_values.get("highest_education_level"),
+                "dependents": row.dependents if row.dependents is not None else fallback_values.get("dependents"),
+                "marital_status": row.marital_status or fallback_values.get("marital_status"),
+                "age": calculate_age(row.dob or fallback_values.get("dob")),
             }
             if mode == "longitudinal":
                 base_row["observed_at"] = row.observed_at.isoformat() if row.observed_at else None
@@ -1111,7 +1289,9 @@ async def get_survey_results_grouped(
     db: AsyncSession,
     survey_id: str = None,
     filters: ParticipantFilter = None,
+    current_user_id: UUID | None = None,
 ):
+    await _ensure_survey_access(db, survey_id, current_user_id)
     base_filters = filters or ParticipantFilter()
     group_by = _normalized_group_by(base_filters)
     if not group_by:
@@ -1534,9 +1714,10 @@ async def export_survey_results_csv(
     survey_id: Optional[str] = None,
     filters: Optional[ParticipantFilter] = None,
     exclude_columns: Optional[Set[str]] = None,
+    current_user_id: UUID | None = None,
 ) -> StreamingResponse:
     """Build and return a UTF-8 CSV StreamingResponse of survey results."""
-    results = await get_survey_results_pivoted(db, survey_id, filters)
+    results = await get_survey_results_pivoted(db, survey_id, filters, current_user_id)
 
     if not results["data"]:
         return StreamingResponse(
@@ -1624,6 +1805,7 @@ async def export_survey_results_excel(
     survey_id: Optional[str] = None,
     filters: Optional[ParticipantFilter] = None,
     exclude_columns: Optional[Set[str]] = None,
+    current_user_id: UUID | None = None,
 ) -> StreamingResponse:
     """Build and return an XLSX StreamingResponse of survey results."""
     try:
@@ -1634,7 +1816,7 @@ async def export_survey_results_excel(
             detail="Excel export is unavailable because openpyxl is not installed.",
         ) from exc
 
-    results = await get_survey_results_pivoted(db, survey_id, filters)
+    results = await get_survey_results_pivoted(db, survey_id, filters, current_user_id)
     visible_columns, export_rows = _get_export_columns_and_rows(results, exclude_columns)
 
     workbook = Workbook()
@@ -1661,8 +1843,9 @@ async def export_grouped_results_csv(
     survey_id: Optional[str] = None,
     filters: Optional[ParticipantFilter] = None,
     exclude_columns: Optional[Set[str]] = None,
+    current_user_id: UUID | None = None,
 ) -> StreamingResponse:
-    results = await get_survey_results_grouped(db, survey_id, filters)
+    results = await get_survey_results_grouped(db, survey_id, filters, current_user_id)
 
     if not results["data"]:
         return StreamingResponse(
@@ -1692,6 +1875,7 @@ async def export_grouped_results_excel(
     survey_id: Optional[str] = None,
     filters: Optional[ParticipantFilter] = None,
     exclude_columns: Optional[Set[str]] = None,
+    current_user_id: UUID | None = None,
 ) -> StreamingResponse:
     try:
         from openpyxl import Workbook
@@ -1701,7 +1885,7 @@ async def export_grouped_results_excel(
             detail="Excel export is unavailable because openpyxl is not installed.",
         ) from exc
 
-    results = await get_survey_results_grouped(db, survey_id, filters)
+    results = await get_survey_results_grouped(db, survey_id, filters, current_user_id)
     visible_columns, export_rows = _get_export_columns_and_rows(results, exclude_columns)
 
     workbook = Workbook()

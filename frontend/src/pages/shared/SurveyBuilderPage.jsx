@@ -671,7 +671,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                 'border-slate-200 hover:border-slate-300 hover:shadow-md'
               }`}>
               {/* Main card row */}
-              <div className="cursor-pointer p-4 sm:p-5 flex flex-col gap-3 sm:flex-row sm:items-start" onClick={() => onEdit(form)}>
+              <div className="cursor-pointer p-4 sm:p-5 flex flex-col gap-3 sm:flex-row sm:items-start" onClick={() => onEdit(form, { locked: !isAuthor })}>
                 <input type="checkbox" checked={isSel}
                   onChange={() => toggleSelect(form.form_id)}
                   onClick={(e) => e.stopPropagation()}
@@ -799,10 +799,10 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                         onClick={(e) => { e.stopPropagation(); setModal({ type: 'archive', ids: [form.form_id], formTitle: form.title, isPublished: true }); }}>
                         Archive
                       </button>
-                      <button className={`p-1.5 rounded-lg transition text-[10px] font-bold px-2 ${isAuthor ? 'text-slate-400 hover:text-violet-600 hover:bg-violet-50' : 'text-slate-300 bg-slate-50 cursor-not-allowed'}`} title={isAuthor ? 'Update survey' : 'Only the form author can create a new version'}
-                        disabled={!isAuthor}
+                      <button className="p-1.5 rounded-lg transition text-[10px] font-bold px-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50"
+                        title={isAuthor ? 'Update survey' : 'Duplicate survey'}
                         onClick={(e) => { e.stopPropagation(); onBranch(form); }}>
-                        Update
+                        {isAuthor ? 'Update' : 'Duplicate'}
                       </button>
                     </>
                   )}
@@ -814,10 +814,10 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                     </button>
                   )}
                   {form.status === 'ARCHIVED' && (
-                    <button className={`p-1.5 rounded-lg transition text-[10px] font-bold px-2 ${isAuthor ? 'text-slate-400 hover:text-violet-600 hover:bg-violet-50' : 'text-slate-300 bg-slate-50 cursor-not-allowed'}`} title={isAuthor ? 'Create new version' : 'Only the form author can create a new version'}
-                      disabled={!isAuthor}
+                    <button className="p-1.5 rounded-lg transition text-[10px] font-bold px-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50"
+                      title={isAuthor ? 'Create new version' : 'Duplicate survey'}
                       onClick={(e) => { e.stopPropagation(); onBranch(form); }}>
-                      New Version
+                      {isAuthor ? 'New Version' : 'Duplicate'}
                     </button>
                   )}
                   <button className={`p-1.5 rounded-lg transition ${isAuthor ? 'text-slate-400 hover:text-rose-500 hover:bg-rose-50' : 'text-slate-300 bg-slate-50 cursor-not-allowed'}`} title={isAuthor ? 'Delete' : 'Only the form author can delete'}
@@ -1375,7 +1375,7 @@ function PublishModal({
    BUILDER VIEW
    #1 unsaved changes, #2 auto-save, #3 drag reorder, #4 validation
    ══════════════════════════════════════════════ */
-function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onArchive, dataElements, onDataElementCreated, groups }) {
+function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onArchive, dataElements, onDataElementCreated, groups, currentUser }) {
   const [title, setTitle]       = useState(form?.title || '');
   const [desc, setDesc]         = useState(form?.description || '');
   const [fields, setFields]     = useState(form?.fields || []);
@@ -1601,7 +1601,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                   {onBranch && (
                     <button onClick={() => onBranch(form)}
                       className="px-4 py-2 text-sm font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-xl hover:bg-violet-100 transition shadow-sm">
-                      Update
+                      {String(form?.created_by || '') === String(currentUser?.user_id || '') ? 'Update' : 'Duplicate'}
                     </button>
                   )}
                 </>
@@ -1632,7 +1632,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
       {isLocked && (
         <div className="bg-slate-100 border border-slate-300 rounded-xl px-4 py-3 mb-4 text-xs text-slate-600 flex items-center gap-3">
           <Svg size={15} sw={2} stroke="#64748b" d={<><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>} />
-          <span>This is an older version — it is read-only. Open the latest version to make changes.</span>
+          <span>This survey is read-only. You can duplicate it to create your own editable draft.</span>
         </div>
       )}
       {!isDraft && !isLocked && (
@@ -1641,7 +1641,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
           {onBranch && (
             <button onClick={() => onBranch(form)}
               className="shrink-0 px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 transition">
-              Update
+              {String(form?.created_by || '') === String(currentUser?.user_id || '') ? 'Update' : 'Duplicate'}
             </button>
           )}
         </div>
@@ -2104,6 +2104,7 @@ export default function SurveyBuilderPage() {
           dataElements={dataElements}
           onDataElementCreated={(el) => setCreatedElements((prev) => [...prev, el])}
           groups={groups}
+          currentUser={user}
         />
       )}
 

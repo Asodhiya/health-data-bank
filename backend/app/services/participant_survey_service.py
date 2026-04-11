@@ -33,6 +33,7 @@ async def _get_deployed_forms(participant_id: UUID, db: AsyncSession):
         .where(
             and_(
                 GroupMember.participant_id == participant_id,
+                GroupMember.left_at.is_(None),
                 SurveyForm.status == "PUBLISHED",
                 FormDeployment.revoked_at.is_(None)
             )
@@ -194,6 +195,7 @@ async def get_participant_survey_detail(form_id: UUID, user_id: UUID, db: AsyncS
             and_(
                 FormDeployment.form_id == form_id,
                 GroupMember.participant_id == participant.participant_id,
+                GroupMember.left_at.is_(None),
                 FormDeployment.revoked_at.is_(None),
             )
         )
@@ -227,6 +229,7 @@ async def get_participant_survey_response(form_id: UUID, user_id: UUID, db: Asyn
             and_(
                 SurveyForm.form_id == form_id,
                 GroupMember.participant_id == participant.participant_id,
+                GroupMember.left_at.is_(None),
                 FormDeployment.revoked_at.is_(None),
             )
         )
@@ -281,6 +284,7 @@ async def _get_participant_and_submission(
             and_(
                 FormDeployment.form_id == form_id,
                 GroupMember.participant_id == participant.participant_id,
+                GroupMember.left_at.is_(None),
                 FormDeployment.revoked_at.is_(None),
             )
         )

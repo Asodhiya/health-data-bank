@@ -15,7 +15,7 @@ from app.services.admin_service import assign_caretaker_to_group, unassign_caret
 from typing import List
 from app.db.session import get_db
 from app.db.models import Role, UserRole, GroupMember, AuditLog, User, AdminProfile, SignupInvite, Backup, Group
-from app.core.dependency import require_permissions, check_current_user
+from app.core.dependency import require_permissions, check_current_user, get_rls_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func, case
 from typing import Optional
@@ -652,7 +652,7 @@ async def put_system_maintenance_settings(
 
 @router.get("/notifications", response_model=list[NotificationItem], dependencies=[Depends(require_permissions(USER_READ))])
 async def get_notifications(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     rows = await list_notifications_for_user(db, current_user.user_id, role_target="admin")
@@ -674,7 +674,7 @@ async def get_notifications(
 @router.patch("/notifications/{notification_id}", response_model=NotificationItem, dependencies=[Depends(require_permissions(USER_READ))])
 async def mark_notification_read(
     notification_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     n = await mark_notification_read_for_user(db, notification_id, current_user.user_id)

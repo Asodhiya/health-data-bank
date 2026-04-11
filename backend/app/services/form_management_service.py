@@ -308,7 +308,11 @@ async def list_researcher_forms_paged(
         "counts": counts,
     }
 
-async def get_form_by_id(form_id: UUID, db: AsyncSession) -> Optional[SurveyForm]:
+async def get_form_by_id(
+    form_id: UUID,
+    db: AsyncSession,
+    user_id: UUID | None = None,
+) -> Optional[SurveyForm]:
     """Get forms by ID, with element_id attached to each field."""
     query = (
         select(SurveyForm)
@@ -319,6 +323,8 @@ async def get_form_by_id(form_id: UUID, db: AsyncSession) -> Optional[SurveyForm
     form = result.scalar_one_or_none()
     if not form:
         return None
+    if user_id is not None and str(form.created_by) != str(user_id):
+        raise PermissionError("You do not have access to this form.")
 
     # Run FieldElementMap + FormDeployment lookups in parallel
     field_ids = [f.field_id for f in form.fields]
@@ -483,19 +489,26 @@ async def branch_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
     original = await get_form_by_id(form_id, db)
     if not original:
         raise HTTPException(status_code=404, detail="Form not found.")
-    if str(original.created_by) != str(user_id):
-        raise HTTPException(status_code=403, detail="Only the researcher who created this form can create a new version.")
+    is_owner = str(original.created_by) == str(user_id)
 
-    # Determine root form id — always point back to the original, not a chain
-    root_id = original.parent_form_id or original.form_id
+    if is_owner:
+        # Determine root form id — always point back to the original, not a chain
+        root_id = original.parent_form_id or original.form_id
 
-    # Find the highest version in this form family
-    version_result = await db.execute(
-        select(func.max(SurveyForm.version)).where(
-            (SurveyForm.form_id == root_id) | (SurveyForm.parent_form_id == root_id)
+        # Find the highest version in this form family
+        version_result = await db.execute(
+            select(func.max(SurveyForm.version)).where(
+                (SurveyForm.form_id == root_id) | (SurveyForm.parent_form_id == root_id)
+            )
         )
-    )
-    max_version = version_result.scalar() or original.version or 1
+        max_version = version_result.scalar() or original.version or 1
+        new_version = max_version + 1
+        parent_form_id = root_id
+    else:
+        # Duplicating another researcher's survey creates an independent draft copy
+        # owned by the current user, not a new version inside the original family.
+        new_version = 1
+        parent_form_id = None
 
     new_form = SurveyForm(
         title=original.title,
@@ -503,8 +516,8 @@ async def branch_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
         status="DRAFT",
         cadence=normalize_cadence(original.cadence),
         cadence_anchor_at=None,
-        version=max_version + 1,
-        parent_form_id=root_id,
+        version=new_version,
+        parent_form_id=parent_form_id,
         created_by=user_id,
     )
     db.add(new_form)
@@ -555,7 +568,12 @@ async def branch_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
             db.add(FieldElementMap(field_id=new_field_id, element_id=m.element_id))
 
     await db.commit()
-    return {"msg": "new version created", "form_id": str(new_form.form_id), "version": new_form.version}
+    return {
+        "msg": "new version created" if is_owner else "survey duplicated",
+        "form_id": str(new_form.form_id),
+        "version": new_form.version,
+        "duplicated": not is_owner,
+    }
 
 
 async def get_publish_preview(form_id: UUID, group_ids: List[UUID], db: AsyncSession) -> List[dict]:
@@ -619,6 +637,8 @@ async def publish_survey_form(
     form = await get_form_by_id(form_id, db)
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
+    if str(form.created_by) != str(user_id):
+        raise HTTPException(status_code=403, detail="Only the researcher who created this form can publish it.")
 
     normalized_cadence = normalize_cadence(cadence)
     if normalized_cadence not in {"once", "daily", "weekly", "monthly"}:

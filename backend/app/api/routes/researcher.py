@@ -4,9 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from app.db.queries.Queries import CaretakersQuery
 
-from app.db.session import get_db
 from app.db.models import User, ResearcherProfile
-from app.core.dependency import require_permissions
+from app.core.dependency import get_rls_db, require_permissions
 from app.core.permissions import FORM_VIEW
 from app.schemas.researcher_schema import ResearcherProfileUpdate, ResearcherProfileOut
 from app.schemas.notification_schema import NotificationItem
@@ -22,7 +21,7 @@ router = APIRouter()
 
 @router.get("/profile", response_model=ResearcherProfileOut)
 async def get_researcher_profile(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(FORM_VIEW)),
 ):
     result = await db.execute(
@@ -37,7 +36,7 @@ async def get_researcher_profile(
 @router.patch("/profile", response_model=ResearcherProfileOut)
 async def update_researcher_profile(
     payload: ResearcherProfileUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(FORM_VIEW)),
 ):
     result = await db.execute(
@@ -71,7 +70,7 @@ async def update_researcher_profile(
 
 @router.get("/notifications", response_model=list[NotificationItem])
 async def list_notifications(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(FORM_VIEW)),
 ):
     rows = await list_notifications_for_user(db, current_user.user_id, role_target="researcher")
@@ -93,7 +92,7 @@ async def list_notifications(
 @router.patch("/notifications/{notification_id}", response_model=NotificationItem)
 async def mark_notification_read(
     notification_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(FORM_VIEW)),
 ):
     n = await mark_notification_read_for_user(db, notification_id, current_user.user_id)
@@ -113,7 +112,7 @@ async def mark_notification_read(
 async def get_submission_detail(
     participant_id: UUID,
     submission_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(FORM_VIEW)),
 ):
     row, answers = await CaretakersQuery(db).get_submission_detail(
