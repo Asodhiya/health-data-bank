@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { api } from "../../services/api";
 import { LANGUAGES } from "../../utils/formOptions";
@@ -244,7 +244,7 @@ export default function ResearcherDashboard() {
   const [loading, setLoading] = useState(true);
   const [filtering, setFiltering] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [filterError, setFilterError] = useState(false);
+  const [filterError, setFilterError] = useState("");
   const [isExporting, setIsExporting] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportConfig, setExportConfig] = useState(createDefaultExportConfig);
@@ -265,10 +265,17 @@ export default function ResearcherDashboard() {
   const loadResultsRef = useRef(null);
 
   const numericElements = useMemo(
-    () =>
-      (availableElements || []).filter(
-        (element) => String(element.datatype || "number").toLowerCase() === "number",
-      ),
+    () => (availableElements || []),
+    [availableElements],
+  );
+
+  const isNumericElement = useCallback(
+    (elementId) => {
+      const element = (availableElements || []).find(
+        (candidate) => String(candidate.element_id) === String(elementId),
+      );
+      return !element || String(element.datatype || "number").toLowerCase() === "number";
+    },
     [availableElements],
   );
 
@@ -398,10 +405,30 @@ export default function ResearcherDashboard() {
     return numericElements.filter((element) => {
       if (selectedIds.has(String(element.element_id))) return false;
       if (!searchTerm) return true;
-      const label = `${element.label || ""} ${element.unit || ""}`.toLowerCase();
-      return label.includes(searchTerm);
+      const searchableText = `${element.label || ""} ${element.code || ""} ${element.unit || ""}`.toLowerCase();
+      return searchableText.includes(searchTerm);
     });
   }, [numericElements, selectedElementFilters, elementSearch]);
+
+  const elementOperatorOptions = useMemo(
+    () => ({
+      numeric: [
+        { value: "eq", label: "=" },
+        { value: "gt", label: ">" },
+        { value: "gte", label: ">=" },
+        { value: "lt", label: "<" },
+        { value: "lte", label: "<=" },
+        { value: "between", label: "Between" },
+        { value: "has_value", label: "Has any value" },
+        { value: "is_empty", label: "Is empty" },
+      ],
+      text: [
+        { value: "has_value", label: "Has any value" },
+        { value: "is_empty", label: "Is empty" },
+      ],
+    }),
+    [],
+  );
 
   const orderedColumns = useMemo(() => {
     const columns = [...(queryData.columns || [])].filter(
@@ -590,7 +617,7 @@ export default function ResearcherDashboard() {
 
     if (reset) {
       setFiltering(true);
-      setFilterError(false);
+      setFilterError("");
     } else {
       setLoadingMore(true);
     }
@@ -615,7 +642,7 @@ export default function ResearcherDashboard() {
         key: filters.sort_by || null,
         direction: filters.sort_dir || "asc",
       });
-      setFilterError(false);
+      setFilterError("");
       setPagination(responsePagination);
       setQueryData((prev) => ({
         columns,
@@ -624,7 +651,7 @@ export default function ResearcherDashboard() {
     } catch (error) {
       console.error(reset ? "Filter Error:" : "Load More Error:", error);
       if (reset) {
-        setFilterError(true);
+        setFilterError(error?.message || "We couldn't apply the current filters. Please review the inputs and try again.");
         setPagination({
           offset: 0,
           limit: PAGE_SIZE,
@@ -819,6 +846,7 @@ export default function ResearcherDashboard() {
   };
 
   const addElementFilterById = (elementId) => {
+    const nextIsNumeric = isNumericElement(elementId);
     if (!elementId) return;
     const existing = (draftFilters.element_filters || []).find(
       (filter) => String(filter.element_id) === String(elementId),
@@ -826,15 +854,17 @@ export default function ResearcherDashboard() {
     if (existing) {
       setElementDraft({
         element_id: String(existing.element_id || ""),
-        operator: existing.operator || "gte",
-        value: existing.value ?? "",
-        value_max: existing.value_max ?? "",
+        operator: nextIsNumeric ? (existing.operator || "gte") : (["has_value", "is_empty"].includes(existing.operator) ? existing.operator : "has_value"),
+        value: nextIsNumeric ? (existing.value ?? "") : "",
+        value_max: nextIsNumeric ? (existing.value_max ?? "") : "",
       });
       setEditingElementId(String(elementId));
     } else {
-      setElementDraft((prev) => ({
-        ...prev,
+      setElementDraft(() => ({
         element_id: elementId,
+        operator: nextIsNumeric ? "gte" : "has_value",
+        value: "",
+        value_max: "",
       }));
       setEditingElementId(null);
     }
@@ -884,6 +914,8 @@ export default function ResearcherDashboard() {
 
   const updateElementDraft = (key, value) => {
     setElementDraft((prev) => {
+      const currentElementId = key === "element_id" ? value : prev.element_id;
+      const numericElementSelected = isNumericElement(currentElementId);
       if (key === "operator") {
         const isPresenceOperator = ["has_value", "is_empty"].includes(value);
         return {
@@ -892,6 +924,22 @@ export default function ResearcherDashboard() {
           value: isPresenceOperator ? "" : prev.value,
           value_max: value === "between" ? prev.value_max : "",
         };
+      }
+      if (key === "element_id") {
+        const nextOperator =
+          numericElementSelected
+            ? (["has_value", "is_empty"].includes(prev.operator) ? prev.operator : prev.operator || "gte")
+            : "has_value";
+        return {
+          ...prev,
+          element_id: value,
+          operator: nextOperator,
+          value: numericElementSelected ? prev.value : "",
+          value_max: numericElementSelected && nextOperator === "between" ? prev.value_max : "",
+        };
+      }
+      if (!numericElementSelected && (key === "value" || key === "value_max")) {
+        return prev;
       }
       return { ...prev, [key]: value };
     });
@@ -1225,7 +1273,7 @@ export default function ResearcherDashboard() {
             <svg className="h-4 w-4 shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             </svg>
-            <span>We couldn't apply the current filters. Please review the inputs and try again.</span>
+            <span>{filterError}</span>
           </div>
         )}
 
@@ -1882,6 +1930,14 @@ export default function ResearcherDashboard() {
                         const label = element
                           ? `${element.label}${element.unit ? ` (${element.unit})` : ""}`
                           : "Selected element";
+                        const suffix =
+                          filter.operator === "between" && filter.value_max !== ""
+                            ? ` - ${filter.value} to ${filter.value_max}`
+                            : ["has_value", "is_empty"].includes(filter.operator)
+                              ? ` - ${filter.operator === "has_value" ? "has value" : "is empty"}`
+                              : filter.value !== "" && filter.value !== undefined && filter.value !== null
+                                ? ` - ${filter.operator} ${filter.value}`
+                                : "";
                         return (
                           <div
                             key={String(filter.element_id)}
@@ -1892,7 +1948,7 @@ export default function ResearcherDashboard() {
                               onClick={() => editElementFilterById(filter.element_id)}
                               className="text-left transition hover:text-blue-900"
                             >
-                              {label}
+                              {label}{suffix}
                             </button>
                             <button
                               type="button"
@@ -1969,21 +2025,27 @@ export default function ResearcherDashboard() {
               </div>
 
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {(() => {
+                  const showValueInput =
+                    !["has_value", "is_empty"].includes(elementDraft.operator) &&
+                    isNumericElement(elementDraft.element_id);
+                  const operatorChoices = isNumericElement(elementDraft.element_id)
+                    ? elementOperatorOptions.numeric
+                    : elementOperatorOptions.text;
+                  return (
+                    <>
                 <select
                   value={elementDraft.operator}
                   onChange={(event) => updateElementDraft("operator", event.target.value)}
                   className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500"
                 >
-                  <option value="eq">=</option>
-                  <option value="gt">&gt;</option>
-                  <option value="gte">&ge;</option>
-                  <option value="lt">&lt;</option>
-                  <option value="lte">&le;</option>
-                  <option value="between">Between</option>
-                  <option value="has_value">Has any value</option>
-                  <option value="is_empty">Is empty</option>
+                  {operatorChoices.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
-                {["has_value", "is_empty"].includes(elementDraft.operator) ? (
+                {!showValueInput ? (
                   <div className="hidden sm:block" />
                 ) : (
                   <input
@@ -1994,7 +2056,7 @@ export default function ResearcherDashboard() {
                     className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500"
                   />
                 )}
-                {elementDraft.operator === "between" ? (
+                {elementDraft.operator === "between" && showValueInput ? (
                   <input
                     type="number"
                     value={elementDraft.value_max}
@@ -2003,6 +2065,9 @@ export default function ResearcherDashboard() {
                     className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 sm:col-span-2"
                   />
                 ) : null}
+                    </>
+                  );
+                })()}
               </div>
               <div className="flex justify-end">
                 <button

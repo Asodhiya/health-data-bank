@@ -11,6 +11,7 @@ from sqlalchemy import (
     TIMESTAMP,
     UniqueConstraint,
     PrimaryKeyConstraint,
+    Index,
     text,
 
 )
@@ -413,6 +414,12 @@ class GoalTemplate(Base):
             "\"window\" IN ('daily', 'weekly', 'monthly', 'none')",
             name="ck_goal_templates_window",
         ),
+        Index(
+            "ux_goal_templates_active_element",
+            "element_id",
+            unique=True,
+            postgresql_where=text("is_active = TRUE AND element_id IS NOT NULL"),
+        ),
     )
 
     template_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -430,6 +437,15 @@ class GoalTemplate(Base):
 
 class HealthGoal(Base):
     __tablename__ = "health_goals"
+    __table_args__ = (
+        Index(
+            "ux_health_goals_active_participant_element",
+            "participant_id",
+            "element_id",
+            unique=True,
+            postgresql_where=text("status = 'active' AND participant_id IS NOT NULL AND element_id IS NOT NULL"),
+        ),
+    )
 
     goal_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     participant_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("participant_profile.participant_id"))
@@ -600,6 +616,7 @@ class FieldElementMap(Base):
     __tablename__ = "field_element_map"
     __table_args__ = (
         PrimaryKeyConstraint("field_id", "element_id", name="pk_field_element_map"),
+        UniqueConstraint("field_id", name="uq_field_element_map_field_id"),
     )
 
     field_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("form_fields.field_id"))

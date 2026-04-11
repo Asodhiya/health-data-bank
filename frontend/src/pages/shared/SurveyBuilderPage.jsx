@@ -1908,7 +1908,7 @@ export default function SurveyBuilderPage() {
       else setRefreshKey((v) => v + 1);
       showToast('Form deleted');
     } catch (err) {
-      showToast('Error deleting form');
+      showToast(err.message || 'Error deleting form');
     }
   };
 
@@ -1919,7 +1919,7 @@ export default function SurveyBuilderPage() {
       showToast(ids.length > 1 ? `Published to ${ids.length} groups!` : 'Form published!');
       setRefreshKey((v) => v + 1);
     } catch (err) {
-      showToast('Error publishing form');
+      showToast(err.message || 'Error publishing form');
     }
   };
 

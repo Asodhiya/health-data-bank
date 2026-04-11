@@ -470,6 +470,14 @@ export default function GoalTemplates() {
     setShowModal(true);
   };
 
+  const unavailableElementIds = new Set(
+    (templates || [])
+      .filter((t) => t.template_id !== editingId)
+      .map((t) => t.element_id)
+      .filter(Boolean)
+  );
+  const selectableDataElements = dataElements.filter((el) => !unavailableElementIds.has(el.element_id));
+
   const openEditModal = (template, e) => {
     e.stopPropagation();
     setEditingId(template.template_id);
@@ -490,6 +498,10 @@ export default function GoalTemplates() {
       showToast("Please select a data element before saving.");
       return;
     }
+    if (!editingId && unavailableElementIds.has(formData.element_id)) {
+      showToast("That data element already has an active goal template.");
+      return;
+    }
     try {
       if (editingId) {
         await api.updateGoalTemplate(editingId, formData);
@@ -504,7 +516,7 @@ export default function GoalTemplates() {
       setShowModal(false);
       fetchAllData();
     } catch (err) {
-      alert("Save failed: " + err.message);
+      showToast(err.message || "Save failed");
     }
   };
 
@@ -516,7 +528,7 @@ export default function GoalTemplates() {
       setDeleteTarget(null);
       fetchAllData();
     } catch (err) {
-      alert("Delete failed: " + err.message);
+      showToast(err.message || "Delete failed");
     }
   };
 
@@ -526,7 +538,7 @@ export default function GoalTemplates() {
       await api.restoreGoalTemplate(template_id);
       fetchAllData();
     } catch (err) {
-      alert("Restore failed: " + err.message);
+      showToast(err.message || "Restore failed");
     } finally {
       setRestoringId(null);
     }
@@ -1024,6 +1036,9 @@ export default function GoalTemplates() {
                       {!formData.element_id && (
                         <p className="text-[11px] text-rose-400 mt-1 ml-1">Required — select a metric to track</p>
                       )}
+                      {selectableDataElements.length === 0 && (
+                        <p className="text-[11px] text-amber-500 mt-1 ml-1">All active data elements already have goal templates.</p>
+                      )}
                     </>
                   )}
                 </div>
@@ -1117,7 +1132,7 @@ export default function GoalTemplates() {
       {showCreateElement && (
         <SearchDataElementModal
           value={formData.element_id}
-          dataElements={dataElements}
+          dataElements={editingId ? dataElements : selectableDataElements}
           onChange={(id) => { setFormData((prev) => ({ ...prev, element_id: id })); setShowCreateElement(false); }}
           onCreated={(newElement) => { setDataElements((prev) => [...prev, newElement]); }}
           onClose={() => setShowCreateElement(false)}
