@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import psutil
-from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException, Request
 from fastapi.responses import Response
 from app.schemas.schemas import Role_schema, Permissions_schema, Role_user_link, Link_role_permission_schema
 from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResponse, UnassignCaretakerResponse, CaretakerItem, DeleteGroupResponse, RestoreResponse, BackupPreviewResponse, AdminProfileUpdate, AdminProfileOut, MaintenanceSettingsOut, MaintenanceSettingsPayload, UserListItem, UserListPage, AdminUserUpdate, UserStatusUpdate, UserReactivateRequest, UserDeleteRequest, MoveParticipantRequest, InviteListItem, BackupListItem, BackupScheduleSettingsOut, BackupScheduleSettingsPayload
@@ -832,3 +832,33 @@ async def get_admin_dashboard_summary(
 async def get_system_stats():
     """Return live server metrics for admin dashboard gauges."""
     return await _get_system_stats_payload()
+
+
+@router.get("/rbac-audit", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
+async def get_rbac_audit(request: Request):
+    """Introspect all routes and report their permission requirements."""
+    from app.core.rbac_audit import build_rbac_audit_report
+
+    app = request.app
+    flat_endpoints = build_rbac_audit_report(app)
+
+    # Group by module prefix
+    modules: dict[str, list] = {}
+    for ep in flat_endpoints:
+        parts = ep["path"].strip("/").split("/")
+        module_key = parts[2] if len(parts) >= 3 and parts[0] == "api" and parts[1] == "v1" else "_root"
+        modules.setdefault(module_key, []).append(ep)
+
+    summary: dict[str, int] = {}
+    for ep in flat_endpoints:
+        summary[ep["auth_level"]] = summary.get(ep["auth_level"], 0) + 1
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_endpoints": len(flat_endpoints),
+        "summary": summary,
+        "modules": [
+            {"module": key, "prefix": f"/api/v1/{key}" if key != "_root" else "/", "endpoints": eps}
+            for key, eps in sorted(modules.items())
+        ],
+    }

@@ -46,12 +46,9 @@ from app.services.notification_service import create_notifications_bulk
 router = APIRouter()
 
 INTAKE_FORM_TITLE = "Intake Form"
-async def _get_valid_profile_field_names(db: AsyncSession) -> set[str]:
-    """Return all active data element codes — these are valid profile_field values."""
-    result = await db.execute(
-        select(DataElement.code).where(DataElement.is_active == True)
-    )
-    return set(result.scalars().all())
+def _get_valid_profile_field_names() -> set[str]:
+    """Return column names on ParticipantProfile that intake fields may write to."""
+    return set(ParticipantProfile.__table__.columns.keys())
 
 
 async def _get_intake_form(db: AsyncSession) -> SurveyForm:
@@ -222,7 +219,14 @@ def _normalize_profile_field_value(profile_field: str, value: Any) -> Any:
         return parsed
 
     if profile_field == "dependents":
-        if value == "":
+        if value == "" or value is None:
+            return None
+        # If the value is a non-numeric string (e.g. option label "No" / "Yes"
+        # from a single_select field), treat negative answers as 0 dependents
+        # and ignore unresolvable labels so the intake submission isn't blocked.
+        if isinstance(value, str) and not value.lstrip("-").isdigit():
+            if value.lower() in ("no", "false", "none", "0"):
+                return 0
             return None
         try:
             parsed = int(value)
@@ -455,7 +459,7 @@ async def submit_intake(
     # 4. Save answers and collect mapped profile updates
     answer_records = _build_answer_records([answer.model_dump() for answer in payload.answers], submission.submission_id)
     field_meta = await _load_field_meta([field_uuid for _, field_uuid, *_ in answer_records], db)
-    valid_profile_fields = await _get_valid_profile_field_names(db)
+    valid_profile_fields = _get_valid_profile_field_names()
     profile_updates: dict[str, Any] = {
         "program_enrolled_at": datetime.now(timezone.utc),
     }
@@ -476,7 +480,8 @@ async def submit_intake(
         if not is_conditional:
             val_text, val_num, val_json = _resolve_answer_value(field_uuid, val_text, val_num, val_json, field_meta)
         raw_value = val_json if val_json is not None else val_num if val_num is not None else val_text
-        raw_value = _resolve_profile_field_raw_value(field, raw_value)
+        if not is_conditional:
+            raw_value = _resolve_profile_field_raw_value(field, raw_value)
         profile_updates[field.profile_field] = _normalize_profile_field_value(field.profile_field, raw_value)
 
     if profile_updates:
@@ -773,7 +778,7 @@ async def update_intake_form_route(
     saved_fields: list[FormField] = []
 
     # Update existing fields in place, create only new fields, and replace options.
-    valid_profile_fields = await _get_valid_profile_field_names(db)
+    valid_profile_fields = _get_valid_profile_field_names()
     for i, field_data in enumerate(payload.fields):
         profile_field = field_data.get("profile_field") or None
         if profile_field is not None and profile_field not in valid_profile_fields:
