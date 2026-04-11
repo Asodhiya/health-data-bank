@@ -158,7 +158,7 @@ export default function DashboardLayout({ role }) {
             isSidebarOpen ? "translate-x-0" : "-translate-x-full"
           } fixed top-0 left-0 z-50 h-screen w-64 shadow-xl transition-transform duration-300 ease-in-out bg-white border-r border-gray-200 flex flex-col`}
         >
-          <nav className="flex-1 p-6 flex flex-col gap-2">
+          <nav className="flex-1 p-6 flex flex-col gap-2 overflow-y-auto">
             {/* USER PROFILE CARD */}
             <div className="mb-6 p-4 bg-slate-50 border border-slate-100 rounded-xl shadow-sm">
               <div className="flex flex-col">

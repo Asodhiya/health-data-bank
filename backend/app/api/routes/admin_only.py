@@ -11,7 +11,7 @@ from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResp
 from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem, GroupUpdateRequest, GroupMemberItem
 from app.schemas.notification_schema import NotificationItem
 from app.services.role_service import addroles, viewroles, add_permissions, link_user_roles, link_role_permisson
-from app.services.admin_service import assign_caretaker_to_group, unassign_caretaker_from_group, create_group, delete_group, update_group, move_participant_group, list_groups, list_group_members_for_admin, list_caretakers, backup_database, restore_database, preview_restore_file, restore_backup_by_id, preview_backup_by_id, list_users, list_users_paginated, get_user_item, update_user, update_user_status, reactivate_user_access, unlock_user_access, delete_user, list_invites, revoke_invite, list_backups, delete_backup, get_backup_schedule_settings, get_maintenance_settings, update_maintenance_settings, update_backup_schedule_settings, get_user_submissions, get_user_goals, get_onboarding_stats, get_survey_completion_stats
+from app.services.admin_service import assign_caretaker_to_group, unassign_caretaker_from_group, create_group, delete_group, update_group, move_participant_group, list_groups, list_group_members_for_admin, get_group_goals, list_caretakers, backup_database, restore_database, preview_restore_file, restore_backup_by_id, preview_backup_by_id, list_users, list_users_paginated, get_user_item, update_user, update_user_status, reactivate_user_access, unlock_user_access, delete_user, list_invites, revoke_invite, list_backups, delete_backup, get_backup_schedule_settings, get_maintenance_settings, update_maintenance_settings, update_backup_schedule_settings, get_user_submissions, get_user_goals, get_onboarding_stats, get_survey_completion_stats
 from typing import List
 from app.db.session import get_db
 from app.db.models import Role, UserRole, GroupMember, AuditLog, User, AdminProfile, SignupInvite, Backup, Group
@@ -87,10 +87,23 @@ async def _fetch_audit_logs_payload(
     offset: int = 0,
     action: Optional[str] = None,
     user_id: Optional[UUID] = None,
+    search: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    actor_role: Optional[str] = None,
 ):
+    # Subquery: pick one role per user (lowest role_id = primary assignment)
+    role_sq = (
+        select(UserRole.user_id, func.min(Role.role_name).label("role_name"))
+        .join(Role, Role.role_id == UserRole.role_id)
+        .group_by(UserRole.user_id)
+        .subquery()
+    )
+
     stmt = (
-        select(AuditLog, User.first_name, User.last_name, User.email)
+        select(AuditLog, User.first_name, User.last_name, User.email, role_sq.c.role_name)
         .outerjoin(User, User.user_id == AuditLog.actor_user_id)
+        .outerjoin(role_sq, role_sq.c.user_id == AuditLog.actor_user_id)
         .order_by(desc(AuditLog.created_at))
     )
 
@@ -100,23 +113,60 @@ async def _fetch_audit_logs_payload(
         stmt = stmt.where(
             (AuditLog.actor_user_id == user_id) | (AuditLog.entity_id == user_id)
         )
+    if search:
+        q = f"%{search.strip()}%"
+        stmt = stmt.where(
+            func.coalesce(User.first_name, "").ilike(q)
+            | func.coalesce(User.last_name, "").ilike(q)
+            | func.coalesce(User.email, "").ilike(q)
+            | func.coalesce(AuditLog.ip_address, "").ilike(q)
+        )
+    if date_from:
+        stmt = stmt.where(AuditLog.created_at >= date_from)
+    if date_to:
+        # include the full end day
+        end = date_to.replace(hour=23, minute=59, second=59, microsecond=999999) if date_to.hour == 0 else date_to
+        stmt = stmt.where(AuditLog.created_at <= end)
+    if actor_role:
+        stmt = stmt.where(func.lower(func.coalesce(role_sq.c.role_name, "")) == actor_role.lower())
 
     stmt = stmt.offset(offset).limit(limit)
 
     result = await db.execute(stmt)
     rows = result.all()
 
-    count_stmt = select(func.count()).select_from(AuditLog)
+    # Count with the same filters (needs same joins when search/actor_role are active)
+    count_stmt = (
+        select(func.count())
+        .select_from(AuditLog)
+        .outerjoin(User, User.user_id == AuditLog.actor_user_id)
+        .outerjoin(role_sq, role_sq.c.user_id == AuditLog.actor_user_id)
+    )
     if action:
         count_stmt = count_stmt.where(AuditLog.action == action.upper())
     if user_id:
         count_stmt = count_stmt.where(
             (AuditLog.actor_user_id == user_id) | (AuditLog.entity_id == user_id)
         )
+    if search:
+        q = f"%{search.strip()}%"
+        count_stmt = count_stmt.where(
+            func.coalesce(User.first_name, "").ilike(q)
+            | func.coalesce(User.last_name, "").ilike(q)
+            | func.coalesce(User.email, "").ilike(q)
+            | func.coalesce(AuditLog.ip_address, "").ilike(q)
+        )
+    if date_from:
+        count_stmt = count_stmt.where(AuditLog.created_at >= date_from)
+    if date_to:
+        end = date_to.replace(hour=23, minute=59, second=59, microsecond=999999) if date_to.hour == 0 else date_to
+        count_stmt = count_stmt.where(AuditLog.created_at <= end)
+    if actor_role:
+        count_stmt = count_stmt.where(func.lower(func.coalesce(role_sq.c.role_name, "")) == actor_role.lower())
     total = (await db.execute(count_stmt)).scalar()
 
     logs = []
-    for audit, first_name, last_name, email in rows:
+    for audit, first_name, last_name, email, role_name in rows:
         if first_name or last_name:
             actor_label = f"{first_name or ''} {last_name or ''}".strip()
         elif email:
@@ -129,6 +179,8 @@ async def _fetch_audit_logs_payload(
             "action": audit.action,
             "actor_user_id": str(audit.actor_user_id) if audit.actor_user_id else None,
             "actor_label": actor_label,
+            "actor_email": email or None,
+            "actor_role": role_name or None,
             "entity_type": audit.entity_type,
             "entity_id": str(audit.entity_id) if audit.entity_id else None,
             "ip_address": audit.ip_address,
@@ -181,24 +233,27 @@ async def _get_system_stats_payload():
 
 @router.get("/audit-logs", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
 async def get_audit_logs(
-    limit: int = Query(default=20, ge=1, le=100, description="Number of records to return"),
-    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
-    action: Optional[str] = Query(default=None, description="Filter by action e.g. LOGIN_FAILED"),
-    user_id: Optional[UUID] = Query(default=None, description="Filter logs for a specific user"),
+    limit: int = Query(default=20, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    action: Optional[str] = Query(default=None),
+    user_id: Optional[UUID] = Query(default=None),
+    search: Optional[str] = Query(default=None, max_length=200),
+    date_from: Optional[datetime] = Query(default=None),
+    date_to: Optional[datetime] = Query(default=None),
+    actor_role: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
-    # TODO: replace ROLE_READ_ALL with require_permissions("audit:read") once that permission is seeded in the DB
 ):
-    """
-    Return paginated audit log entries, newest first.
-
-    Query params:
-      - limit:  max rows to return (default 20, max 100)
-      - offset: pagination offset
-      - action: optional filter e.g. ?action=LOGIN_FAILED
-
-    Each row includes the actor's display name joined from the users table.
-    """
-    return await _fetch_audit_logs_payload(db, limit=limit, offset=offset, action=action, user_id=user_id)
+    return await _fetch_audit_logs_payload(
+        db,
+        limit=limit,
+        offset=offset,
+        action=action,
+        user_id=user_id,
+        search=search,
+        date_from=date_from,
+        date_to=date_to,
+        actor_role=actor_role,
+    )
     
     
     
@@ -215,6 +270,15 @@ async def list_group_members_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     return await list_group_members_for_admin(group_id, db)
+
+
+@router.get("/groups/{group_id}/goals", dependencies=[Depends(require_permissions(GROUP_READ))])
+async def get_group_goals_endpoint(
+    group_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return health goal summaries for all active members of a group (single query)."""
+    return await get_group_goals(group_id, db)
 
 
 @router.get("/caretakers", response_model=List[CaretakerItem], dependencies=[Depends(require_permissions(CARETAKER_READ))])
@@ -403,6 +467,9 @@ async def get_users_paged(
     search: str | None = Query(default=None),
     sort_field: str = Query(default="joined"),
     sort_dir: str = Query(default="desc"),
+    role: str | None = Query(default=None),
+    exclude_group_id: int | None = Query(default=None),
+    active_only: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ):
     return await list_users_paginated(
@@ -412,6 +479,9 @@ async def get_users_paged(
         search=search,
         sort_field=sort_field,
         sort_dir=sort_dir,
+        role=role,
+        exclude_group_id=exclude_group_id,
+        active_only=active_only,
     )
 
 

@@ -53,7 +53,7 @@ from typing import List
 from app.core.config import settings
 from app.core.security import generate_reset_token, hash_reset_token, reset_token_expiry
 from app.core.security import PasswordHash
-from app.services.email_sender import send_reset_email
+from app.services.email_sender import send_reset_email, send_email_update_notification
 from app.services.notification_service import create_notification
 
 # ── Small in-memory caches for hot admin list endpoints ──────────────────────
@@ -115,38 +115,40 @@ def _normalize_user_sort(
 
 
 def _apply_user_ordering(stmt, *, sort_field: str, sort_dir: str):
-    role_link_sq = _single_role_link_subquery()
-    ordered = (
-        stmt
-        .outerjoin(role_link_sq, role_link_sq.c.user_id == User.user_id)
-        .outerjoin(Role, Role.role_id == role_link_sq.c.role_id)
-        .outerjoin(ParticipantProfile, ParticipantProfile.user_id == User.user_id)
-        .outerjoin(
-            GroupMember,
-            (GroupMember.participant_id == ParticipantProfile.participant_id)
-            & (GroupMember.left_at.is_(None)),
+    # Only join tables required by the active sort field — avoids 4-table join
+    # for common sorts like name/email/status/joined which need no extra tables.
+    needs_role = sort_field == "role"
+    needs_group = sort_field == "group"
+
+    if needs_role or needs_group:
+        role_link_sq = _single_role_link_subquery()
+        stmt = stmt.outerjoin(role_link_sq, role_link_sq.c.user_id == User.user_id)
+        stmt = stmt.outerjoin(Role, Role.role_id == role_link_sq.c.role_id)
+
+    if needs_group:
+        stmt = (
+            stmt
+            .outerjoin(ParticipantProfile, ParticipantProfile.user_id == User.user_id)
+            .outerjoin(
+                GroupMember,
+                (GroupMember.participant_id == ParticipantProfile.participant_id)
+                & (GroupMember.left_at.is_(None)),
+            )
+            .outerjoin(Group, Group.group_id == GroupMember.group_id)
         )
-        .outerjoin(Group, Group.group_id == GroupMember.group_id)
-    )
 
     base_sort = {
-        "name": (
-            func.lower(func.coalesce(User.first_name, "")),
-            func.lower(func.coalesce(User.last_name, "")),
-        ),
-        "email": (func.lower(func.coalesce(User.email, "")),),
+        "name":   (func.lower(func.coalesce(User.first_name, "")), func.lower(func.coalesce(User.last_name, ""))),
+        "email":  (func.lower(func.coalesce(User.email, "")),),
         "status": (User.status,),
-        "role": (func.lower(func.coalesce(Role.role_name, "")),),
+        "role":   (func.lower(func.coalesce(Role.role_name, "")),),
         "joined": (User.created_at,),
-        "group": (func.lower(func.coalesce(Group.name, "")),),
+        "group":  (func.lower(func.coalesce(Group.name, "")),),
     }[sort_field]
 
-    ordered_columns = [
-        col.asc() if sort_dir == "asc" else col.desc()
-        for col in base_sort
-    ]
+    ordered_columns = [col.asc() if sort_dir == "asc" else col.desc() for col in base_sort]
     tie_breakers = [User.created_at.desc(), User.user_id.asc()]
-    return ordered.order_by(*ordered_columns, *tie_breakers)
+    return stmt.order_by(*ordered_columns, *tie_breakers)
 
 
 async def _get_caretaker_profile_if_assignable(db: AsyncSession, user_id: UUID) -> CaretakerProfile | None:
@@ -600,7 +602,9 @@ async def list_group_members_for_admin(
             ParticipantProfile.user_id,
             User.first_name,
             User.last_name,
+            User.email,
             GroupMember.joined_at,
+            User.status,
         )
         .join(ParticipantProfile, ParticipantProfile.participant_id == GroupMember.participant_id)
         .join(User, User.user_id == ParticipantProfile.user_id)
@@ -613,11 +617,51 @@ async def list_group_members_for_admin(
     return [
         {
             "participant_id": user_id,
-            "name": f"{first_name or ''} {last_name or ''}".strip() or "Unknown",
+            "name": f"{first_name or ''} {last_name or ''}".strip() or email or "Unknown",
             "joined_at": joined_at,
+            "status": "active" if status else "inactive",
         }
-        for user_id, first_name, last_name, joined_at in result.all()
+        for user_id, first_name, last_name, email, joined_at, status in result.all()
     ]
+
+
+async def get_group_goals(group_id: UUID, db: AsyncSession) -> dict:
+    """Return health goal summaries for all active members of a group.
+
+    Returns a dict keyed by user_id (str) → list of {id, name, status, is_completed}.
+    The user_id key matches the 'participant_id' field in list_group_members_for_admin.
+    One JOIN query replaces N per-participant API requests from the frontend.
+    """
+    result = await db.execute(
+        select(
+            ParticipantProfile.user_id,
+            HealthGoal.goal_id,
+            HealthGoal.status,
+            GoalTemplate.name.label("template_name"),
+        )
+        .join(ParticipantProfile, ParticipantProfile.participant_id == HealthGoal.participant_id)
+        .join(User, User.user_id == ParticipantProfile.user_id)
+        .outerjoin(GoalTemplate, GoalTemplate.template_id == HealthGoal.template_id)
+        .join(GroupMember, GroupMember.participant_id == HealthGoal.participant_id)
+        .where(GroupMember.group_id == group_id)
+        .where(GroupMember.left_at.is_(None))
+        .where(_visible_group_member_user_clause())
+    )
+
+    goals_by_user: dict = {}
+    for user_id, goal_id, status, template_name in result.all():
+        key = str(user_id)
+        if key not in goals_by_user:
+            goals_by_user[key] = []
+        status_str = status or "active"
+        goals_by_user[key].append({
+            "id": str(goal_id),
+            "name": template_name or "Goal",
+            "status": status_str,
+            "is_completed": status_str == "completed",
+        })
+
+    return goals_by_user
 
 
 async def list_caretakers(db: AsyncSession) -> List[CaretakerItem]:
@@ -763,6 +807,23 @@ async def delete_group(
         await db.execute(
             sa_delete(FormDeployment).where(FormDeployment.group_id == group_id)
         )
+
+        # Clean up any unsubmitted drafts for this group before orphaning the completed ones
+        unsubmitted_sq = (
+            select(FormSubmission.submission_id)
+            .where(FormSubmission.group_id == group_id)
+            .where(FormSubmission.submitted_at.is_(None))
+        )
+        await db.execute(
+            sa_delete(SubmissionAnswer)
+            .where(SubmissionAnswer.submission_id.in_(unsubmitted_sq))
+        )
+        await db.execute(
+            sa_delete(FormSubmission)
+            .where(FormSubmission.group_id == group_id)
+            .where(FormSubmission.submitted_at.is_(None))
+        )
+
         await db.execute(
             update(FormSubmission).where(FormSubmission.group_id == group_id).values(group_id=None)
         )
@@ -842,6 +903,8 @@ async def move_participant_group(user_id: UUID, new_group_id: UUID | None, db: A
 
     # Fetch participant name for notification message
     participant_user = await db.scalar(select(User).where(User.user_id == user_id))
+    if participant_user and not participant_user.status:
+        raise HTTPException(status_code=400, detail="Cannot assign an inactive participant to a group.")
     participant_name = f"{participant_user.first_name or ''} {participant_user.last_name or ''}".strip() if participant_user else "A participant"
 
     # Close current active membership
@@ -851,6 +914,25 @@ async def move_participant_group(user_id: UUID, new_group_id: UUID | None, db: A
         .where(GroupMember.left_at == None)
         .values(left_at=now)
     )
+
+    if previous_group_id:
+        # Clean up any unsubmitted survey drafts tied to the old group
+        unsubmitted_sq = (
+            select(FormSubmission.submission_id)
+            .where(FormSubmission.participant_id == participant.participant_id)
+            .where(FormSubmission.group_id == previous_group_id)
+            .where(FormSubmission.submitted_at.is_(None))
+        )
+        await db.execute(
+            sa_delete(SubmissionAnswer)
+            .where(SubmissionAnswer.submission_id.in_(unsubmitted_sq))
+        )
+        await db.execute(
+            sa_delete(FormSubmission)
+            .where(FormSubmission.participant_id == participant.participant_id)
+            .where(FormSubmission.group_id == previous_group_id)
+            .where(FormSubmission.submitted_at.is_(None))
+        )
 
     # Notify old caretaker that participant left their group
     if old_caretaker_user_id:
@@ -1361,17 +1443,45 @@ async def _list_users_table_page(
     search: str | None = None,
     sort_field: str = "joined",
     sort_dir: str = "desc",
+    role: str | None = None,
+    exclude_group_id: int | None = None,
+    active_only: bool = False,
 ) -> list[UserListItem]:
     """Admin users page query, including lightweight profile details for side panel drawers."""
     CaretakerUser = aliased(User)
     AssignedCaretakerProfile = aliased(CaretakerProfile)
     UserCaretakerProfile = aliased(CaretakerProfile)
+
+    base_stmt = select(User.user_id)
+    if active_only:
+        base_stmt = base_stmt.where(User.status == True)
+    if role is not None:
+        _role_sq = _single_role_link_subquery()
+        base_stmt = (
+            base_stmt
+            .join(_role_sq, _role_sq.c.user_id == User.user_id)
+            .join(Role, Role.role_id == _role_sq.c.role_id)
+            .where(Role.role_name == role)
+        )
+    if exclude_group_id is not None:
+        _already_in = (
+            select(GroupMember.participant_id)
+            .join(ParticipantProfile, ParticipantProfile.participant_id == GroupMember.participant_id)
+            .where(GroupMember.group_id == exclude_group_id)
+            .where(GroupMember.left_at == None)
+            .subquery()
+        )
+        _pp_sq = select(ParticipantProfile.user_id, ParticipantProfile.participant_id).subquery()
+        base_stmt = (
+            base_stmt
+            .join(_pp_sq, _pp_sq.c.user_id == User.user_id)
+            .where(~_pp_sq.c.participant_id.in_(select(_already_in)))
+        )
+
     user_ids_stmt = _apply_user_ordering(
         _apply_user_search(
-        select(User.user_id)
-        .limit(limit)
-        .offset(offset),
-        search,
+            base_stmt.limit(limit).offset(offset),
+            search,
         ),
         sort_field=sort_field,
         sort_dir=sort_dir,
@@ -1393,6 +1503,7 @@ async def _list_users_table_page(
             User.status,
             User.locked_until,
             User.created_at,
+            User.last_login_at,
             Role.role_name,
             Group.group_id,
             Group.name.label("group_name"),
@@ -1476,6 +1587,7 @@ async def _list_users_table_page(
             marital_status=row.marital_status,
             onboarding_status=row.onboarding_status,
             program_enrolled_at=row.program_enrolled_at,
+            last_login_at=row.last_login_at,
             **_role_scoped_profile_fields(row),
             anonymized_from=None,
             self_deactivated_at=None,
@@ -1484,9 +1596,40 @@ async def _list_users_table_page(
     ]
 
 
-async def _get_users_total_cached(db: AsyncSession, search: str | None = None) -> int:
+async def _get_users_total_cached(
+    db: AsyncSession,
+    search: str | None = None,
+    role: str | None = None,
+    exclude_group_id: int | None = None,
+    active_only: bool = False,
+) -> int:
     # Keep this live for correctness in admin UX; count cache can drift after rapid user changes.
-    total_stmt = _apply_user_search(select(func.count(User.user_id)), search)
+    base_stmt = select(func.count(User.user_id))
+    if active_only:
+        base_stmt = base_stmt.where(User.status == True)
+    if role is not None:
+        _role_sq = _single_role_link_subquery()
+        base_stmt = (
+            base_stmt
+            .join(_role_sq, _role_sq.c.user_id == User.user_id)
+            .join(Role, Role.role_id == _role_sq.c.role_id)
+            .where(Role.role_name == role)
+        )
+    if exclude_group_id is not None:
+        _already_in = (
+            select(GroupMember.participant_id)
+            .join(ParticipantProfile, ParticipantProfile.participant_id == GroupMember.participant_id)
+            .where(GroupMember.group_id == exclude_group_id)
+            .where(GroupMember.left_at == None)
+            .subquery()
+        )
+        _pp_sq = select(ParticipantProfile.user_id, ParticipantProfile.participant_id).subquery()
+        base_stmt = (
+            base_stmt
+            .join(_pp_sq, _pp_sq.c.user_id == User.user_id)
+            .where(~_pp_sq.c.participant_id.in_(select(_already_in)))
+        )
+    total_stmt = _apply_user_search(base_stmt, search)
     total = (await db.execute(total_stmt)).scalar_one() or 0
     return int(total)
 
@@ -1526,6 +1669,7 @@ async def get_user_item(
                 User.status,
                 User.locked_until,
                 User.created_at,
+                User.last_login_at,
                 Role.role_name,
                 Group.group_id,
                 Group.name.label("group_name"),
@@ -1595,6 +1739,7 @@ async def get_user_item(
         status=row.status,
         locked_until=row.locked_until,
         joined_at=row.created_at,
+        last_login_at=row.last_login_at,
         group_id=row.group_id,
         group=row.group_name,
         caretaker_id=row.caretaker_id,
@@ -1624,12 +1769,15 @@ async def list_users_paginated(
     search: str | None = None,
     sort_field: str = "joined",
     sort_dir: str = "desc",
+    role: str | None = None,
+    exclude_group_id: int | None = None,
+    active_only: bool = False,
 ) -> UserListPage:
     safe_limit = max(1, min(limit, 200))
     safe_offset = max(0, offset)
     normalized_search = _normalize_user_search(search)
     normalized_sort_field, normalized_sort_dir = _normalize_user_sort(sort_field, sort_dir)
-    total = await _get_users_total_cached(db, search=normalized_search)
+    total = await _get_users_total_cached(db, search=normalized_search, role=role, exclude_group_id=exclude_group_id, active_only=active_only)
     items = await _list_users_table_page(
         db,
         limit=safe_limit,
@@ -1637,6 +1785,9 @@ async def list_users_paginated(
         search=normalized_search,
         sort_field=normalized_sort_field,
         sort_dir=normalized_sort_dir,
+        role=role,
+        exclude_group_id=exclude_group_id,
+        active_only=active_only,
     )
     return UserListPage(total=int(total), limit=safe_limit, offset=safe_offset, items=items)
 
@@ -1697,8 +1848,10 @@ async def get_survey_completion_stats(db: AsyncSession) -> dict:
                 Group.name.label("group_name"),
             )
             .join(Group, Group.group_id == FormDeployment.group_id, isouter=True)
+            .join(SurveyForm, SurveyForm.form_id == FormDeployment.form_id)
             .where(FormDeployment.group_id.is_not(None))
             .where(FormDeployment.revoked_at.is_(None))
+            .where(SurveyForm.status.notin_(["archived", "deleted", "ARCHIVED", "DELETED"]))
         )
     ).all()
 
@@ -1829,13 +1982,32 @@ async def update_user(user_id: UUID, payload: AdminUserUpdate, actor_id: UUID, d
     current_role_names: set[str] = set()
     current_roles = []
 
+    email_changed = False
     if payload.email and payload.email != user.email:
         existing = await db.scalar(select(User).where(User.email == payload.email))
         if existing:
             raise HTTPException(status_code=409, detail="Email already in use")
+        email_changed = True
 
+    password_changed = False
     for field, value in payload.model_dump(exclude_none=True, exclude={"role"}).items():
-        setattr(user, field, value)
+        if field == "password":
+            password_changed = True
+            user.password_hash = PasswordHash.from_password(value).to_str()
+        else:
+            setattr(user, field, value)
+
+    if password_changed:
+        from app.services.audit_service import write_audit_log
+        await write_audit_log(
+            db,
+            action="PASSWORD_RESET_SUCCESS",
+            actor_user_id=actor_id,
+            entity_type="user",
+            entity_id=user_id,
+            details={"reason": "Admin set temporary password"},
+            commit=False,
+        )
 
     if requested_role:
         allowed_roles = {"admin", "researcher", "caretaker", "participant"}
@@ -1910,6 +2082,13 @@ async def update_user(user_id: UUID, payload: AdminUserUpdate, actor_id: UUID, d
 
     await db.commit()
     await db.refresh(user)
+
+    if email_changed:
+        try:
+            send_email_update_notification(user.email)
+        except Exception as e:
+            print(f"Failed to send email update notification: {e}")
+
     return user
 
 
@@ -1986,6 +2165,15 @@ async def reactivate_user_access(user_id: UUID, payload: UserReactivateRequest, 
         entity_type="user",
         entity_id=user_id,
         details={"email": user.email},
+        commit=False,
+    )
+    await write_audit_log(
+        db,
+        action="PASSWORD_RESET_REQUESTED",
+        actor_user_id=actor_id,
+        entity_type="user",
+        entity_id=user_id,
+        details={"email": user.email, "reason": "Account reactivation"},
         commit=False,
     )
     await db.commit()
@@ -2562,5 +2750,3 @@ async def get_user_goals(user_id: UUID, db: AsyncSession) -> list:
         })
 
     return result
-
-

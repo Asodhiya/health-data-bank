@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from jose import jwt, JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import SignupInvite, Role
+from app.db.models import SignupInvite, Role, User
 from sqlalchemy import select
 from fastapi import HTTPException
 
@@ -87,6 +87,18 @@ class InviteTokenGenerator:
         )
 
     async def save(self, db: AsyncSession) -> dict:
+        existing_user = await db.scalar(select(User).where(User.email == self.target_email))
+        if existing_user:
+            if not existing_user.status:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This email belongs to a deactivated account. Use the reactivate option instead."
+                )
+            raise HTTPException(
+                status_code=409,
+                detail="An account with this email already exists."
+            )
+
         role_result = await db.execute(select(Role).where(Role.role_name == self.target_role))
         role = role_result.scalar_one_or_none()
         if not role:

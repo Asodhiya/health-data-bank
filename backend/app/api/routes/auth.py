@@ -163,7 +163,7 @@ async def login(
             ip_address=ip,
             actor_user_id=None,
             entity_type="user",
-            details={"identifier_attempted": data.identifier},
+            details={"identifier_attempted": data.identifier, "user_agent": request.headers.get("User-Agent")},
         )
 
         if exc.status_code == status.HTTP_423_LOCKED:
@@ -232,7 +232,7 @@ async def login(
         actor_user_id=user.user_id,
         entity_type="user",
         entity_id=user.user_id,
-        details={"email": user.email},
+        details={"email": user.email, "user_agent": request.headers.get("User-Agent")},
     )
 
     session = await create_user_session(user.user_id, db)
@@ -293,7 +293,7 @@ async def logout(
         actor_user_id=user.user_id,
         entity_type="user",
         entity_id=user.user_id,
-        details={"email": user.email},
+        details={"email": user.email, "user_agent": request.headers.get("User-Agent")},
     )
 
     response.delete_cookie("token")

@@ -54,6 +54,7 @@ function transformUser(u) {
     role: u.role || "",
     status: u.status === true ? "active" : "inactive",
     joinedAt: u.joined_at || null,
+    lastLoginAt: u.last_login_at || null,
     groupId: u.group_id ? String(u.group_id) : null,
     group: u.group || null,
     caretakerId: u.caretaker_id ? String(u.caretaker_id) : null,
@@ -91,9 +92,55 @@ function transformUser(u) {
 function Avatar({ name, size = "md" }) { const ini = (name || "?").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2); const cols = ["bg-blue-500", "bg-emerald-500", "bg-indigo-500", "bg-rose-500", "bg-amber-500", "bg-violet-500"]; const sz = size === "lg" ? "w-12 h-12 text-base" : size === "sm" ? "w-7 h-7 text-[10px]" : "w-9 h-9 text-xs"; return <div className={`rounded-full ${cols[(name?.charCodeAt(0) || 0) % cols.length]} text-white flex items-center justify-center font-bold shrink-0 ${sz}`}>{ini}</div>; }
 function RoleBadge({ role }) { const r = ROLES.find(x => x.value === role); return <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${r?.lightBg} ${r?.lightText}`}>{r?.label?.replace(/s$/, "") || role}</span>; }
 function StatusDot({ status }) { return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${status === "active" ? "bg-emerald-400 animate-pulse" : "bg-slate-300"}`} />; }
-function Toast({ show, message, type, onClose }) { if (!show) return null; const ok = type !== "error"; return <div className={`fixed top-20 right-6 z-50 max-w-sm w-full border rounded-xl p-4 shadow-lg flex items-start gap-3 animate-slide-in ${ok ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-rose-50 border-rose-200 text-rose-800"}`}><div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${ok ? "bg-emerald-100 text-emerald-600" : "bg-rose-100 text-rose-600"}`}>{ok ? <IconCheck /> : <IconX />}</div><div className="flex-1"><p className="text-sm font-semibold">{ok ? "Done" : "Error"}</p><p className="text-sm mt-0.5 opacity-80">{message}</p></div><button onClick={onClose} className="text-current opacity-40 hover:opacity-70 shrink-0"><IconX /></button></div>; }
-function Modal({ open, onClose, children, maxW = "max-w-md" }) { if (!open) return null; return <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"><div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} /><div className={`relative bg-white rounded-2xl shadow-xl ${maxW} w-full p-6 max-h-[85vh] overflow-y-auto`}>{children}</div></div>; }
+function Toast({ show, message, type, onClose }) { if (!show) return null; const ok = type !== "error"; return <div className={`fixed top-20 left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-6 z-[200] max-w-sm w-[calc(100%-3rem)] sm:w-full border rounded-xl p-4 shadow-lg flex items-start gap-3 animate-slide-in ${ok ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-rose-50 border-rose-200 text-rose-800"}`}><div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${ok ? "bg-emerald-100 text-emerald-600" : "bg-rose-100 text-rose-600"}`}>{ok ? <IconCheck /> : <IconX />}</div><div className="flex-1"><p className="text-sm font-semibold">{ok ? "Done" : "Error"}</p><p className="text-sm mt-0.5 opacity-80">{message}</p></div><button onClick={onClose} className="text-current opacity-40 hover:opacity-70 shrink-0"><IconX /></button></div>; }
+function Modal({ open, onClose, children, maxW = "max-w-md" }) { if (!open) return null; return <div className="fixed inset-0 z-50 flex items-center justify-center p-4"><div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} /><div className={`relative bg-white rounded-2xl shadow-xl ${maxW} w-full p-6 max-h-[85vh] overflow-y-auto`}>{children}</div></div>; }
 function InfoRow({ label, value }) { return <div className="flex justify-between py-1.5 border-b border-slate-50 last:border-0"><span className="text-xs text-slate-400">{label}</span><span className="text-xs font-semibold text-slate-700">{value || "—"}</span></div>; }
+
+// ── Searchable filter dropdown ──────────────────────────────────────────────
+function SearchableSelect({ value, onChange, options, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+  const filtered = options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()));
+  const selected = options.find(o => o.value === value);
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => { setOpen(p => !p); setQ(""); }}
+        className="px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-600 flex items-center gap-1.5 hover:bg-slate-100 transition-colors whitespace-nowrap">
+        {selected?.label || placeholder}
+        <svg className={`h-3.5 w-3.5 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 z-30 w-52 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-slate-100">
+            <div className="relative">
+              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search…"
+                className="w-full pl-7 pr-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-300" />
+            </div>
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {filtered.length === 0
+              ? <p className="px-3 py-2 text-xs text-slate-400 italic">No results</p>
+              : filtered.map(o => (
+                <button key={o.value} onClick={() => { onChange(o.value); setOpen(false); }}
+                  className={`w-full text-left px-3 py-2 text-xs font-medium transition-colors ${o.value === value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
+                  {o.label}
+                </button>
+              ))
+            }
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Placeholder: empty state for sections awaiting backend ───────────────────
 function ApiPendingBanner({ endpoint, description }) {
@@ -142,7 +189,7 @@ function CreateGroupModal({ open, onClose, onConfirm, caretakers, users }) {
   };
 
   return (
-    <Modal open={open} onClose={onClose} maxW="max-w-lg">
+    <Modal open={open} onClose={() => !loading && onClose()} maxW="max-w-lg">
       <h3 className="text-lg font-bold text-slate-800 mb-4">Create New Group</h3>
       <div className="space-y-4">
         <div>
@@ -224,22 +271,149 @@ function InviteModal({ open, onClose, groups, preselectedRole, onInviteSent, onE
   const send = async () => { setStatus("loading"); try { await api.sendInvite(email.trim(), role, groupId || undefined); onInviteSent?.({ email: email.trim(), role, groupId, group_name: groups.find(g => g.group_id === groupId)?.name || null }); setStatus("success"); } catch (err) { setStatus(null); onError?.(err.message || "Failed to send invite."); } };
   const reset = () => { setEmail(""); setRole(preselectedRole || ""); setGroupId(""); setStatus(null); };
   if (status === "success") return <Modal open={open} onClose={() => { reset(); onClose(); }}><div className="text-center py-4 space-y-3"><div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto"><IconCheck /></div><p className="text-lg font-bold text-slate-800">Invite Sent!</p><p className="text-sm text-slate-500">Link sent to <span className="font-semibold text-slate-700">{email}</span></p><div className="flex gap-3 pt-2"><button onClick={reset} className="flex-1 px-4 py-2.5 text-sm font-semibold text-blue-600 bg-blue-50 rounded-xl">Another</button><button onClick={() => { reset(); onClose(); }} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Done</button></div></div></Modal>;
-  return <Modal open={open} onClose={onClose}><h3 className="text-lg font-bold text-slate-800 mb-1">Invite New User</h3><p className="text-sm text-slate-400 mb-4">One-time registration link</p><div className="space-y-4"><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="user@example.com" className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 placeholder:text-slate-300" /></div><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Role</label><div className="grid grid-cols-2 gap-2">{ROLES.map(r => <button key={r.value} onClick={() => { setRole(r.value); if (r.value !== "participant" && r.value !== "caretaker") setGroupId(""); }} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold text-left ${role === r.value ? `${r.lightBg} ${r.border} ${r.lightText} ring-1 ring-current` : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{r.label.replace(/s$/, "")}</button>)}</div></div>{(role === "participant" || role === "caretaker") && <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{role === "caretaker" ? "Assign to Group" : "Group"}</label><select value={groupId} onChange={e => setGroupId(e.target.value)} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl"><option value="">{role === "caretaker" ? "Assign later" : "No group"}</option>{role === "participant" ? groups.filter(g => g.caretaker_id).map(g => <option key={g.group_id} value={g.group_id}>{g.name}</option>) : groups.map(g => <option key={g.group_id} value={g.group_id}>{g.name}{g.caretaker_name ? ` (has: ${g.caretaker_name})` : ""}</option>)}</select>{role === "caretaker" && groupId && (() => { const g = groups.find(x => x.group_id === groupId); return g?.caretaker_name ? <div className="mt-2 bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-700"><span className="font-semibold">Note:</span> {g.name} already has {g.caretaker_name}. The new caretaker will replace them.</div> : <p className="mt-1.5 text-xs text-emerald-600 font-medium">Will be assigned to {g?.name} upon registration.</p>; })()}{role === "caretaker" && !groupId && <p className="mt-1.5 text-xs text-slate-400">You can assign them later from the Groups section.</p>}</div>}{role === "admin" && <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 text-xs text-rose-700"><span className="font-semibold">Elevated access.</span> Full platform permissions.</div>}</div><div className="flex gap-3 mt-6"><button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={send} disabled={!email.trim() || !role || status === "loading"} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">{status === "loading" ? <><Spinner /> Sending…</> : <><IconMail /> Send</>}</button></div></Modal>;
+  return <Modal open={open} onClose={() => status !== "loading" && onClose()}><h3 className="text-lg font-bold text-slate-800 mb-1">Invite New User</h3><p className="text-sm text-slate-400 mb-4">One-time registration link</p><div className="space-y-4"><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="user@example.com" name="group-invite-email" autoComplete="off" className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 placeholder:text-slate-300" /></div><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Role</label><div className="grid grid-cols-2 gap-2">{ROLES.map(r => <button key={r.value} onClick={() => { setRole(r.value); if (r.value !== "participant" && r.value !== "caretaker") setGroupId(""); }} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold text-left ${role === r.value ? `${r.lightBg} ${r.border} ${r.lightText} ring-1 ring-current` : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{r.label.replace(/s$/, "")}</button>)}</div></div>{(role === "participant" || role === "caretaker") && <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{role === "caretaker" ? "Assign to Group" : "Group"}</label><select value={groupId} onChange={e => setGroupId(e.target.value)} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl"><option value="">{role === "caretaker" ? "Assign later" : "No group"}</option>{role === "participant" ? groups.filter(g => g.caretaker_id).map(g => <option key={g.group_id} value={g.group_id}>{g.name}</option>) : groups.map(g => <option key={g.group_id} value={g.group_id}>{g.name}{g.caretaker_name ? ` (has: ${g.caretaker_name})` : ""}</option>)}</select>{role === "caretaker" && groupId && (() => { const g = groups.find(x => x.group_id === groupId); return g?.caretaker_name ? <div className="mt-2 bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-700"><span className="font-semibold">Note:</span> {g.name} already has {g.caretaker_name}. The new caretaker will replace them.</div> : <p className="mt-1.5 text-xs text-emerald-600 font-medium">Will be assigned to {g?.name} upon registration.</p>; })()}{role === "caretaker" && !groupId && <p className="mt-1.5 text-xs text-slate-400">You can assign them later from the Groups section.</p>}</div>}{role === "admin" && <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 text-xs text-rose-700"><span className="font-semibold">Elevated access.</span> Full platform permissions.</div>}</div><div className="flex gap-3 mt-6"><button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={send} disabled={!email.trim() || !role || status === "loading"} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">{status === "loading" ? <><Spinner /> Sending…</> : <><IconMail /> Send</>}</button></div></Modal>;
 }
 
 // ── Edit User Modal (REAL API for password reset) ────────────────────────────
 function EditUserModal({ open, onClose, user, onSave }) {
-  const [firstName, setFirstName] = useState(user?.firstName || ""); const [lastName, setLastName] = useState(user?.lastName || ""); const [email, setEmail] = useState(user?.email || ""); const [phone, setPhone] = useState(user?.phone || "");
-  const [pwMode, setPwMode] = useState(null); const [newPw, setNewPw] = useState(""); const [saving, setSaving] = useState(false); const [resetSent, setResetSent] = useState(false);
-  const handleSave = async () => { setSaving(true); await new Promise(r => setTimeout(r, 800)); onSave({ firstName, lastName, email, phone }); setSaving(false); };
-  const handleResetEmail = async () => { try { await api.forgotPassword(user.email); } catch {} setResetSent(true); };
+  // Start empty — placeholder shows current value. User types to override.
+  // Component is remounted via key={user.id} in parent so state resets per user.
+  const [firstName, setFirstName] = useState("");
+  const [lastName,  setLastName]  = useState("");
+  const [email,     setEmail]     = useState("");
+  const [phone,     setPhone]     = useState("");
+  const [pwMode,    setPwMode]    = useState(null);
+  const [newPw,     setNewPw]     = useState("");
+  const [saving,    setSaving]    = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [resetSent, setResetSent] = useState(false);
+  const [sendingReset, setSendingReset] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+
+  const isBusy = saving || sendingReset;
+
   if (!user) return null;
-  return <Modal open={open} onClose={onClose} maxW="max-w-lg"><h3 className="text-lg font-bold text-slate-800">Edit User</h3><p className="text-sm text-slate-400 mb-4">{user.firstName} {user.lastName} · <RoleBadge role={user.role} /></p><div className="space-y-4"><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">First Name</label><input value={firstName} onChange={e => setFirstName(e.target.value)} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200" /></div><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Last Name</label><input value={lastName} onChange={e => setLastName(e.target.value)} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200" /></div></div><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label><input value={email} onChange={e => setEmail(e.target.value)} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200" /></div><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Phone</label><input value={phone} onChange={e => setPhone(e.target.value)} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200" /></div><div className="border-t border-slate-100 pt-4"><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Password</label><div className="flex gap-2"><button onClick={() => setPwMode(pwMode === "set" ? null : "set")} className={`flex-1 px-3 py-2 text-xs font-semibold rounded-xl border flex items-center justify-center gap-1.5 ${pwMode === "set" ? "bg-blue-50 border-blue-300 text-blue-700 ring-1 ring-blue-200" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}><IconKey /> Set Temp Password</button><button onClick={handleResetEmail} disabled={resetSent} className={`flex-1 px-3 py-2 text-xs font-semibold rounded-xl border flex items-center justify-center gap-1.5 ${resetSent ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}><IconMail /> {resetSent ? "Reset Sent!" : "Send Reset Link"}</button></div>{pwMode === "set" && <div className="mt-3 space-y-2"><input type="text" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="Temporary password" className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 font-mono placeholder:text-slate-300 placeholder:font-sans" /><p className="text-xs text-slate-400">User must change this on next login.</p></div>}</div></div><div className="flex gap-3 mt-6"><button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handleSave} disabled={saving || !firstName.trim() || !lastName.trim()} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">{saving ? <><Spinner /> Saving…</> : "Save"}</button></div></Modal>;
+
+  const orig = { firstName: user.firstName || "", lastName: user.lastName || "", email: user.email || "", phone: user.phone || "" };
+
+  const handlePhoneChange = (e) => {
+    const input = e.target.value;
+    if (input === "(") {
+      setPhone("");
+      return;
+    }
+    const digits = input.replace(/\D/g, '').substring(0, 10);
+    let formatted = digits;
+    if (digits.length > 6) {
+      formatted = `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+    } else if (digits.length > 3) {
+      formatted = `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+    } else if (digits.length > 0) {
+      formatted = `(${digits}`;
+    }
+    setPhone(formatted);
+  };
+
+  // A field is "changed" if the user has typed something that differs from the original
+  const isDirty = firstName !== "" || lastName !== "" || email !== "" || phone !== "" || newPw !== "";
+  const canSave = isDirty;
+
+  const handleSave = async () => {
+    setSaving(true); setSaveError("");
+
+    const newEmail = email.trim();
+    if (newEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+      setSaveError("Please enter a valid email address.");
+      setSaving(false);
+      return;
+    }
+
+    const newPhone = phone.trim();
+    const phoneDigits = newPhone.replace(/\D/g, '');
+    if (newPhone) {
+      if (phoneDigits.length > 0 && phoneDigits.length !== 10) {
+        setSaveError("Phone number must contain exactly 10 digits.");
+        setSaving(false);
+        return;
+      }
+    }
+
+    try {
+      await onSave({
+        firstName: firstName.trim() !== "" ? firstName : orig.firstName,
+        lastName: lastName.trim() !== "" ? lastName : orig.lastName,
+        email: newEmail !== "" ? newEmail : orig.email,
+        phone: newPhone !== "" ? phoneDigits : orig.phone,
+        newPw: newPw.trim() !== "" ? newPw : undefined
+      });
+    }
+    catch (err) { setSaveError(err.message || "Failed to save changes."); setSaving(false); return; }
+    setSaving(false);
+  };
+
+  const handleClose = () => { if (isBusy) return; if (isDirty) { setConfirmDiscard(true); } else { onClose(); } };
+  const handleResetEmail = async () => { 
+    setSendingReset(true);
+    try { await api.forgotPassword(user.email); } catch {} 
+    setSendingReset(false);
+    setResetSent(true); 
+  };
+
+  // placeholder:text-slate-400 shows the current value greyed; actual typed input is black
+  const inputCls = "w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 placeholder:text-slate-400 placeholder:font-normal text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed";
+  const labelCls = "block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5";
+
+  if (confirmDiscard) {
+    return <Modal open={open} onClose={() => setConfirmDiscard(false)} maxW="max-w-sm">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+        </div>
+        <div>
+          <h3 className="text-base font-bold text-slate-800">Discard changes?</h3>
+          <p className="text-sm text-slate-400">Your edits haven't been saved.</p>
+        </div>
+      </div>
+      <div className="flex gap-3">
+        <button onClick={() => setConfirmDiscard(false)} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Keep Editing</button>
+        <button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 rounded-xl">Discard</button>
+      </div>
+    </Modal>;
+  }
+
+  return <Modal open={open} onClose={handleClose} maxW="max-w-lg">
+    <h3 className="text-lg font-bold text-slate-800">Edit User</h3>
+    <p className="text-sm text-slate-400 mb-1">{user.firstName} {user.lastName} · <RoleBadge role={user.role} /></p>
+    <p className="text-xs text-slate-400 mb-4">Greyed text shows the current value. Click a field and type to replace it.</p>
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className={labelCls}>First Name</label><input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder={orig.firstName || "First name"} className={inputCls} disabled={isBusy} /></div>
+        <div><label className={labelCls}>Last Name</label><input value={lastName} onChange={e => setLastName(e.target.value)} placeholder={orig.lastName || "Last name"} className={inputCls} disabled={isBusy} /></div>
+      </div>
+      <div><label className={labelCls}>Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder={orig.email || "Email"} className={inputCls} disabled={isBusy} /></div>
+      <div><label className={labelCls}>Phone</label><input type="tel" value={phone} onChange={handlePhoneChange} placeholder={orig.phone || "Phone"} className={inputCls} maxLength={14} disabled={isBusy} /></div>
+      <div className="border-t border-slate-100 pt-4">
+        <label className={labelCls}>Password</label>
+        <div className="flex gap-2">
+          <button onClick={() => {
+            if (pwMode === "set") setNewPw("");
+            setPwMode(pwMode === "set" ? null : "set");
+          }} disabled={isBusy} className={`flex-1 px-3 py-2 text-xs font-semibold rounded-xl border flex items-center justify-center gap-1.5 ${pwMode === "set" ? "bg-blue-50 border-blue-300 text-blue-700 ring-1 ring-blue-200" : "border-slate-200 text-slate-500 hover:bg-slate-50"} disabled:opacity-50 disabled:cursor-not-allowed`}><IconKey /> Set Temp Password</button>
+          <button onClick={handleResetEmail} disabled={resetSent || isBusy} className={`flex-1 px-3 py-2 text-xs font-semibold rounded-xl border flex items-center justify-center gap-1.5 ${resetSent ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"} disabled:opacity-50 disabled:cursor-not-allowed`}><IconMail /> {sendingReset ? <><Spinner /> Sending…</> : resetSent ? "Reset Sent!" : "Send Reset Link"}</button>
+        </div>
+        {pwMode === "set" && <div className="mt-3 space-y-2"><input type="text" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="Temporary password" className={`${inputCls} font-mono placeholder:font-sans`} disabled={isBusy} /><p className="text-xs text-slate-400">User must change this on next login.</p></div>}
+      </div>
+      {!isDirty && <p className="text-xs text-slate-400 text-center">Type in any field above to enable saving.</p>}
+      {saveError && <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-red-500 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg><p className="text-xs text-red-700">{saveError}</p></div>}
+    </div>
+    <div className="flex gap-3 mt-6">
+      <button onClick={handleClose} disabled={isBusy} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed">Cancel</button>
+      <button onClick={handleSave} disabled={!canSave || isBusy} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">{saving ? <><Spinner /> Saving…</> : "Save"}</button>
+    </div>
+  </Modal>;
 }
 
 // ── Other Modals ─────────────────────────────────────────────────────────────
-function ChangeGroupModal({ open, onClose, targets, groups, onConfirm }) { const [sel, setSel] = useState(""); const [loading, setLoading] = useState(false); const p = targets?.length > 1; if (!open) return null; const handle = async () => { if (!sel) return; setLoading(true); await onConfirm(sel); setLoading(false); setSel(""); }; return <Modal open={open} onClose={() => { if (!loading) { setSel(""); onClose(); } }}><h3 className="text-lg font-bold text-slate-800 mb-1">Change Group</h3><p className="text-sm text-slate-400 mb-4">{p ? `Move ${targets.length} participants` : `Move ${targets?.[0]?.firstName} ${targets?.[0]?.lastName}`}</p><div className="space-y-2 max-h-52 overflow-y-auto"><button onClick={() => setSel("none")} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${sel === "none" ? "border-amber-400 bg-amber-50 ring-1 ring-amber-300 text-amber-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}><p className="text-sm font-semibold">No Group</p><p className="text-xs text-slate-400 mt-0.5">Remove from all groups</p></button>{groups.map(g => <button key={g.group_id} onClick={() => setSel(g.group_id)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${sel === g.group_id ? "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-400" : "border-slate-200 hover:bg-slate-50"}`}><p className="text-sm font-semibold text-slate-700">{g.name}</p><p className="text-xs text-slate-400 mt-0.5">{g.caretaker_name || "No caretaker"}</p></button>)}</div><div className="flex gap-3 mt-6"><button onClick={() => { setSel(""); onClose(); }} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={!sel || loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">{loading ? <><Spinner /> Moving…</> : sel === "none" ? "Unassign" : "Move"}</button></div></Modal>; }
-
 // ── Assign Caretaker Modal (REAL API) ────────────────────────────────────────
 function AssignCaretakerModal({ open, onClose, group, caretakers, onAssign }) {
   const [sel, setSel] = useState("");
@@ -280,6 +454,8 @@ function DeactivateModal({ open, onClose, user, onConfirm, loading }) { if (!ope
 function DeleteModal({ open, onClose, user, onDelete, loading }) { if (!open || !user) return null; return <Modal open={open} onClose={() => !loading && onClose()}><div className="flex items-center gap-3"><div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center shrink-0"><IconTrash /></div><div><h3 className="text-lg font-bold text-slate-800">Delete & Anonymize</h3><p className="text-sm text-slate-500">{user.firstName} {user.lastName}</p></div></div>{user.status === "active" ? <><div className="mt-4 bg-amber-50 border border-amber-100 rounded-xl p-3 text-sm text-amber-700 font-semibold">Deactivate this user first.</div><div className="flex gap-3 mt-4"><button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Close</button></div></> : <><div className="mt-4 bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm text-blue-700"><span className="font-semibold">This will:</span> remove identifying account details and keep retained submissions and health data in anonymized form.</div><div className="flex gap-3 mt-4"><button onClick={onClose} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={() => onDelete("anonymize")} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-70">{loading ? <><Spinner /> Deleting…</> : "Delete & Anonymize"}</button></div></>}</Modal>; }
 function RevokeModal({ open, onClose, onConfirm, invite, loading }) { if (!open || !invite) return null; return <Modal open={open} onClose={() => !loading && onClose()}><div className="flex items-center gap-3"><div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center shrink-0"><IconBan /></div><div><h3 className="text-lg font-bold text-slate-800">Revoke Invite</h3><p className="text-sm text-slate-500">{invite.email}</p></div></div><p className="text-xs text-slate-400 mt-3">The registration link will be invalidated.</p><div className="flex gap-3 mt-4"><button onClick={onClose} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={onConfirm} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-70">{loading ? <><Spinner /> Revoking…</> : "Revoke"}</button></div></Modal>; }
 
+function ReactivateModal({ open, onClose, user, onConfirm, loading }) { if (!open || !user) return null; return <Modal open={open} onClose={() => !loading && onClose()}><div className="flex items-center gap-3"><div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0"><IconRefresh /></div><div><h3 className="text-lg font-bold text-slate-800">Reactivate User</h3><p className="text-sm text-slate-500">{user.firstName} {user.lastName}</p></div></div><div className="mt-4 bg-emerald-50 border border-emerald-100 rounded-xl p-3 text-sm text-emerald-700">A password reset link will be sent to their email. They must set a new password to log in.</div><div className="flex gap-3 mt-4"><button onClick={onClose} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={onConfirm} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-70">{loading ? <><Spinner /> Processing…</> : "Reactivate"}</button></div></Modal>; }
+
 // ── Reactivate Anonymized Modal ─────────────────────────────────────────────
 function ReactivateAnonymizedModal({ open, onClose, user, onConfirm }) {
   const [email, setEmail] = useState(user?.anonymizedFrom || "");
@@ -311,36 +487,164 @@ function GroupInviteModal({ open, onClose, group, onInviteSent, onError }) {
   const reset = () => { setEmail(""); setRole(""); setStatus(null); };
   if (!open) return null;
   if (status === "success") return <Modal open={open} onClose={() => { reset(); onClose(); }}><div className="text-center py-4 space-y-3"><div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto"><IconCheck /></div><p className="text-lg font-bold text-slate-800">Invite Sent!</p><p className="text-sm text-slate-500">to <span className="font-semibold text-slate-700">{email}</span> → {group?.name}</p><div className="flex gap-3 pt-2"><button onClick={() => { reset(); onClose(); }} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Done</button></div></div></Modal>;
-  return <Modal open={open} onClose={onClose}><h3 className="text-lg font-bold text-slate-800 mb-1">Invite to {group?.name}</h3><p className="text-sm text-slate-400 mb-4">Send a registration link</p><div className="space-y-4"><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="user@example.com" className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 placeholder:text-slate-300" /></div><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Role</label><div className="grid grid-cols-2 gap-2">{[{ value: "participant", label: "Participant", lightBg: "bg-blue-50", border: "border-blue-200", lightText: "text-blue-700" }, { value: "caretaker", label: "Caretaker", lightBg: "bg-emerald-50", border: "border-emerald-200", lightText: "text-emerald-700" }].map(r => <button key={r.value} onClick={() => setRole(r.value)} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold text-left transition-all ${role === r.value ? `${r.lightBg} ${r.border} ${r.lightText} ring-1 ring-current` : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{r.label}</button>)}</div></div>{role === "caretaker" && group?.caretaker_name && <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-700"><span className="font-semibold">Note:</span> {group.name} already has {group.caretaker_name} assigned.</div>}</div><div className="flex gap-3 mt-6"><button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={send} disabled={!email.trim() || !role || status === "loading"} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">{status === "loading" ? <><Spinner /> Sending…</> : <><IconMail /> Send</>}</button></div></Modal>;
+  return <Modal open={open} onClose={() => status !== "loading" && onClose()}><h3 className="text-lg font-bold text-slate-800 mb-1">Invite to {group?.name}</h3><p className="text-sm text-slate-400 mb-4">Send a registration link</p><div className="space-y-4"><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="user@example.com" name="group-invite-email" autoComplete="off" className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 placeholder:text-slate-300" /></div><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Role</label><div className="grid grid-cols-2 gap-2">{[{ value: "participant", label: "Participant", lightBg: "bg-blue-50", border: "border-blue-200", lightText: "text-blue-700" }, { value: "caretaker", label: "Caretaker", lightBg: "bg-emerald-50", border: "border-emerald-200", lightText: "text-emerald-700" }].map(r => <button key={r.value} onClick={() => setRole(r.value)} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold text-left transition-all ${role === r.value ? `${r.lightBg} ${r.border} ${r.lightText} ring-1 ring-current` : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{r.label}</button>)}</div></div>{role === "caretaker" && group?.caretaker_name && <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-700"><span className="font-semibold">Note:</span> {group.name} already has {group.caretaker_name} assigned.</div>}</div><div className="flex gap-3 mt-6"><button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={send} disabled={!email.trim() || !role || status === "loading"} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">{status === "loading" ? <><Spinner /> Sending…</> : <><IconMail /> Send</>}</button></div></Modal>;
 }
 
 // ── Add Existing Participants to Group Modal ─────────────────────────────────
-function AddParticipantsModal({ open, onClose, group, users, groups, onConfirm }) {
-  const [selected, setSelected] = useState(new Set()); const [search, setSearch] = useState(""); const [loading, setLoading] = useState(false);
-  if (!open || !group) return null;
-  const allParticipants = users.filter(u => u.role === "participant");
-  const inGroupIds = new Set(allParticipants.filter(u => String(u.groupId) === String(group.group_id)).map(u => u.id));
-  const eligible = allParticipants.filter(u => u.status === "active" && !inGroupIds.has(u.id));
-  const sorted = [...eligible].sort((a, b) => { if (!a.groupId && b.groupId) return -1; if (a.groupId && !b.groupId) return 1; return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`); });
-  const filtered = sorted.filter(u => `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(search.toLowerCase()));
-  const toggle = (id) => setSelected(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const handle = async () => {
-    setLoading(true);
-    try { for (const id of selected) { await api.adminMoveParticipant(id, group.group_id); } onConfirm(group, [...selected]); }
-    catch (err) { console.error("Move failed:", err); }
-    finally { setLoading(false); setSelected(new Set()); setSearch(""); }
+const MODAL_PAGE_SIZE = 8;
+function AddParticipantsModal({ open, onClose, group, onConfirm }) {
+  const [selected, setSelected] = useState(new Set());
+  // map of id → display name, persisted across page turns
+  const [selectedNames, setSelectedNames] = useState({});
+  const [selDropOpen, setSelDropOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [items, setItems] = useState([]);
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [fetching, setFetching] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [addError, setAddError] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(0); }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    if (!open || !group) return;
+    setFetching(true);
+    api.adminListUsersPaged(MODAL_PAGE_SIZE, page * MODAL_PAGE_SIZE, debouncedSearch, "name", "asc", "participant", group.group_id, true)
+      .then(res => {
+        const raw = Array.isArray(res?.items) ? res.items : [];
+        setItems(raw.map(transformUser));
+        setTotal(Number(res?.total || 0));
+      })
+      .catch(() => setItems([]))
+      .finally(() => setFetching(false));
+  }, [open, group, debouncedSearch, page]);
+
+  // Reset on open
+  useEffect(() => { if (open) { setSelected(new Set()); setSelectedNames({}); setSelDropOpen(false); setSearch(""); setPage(0); } }, [open]);
+
+  const totalPages = Math.ceil(total / MODAL_PAGE_SIZE);
+  const toggle = (u) => {
+    setSelected(prev => {
+      const n = new Set(prev);
+      if (n.has(u.id)) {
+        n.delete(u.id);
+        setSelectedNames(m => { const c = { ...m }; delete c[u.id]; return c; });
+      } else {
+        n.add(u.id);
+        setSelectedNames(m => ({ ...m, [u.id]: `${u.firstName} ${u.lastName}` }));
+      }
+      return n;
+    });
   };
-  return <Modal open={open} onClose={onClose} maxW="max-w-lg">
+
+  const removeSelected = (id) => {
+    setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
+    setSelectedNames(m => { const c = { ...m }; delete c[id]; return c; });
+  };
+
+  const handle = async () => {
+    setSubmitting(true);
+    setAddError("");
+    try { for (const id of selected) { await api.adminMoveParticipant(id, group.group_id); } onConfirm(group, [...selected]); }
+    catch (err) { setAddError(err.message || "Failed to add participant. Please try again."); }
+    finally { setSubmitting(false); }
+  };
+
+  if (!open || !group) return null;
+  return <Modal open={open} onClose={() => { if (!submitting) { setAddError(""); onClose(); } }} maxW="max-w-lg">
     <h3 className="text-lg font-bold text-slate-800 mb-1">Add Participants to {group.name}</h3>
-    <p className="text-sm text-slate-400 mb-4">{eligible.length} available · {inGroupIds.size} already in group</p>
-    <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or email…" className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 mb-3 placeholder:text-slate-300" />
-    <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-50">
-      {filtered.length === 0 ? <p className="text-xs text-slate-400 p-4 text-center">{eligible.length === 0 ? "All active participants are in this group." : "No matches."}</p>
-      : filtered.map(u => { const isSel = selected.has(u.id); return <button key={u.id} onClick={() => toggle(u.id)} className={`w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors ${isSel ? "bg-blue-50" : "hover:bg-slate-50"}`}><div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isSel ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300"}`}>{isSel && <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>}</div><Avatar name={`${u.firstName} ${u.lastName}`} size="sm" /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-700 truncate">{u.firstName} {u.lastName}</p><p className="text-xs text-slate-400 truncate">{u.email}</p></div>{u.group ? <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap">In: {u.group}</span> : <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full shrink-0">Ungrouped</span>}</button>; })}
+    <p className="text-sm text-slate-400 mb-4">{fetching ? "Loading…" : `${total} available`}</p>
+    <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or email…" name="add-participant-search" autoComplete="off" className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 mb-3 placeholder:text-slate-300" />
+    <div className="border border-slate-200 rounded-xl divide-y divide-slate-50 min-h-[80px]">
+      {fetching ? <p className="text-xs text-slate-400 p-4 text-center">Loading…</p>
+      : items.length === 0 ? <p className="text-xs text-slate-400 p-4 text-center">No eligible participants found.</p>
+      : items.map(u => { const isSel = selected.has(u.id); return <button key={u.id} onClick={() => toggle(u)} className={`w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors ${isSel ? "bg-blue-50" : "hover:bg-slate-50"}`}><div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isSel ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300"}`}>{isSel && <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>}</div><Avatar name={`${u.firstName} ${u.lastName}`} size="sm" /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-700 truncate">{u.firstName} {u.lastName}</p><p className="text-xs text-slate-400 truncate">{u.email}</p></div>{u.group ? <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap">In: {u.group}</span> : <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full shrink-0">Ungrouped</span>}</button>; })}
     </div>
-    {selected.size > 0 && <div className="mt-3 bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-700"><span className="font-semibold">{selected.size} selected.</span>{[...selected].some(id => users.find(u => u.id === id)?.groupId) && <span className="ml-1">Participants in other groups will be moved.</span>}</div>}
-    <div className="flex gap-3 mt-4"><button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={selected.size === 0 || loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">{loading ? <><Spinner /> Adding…</> : `Add ${selected.size || ""}`}</button></div>
+    {totalPages > 1 && <div className="flex items-center justify-between mt-2 px-1">
+      <button onClick={() => setPage(p => p - 1)} disabled={page === 0 || fetching} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 rounded-lg disabled:opacity-40 hover:bg-slate-200">← Prev</button>
+      <button onClick={() => setPage(p => p + 1)} disabled={page >= totalPages - 1 || fetching} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 rounded-lg disabled:opacity-40 hover:bg-slate-200">Next →</button>
+    </div>}
+    {selected.size > 0 && <div className="mt-3 border border-blue-100 rounded-xl overflow-hidden">
+      <button onClick={() => setSelDropOpen(o => !o)} className="w-full flex items-center justify-between px-3 py-2.5 bg-blue-50 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-colors">
+        <span>{selected.size} selected</span>
+        <svg xmlns="http://www.w3.org/2000/svg" className={`h-3.5 w-3.5 transition-transform ${selDropOpen ? "rotate-180" : ""}`} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+      </button>
+      {selDropOpen && <ul className="divide-y divide-blue-50 max-h-36 overflow-y-auto bg-white">
+        {Object.entries(selectedNames).map(([id, name]) => (
+          <li key={id} className="flex items-center justify-between px-3 py-2">
+            <span className="text-xs text-slate-700">{name}</span>
+            <button onClick={() => removeSelected(id)} className="text-slate-400 hover:text-red-500 transition-colors ml-2 shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+            </button>
+          </li>
+        ))}
+      </ul>}
+    </div>}
+    {addError && <div className="mt-3 flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-red-500 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg><p className="text-xs text-red-700">{addError}</p></div>}
+    <div className="flex gap-3 mt-4"><button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={selected.size === 0 || submitting} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">{submitting ? <><Spinner /> Adding…</> : `Add ${selected.size || ""}`}</button></div>
   </Modal>;
+}
+
+// ── Change Group Modal ───────────────────────────────────────────────────────
+function ChangeGroupModal({ open, onClose, targets, groups, onMove }) {
+  const [selected, setSelected] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const close = () => { if (!loading) { setSelected(""); setError(""); onClose(); } };
+
+  const handle = async () => {
+    if (!selected) return;
+    setLoading(true);
+    setError("");
+    try {
+      await onMove(selected);
+      setSelected("");
+    } catch (err) {
+      setError(err.message || "Failed to move participant.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const names = (targets || []).map(u => `${u.firstName} ${u.lastName}`.trim() || u.email).join(", ");
+
+  return (
+    <Modal open={open} onClose={close}>
+      <h3 className="text-lg font-bold text-slate-800 mb-1">Change Group</h3>
+      <p className="text-sm text-slate-400 mb-4 truncate">{names}</p>
+      <div className="space-y-2 mb-4">
+        <button
+          onClick={() => setSelected("none")}
+          className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium transition-colors ${selected === "none" ? "bg-rose-50 border-rose-200 text-rose-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+        >
+          Remove from group
+        </button>
+        {groups.map(g => (
+          <button
+            key={g.group_id}
+            onClick={() => setSelected(g.group_id)}
+            className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium transition-colors ${selected === g.group_id ? "bg-blue-50 border-blue-200 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+          >
+            {g.name}
+            {g.caretaker_name && <span className="text-xs text-slate-400 ml-2">· {g.caretaker_name}</span>}
+          </button>
+        ))}
+      </div>
+      {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">{error}</div>}
+      <div className="flex gap-3">
+        <button onClick={close} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button>
+        <button onClick={handle} disabled={!selected || loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">
+          {loading ? <><Spinner /> Moving…</> : "Confirm"}
+        </button>
+      </div>
+    </Modal>
+  );
 }
 
 // ── User Detail Drawer ───────────────────────────────────────────────────────
@@ -479,14 +783,14 @@ function EditGroupModal({ open, onClose, group, onSave }) {
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (group) { setName(group.name || ""); setDesc(group.description || ""); } }, [group]);
   if (!open || !group) return null;
-  return <Modal open={open} onClose={onClose}>
+  return <Modal open={open} onClose={() => !saving && onClose()}>
     <h3 className="text-lg font-bold text-slate-800 mb-4">Edit Group</h3>
     <div className="space-y-4">
       <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Group Name</label><input value={name} onChange={e => setName(e.target.value)} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200" /></div>
       <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Description</label><textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none" /></div>
     </div>
     <div className="flex gap-3 mt-6">
-      <button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button>
+      <button onClick={onClose} disabled={saving} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl disabled:opacity-50">Cancel</button>
       <button onClick={async () => { setSaving(true); await onSave(group, name.trim(), desc.trim()); setSaving(false); }} disabled={!name.trim() || saving} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">{saving ? <><Spinner /> Saving…</> : "Save"}</button>
     </div>
   </Modal>;
@@ -545,11 +849,21 @@ export default function UserManagementPage() {
   const [assignCaretakerTarget, setAssignCaretakerTarget] = useState(null);
   const [changeRoleTarget, setChangeRoleTarget] = useState(null);
   const [editGroupTarget, setEditGroupTarget] = useState(null);
-  const [expandedGroupId, setExpandedGroupId] = useState(null);
+  const [reactivateTarget, setReactivateTarget] = useState(null);
+  const [reactivateLoading, setReactivateLoading] = useState(false);
   const [reactivateAnonymizedTarget, setReactivateAnonymizedTarget] = useState(null);
   const [groupInviteTarget, setGroupInviteTarget] = useState(null);
   const [addParticipantsTarget, setAddParticipantsTarget] = useState(null);
   const [toast, setToast] = useState({ show: false, message: "", type: "success" });
+  // Group detail modal
+  const [selectedGroupModal, setSelectedGroupModal] = useState(null);
+  const [groupModalTab, setGroupModalTab] = useState("Participants");
+  const [groupModalSurveys, setGroupModalSurveys] = useState([]);
+  const [groupModalSurveysLoading, setGroupModalSurveysLoading] = useState(false);
+  const [groupModalGoals, setGroupModalGoals] = useState(null);
+  const [groupModalGoalsLoading, setGroupModalGoalsLoading] = useState(false);
+  const [groupModalPage, setGroupModalPage] = useState(1);
+  const GROUP_MODAL_PAGE_SIZE = 8;
   const didRunSearchSync = useRef(false);
   const msg = (m, t = "success") => { setToast({ show: true, message: m, type: t }); setTimeout(() => setToast(p => ({ ...p, show: false })), 3500); };
 
@@ -646,6 +960,7 @@ export default function UserManagementPage() {
     }
   }, [users, detailUser?.id]);
 
+
   useEffect(() => {
     if (!didRunSearchSync.current) {
       didRunSearchSync.current = true;
@@ -716,6 +1031,19 @@ export default function UserManagementPage() {
       setUsersLoadingMore(false);
     }
   }, [debouncedSearch, sort.dir, sort.field, usersLoadingMore, usersOffset, usersTotal]);
+
+  const refreshInvites = useCallback(async () => {
+    try {
+      const firstPage = await api.adminListInvites(INVITES_PAGE_SIZE, 0);
+      const rows = Array.isArray(firstPage) ? firstPage : [];
+      setInvites(rows);
+      setInvitesOffset(rows.length);
+      setInvitesHasMore(rows.length === INVITES_PAGE_SIZE);
+      setInvitesAvailable(true);
+    } catch {
+      // silently fail — existing list remains visible
+    }
+  }, []);
 
   const loadMoreInvites = useCallback(async () => {
     if (invitesLoadingMore || !invitesHasMore) return;
@@ -855,7 +1183,7 @@ export default function UserManagementPage() {
   const clearFilters = () => { setFilterStatus("all"); setFilterGroup("all"); setFilterCaretaker("all"); setSearch(""); };
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  const handleDeleteGroup = async (g) => { try { await api.adminDeleteGroup(g.group_id); setGroups(p => p.filter(x => x.group_id !== g.group_id)); setGroupMembersByGroup(prev => { const next = { ...prev }; delete next[g.group_id]; return next; }); msg(`"${g.name}" deleted.`); } catch (err) { msg(err.message || "Failed.", "error"); } };
+  const handleDeleteGroup = async (g) => { try { await api.adminDeleteGroup(g.group_id); setGroups(p => p.filter(x => x.group_id !== g.group_id)); setGroupMembersByGroup(prev => { const next = { ...prev }; delete next[g.group_id]; return next; }); if (selectedGroupModal?.group_id === g.group_id) setSelectedGroupModal(null); msg(`"${g.name}" deleted.`); } catch (err) { msg(err.message || "Failed.", "error"); } };
   const handleDeactivate = async (u) => {
     setDeactivateLoading(true);
     try {
@@ -871,15 +1199,22 @@ export default function UserManagementPage() {
   };
   const handleReactivate = (u) => {
     if (u.email?.startsWith("deleted_")) { setReactivateAnonymizedTarget(u); return; }
-    (async () => {
-      try {
-        await api.adminUpdateUserStatus(u.id, "active");
-        await fetchData();
-        msg(`${u.firstName} reactivated.`);
-      } catch (err) {
-        msg(err.message || "Failed to reactivate user.", "error");
-      }
-    })();
+    setReactivateTarget(u);
+  };
+
+  const confirmReactivate = async () => {
+    const u = reactivateTarget;
+    setReactivateLoading(true);
+    try {
+      await api.adminReactivateUser(u.id);
+      await fetchData();
+      setReactivateTarget(null);
+      msg(`${u.firstName} reactivated. Password reset email sent.`);
+    } catch (err) {
+      msg(err.message || "Failed to reactivate user.", "error");
+    } finally {
+      setReactivateLoading(false);
+    }
   };
   const handleUnlock = async (u) => {
     try {
@@ -925,39 +1260,56 @@ export default function UserManagementPage() {
     msg(mode === "anonymize" ? "User anonymized." : "User account deleted. Retained data was anonymized.");
     setDeleteLoading(false); setDeleteTarget(null);
   };
-  const handleEditSave = async (data) => { const apiPayload = { first_name: data.firstName, last_name: data.lastName, email: data.email, phone: data.phone }; try { await api.adminUpdateUser(editTarget.id, apiPayload); } catch {} setUsers(p => p.map(u => u.id === editTarget.id ? { ...u, ...data } : u)); if (detailUser?.id === editTarget.id) setDetailUser(p => ({ ...p, ...data })); setEditTarget(null); msg("User updated."); };
+  const handleEditSave = async (data) => {
+    const orig = editTarget;
+    const apiPayload = {};
+    // Only include fields that changed AND are non-empty (prevents accidental overwrites)
+    if (data.firstName.trim() && data.firstName.trim() !== (orig.firstName || "").trim()) apiPayload.first_name = data.firstName.trim();
+    if (data.lastName.trim()  && data.lastName.trim()  !== (orig.lastName  || "").trim()) apiPayload.last_name  = data.lastName.trim();
+    if (data.email.trim()     && data.email.trim()     !== (orig.email     || "").trim()) apiPayload.email      = data.email.trim();
+    if (data.phone !== (orig.phone || "")) apiPayload.phone = data.phone || null;
+    if (data.newPw) apiPayload.password = data.newPw;
+    if (Object.keys(apiPayload).length > 0) {
+      await api.adminUpdateUser(orig.id, apiPayload); // throws on error → caught by modal
+    }
+    setUsers(p => p.map(u => u.id === orig.id ? { ...u, ...data } : u));
+    if (detailUser?.id === orig.id) setDetailUser(p => ({ ...p, ...data }));
+    setEditTarget(null);
+    msg("User updated.");
+  };
   const handleChangeGroup = async (groupId) => {
-  const isUnassign = groupId === "none";
-  const g = isUnassign ? null : groups.find(x => x.group_id === groupId);
-  for (const t of changeGroupTargets) {
-    try { await api.adminMoveParticipant(t.id, isUnassign ? null : groupId); } catch (err) { msg(err.message || "Move failed.", "error"); return; }
-    setUsers(p => p.map(u => u.id === t.id ? { ...u, groupId: isUnassign ? null : groupId, group: g?.name || null, caretakerId: g?.caretaker_id || null, caretaker: g?.caretaker_name || null } : u));
-    if (detailUser?.id === t.id) setDetailUser(p => ({ ...p, groupId: isUnassign ? null : groupId, group: g?.name || null }));
-    setGroups(prev => prev.map(group => {
-      if (group.group_id === t.groupId) return { ...group, member_count: Math.max(0, Number(group.member_count || 0) - 1) };
-      if (!isUnassign && group.group_id === groupId) return { ...group, member_count: Number(group.member_count || 0) + 1 };
-      return group;
-    }));
-    setGroupMembersByGroup(prev => {
-      const next = { ...prev };
-      if (t.groupId && Array.isArray(next[t.groupId])) {
-        next[t.groupId] = next[t.groupId].filter(member => member.participant_id !== t.id);
-      }
-      if (!isUnassign && Array.isArray(next[groupId])) {
-        const exists = next[groupId].some(member => member.participant_id === t.id);
-        if (!exists) {
-          next[groupId] = [
-            ...next[groupId],
-            { participant_id: t.id, name: `${t.firstName} ${t.lastName}`.trim() || t.email || "Unknown", joined_at: null },
-          ];
+    const isUnassign = groupId === "none";
+    const g = isUnassign ? null : groups.find(x => x.group_id === groupId);
+    for (const t of changeGroupTargets) {
+      // throws on error — shared modal catches and shows inline
+      await api.adminMoveParticipant(t.id, isUnassign ? null : groupId);
+      setUsers(p => p.map(u => u.id === t.id ? { ...u, groupId: isUnassign ? null : groupId, group: g?.name || null, caretakerId: g?.caretaker_id || null, caretaker: g?.caretaker_name || null } : u));
+      if (detailUser?.id === t.id) setDetailUser(p => ({ ...p, groupId: isUnassign ? null : groupId, group: g?.name || null }));
+      setGroups(prev => prev.map(group => {
+        if (group.group_id === t.groupId) return { ...group, member_count: Math.max(0, Number(group.member_count || 0) - 1) };
+        if (!isUnassign && group.group_id === groupId) return { ...group, member_count: Number(group.member_count || 0) + 1 };
+        return group;
+      }));
+      setGroupMembersByGroup(prev => {
+        const next = { ...prev };
+        if (t.groupId && Array.isArray(next[t.groupId])) {
+          next[t.groupId] = next[t.groupId].filter(member => member.participant_id !== t.id);
         }
-      }
-      return next;
-    });
-  }
-  setChangeGroupTargets(null);
-  msg(isUnassign ? "Removed from group." : `Moved to "${g?.name}".`);
-};
+        if (!isUnassign && Array.isArray(next[groupId])) {
+          const exists = next[groupId].some(member => member.participant_id === t.id);
+          if (!exists) {
+            next[groupId] = [
+              ...next[groupId],
+              { participant_id: t.id, name: `${t.firstName} ${t.lastName}`.trim() || t.email || "Unknown", joined_at: null },
+            ];
+          }
+        }
+        return next;
+      });
+    }
+    setChangeGroupTargets(null);
+    msg(isUnassign ? "Removed from group." : `Moved to "${g?.name}".`);
+  };
   const handleAssignCaretaker = async (group, userId) => {
     try {
       await api.adminAssignCaretaker(userId, group.group_id);
@@ -1010,28 +1362,54 @@ export default function UserManagementPage() {
     msg(`Exported ${filtered.length} users.`);
   };
 
-  const handleToggleGroupExpanded = async (groupId) => {
-    if (expandedGroupId === groupId) {
-      setExpandedGroupId(null);
-      return;
+
+  // Load health goals lazily when "Health goals" tab is opened in the group modal
+  useEffect(() => {
+    if (groupModalTab !== "Health goals" || !selectedGroupModal || groupModalGoals !== null) return;
+    const members = groupMembersByGroup[selectedGroupModal.group_id] || [];
+    if (members.length === 0) { setGroupModalGoals({}); return; }
+    setGroupModalGoalsLoading(true);
+    api.adminGetGroupGoals(selectedGroupModal.group_id)
+      .then(goalsMap => setGroupModalGoals(goalsMap || {}))
+      .catch(() => setGroupModalGoals({}))
+      .finally(() => setGroupModalGoalsLoading(false));
+  }, [groupModalTab, selectedGroupModal, groupModalGoals, groupMembersByGroup]);
+
+  const openGroupModal = async (group) => {
+    setSelectedGroupModal(group);
+    setGroupModalTab("Participants");
+    setGroupModalPage(1);
+    setGroupModalSurveys([]);
+    setGroupModalGoals(null);
+    // Load members if not cached
+    if (!groupMembersByGroup[group.group_id] && !groupMembersLoading[group.group_id]) {
+      setGroupMembersLoading(prev => ({ ...prev, [group.group_id]: true }));
+      try {
+        const members = await api.adminGetGroupMembers(group.group_id);
+        setGroupMembersByGroup(prev => ({ ...prev, [group.group_id]: Array.isArray(members) ? members : [] }));
+      } catch { setGroupMembersByGroup(prev => ({ ...prev, [group.group_id]: [] })); }
+      finally { setGroupMembersLoading(prev => ({ ...prev, [group.group_id]: false })); }
     }
-
-    setExpandedGroupId(groupId);
-    if (groupMembersByGroup[groupId] || groupMembersLoading[groupId]) return;
-
-    setGroupMembersLoading(prev => ({ ...prev, [groupId]: true }));
+    // Load surveys
+    setGroupModalSurveysLoading(true);
     try {
-      const members = await api.adminGetGroupMembers(groupId);
+      const surveys = await api.getGroupSurveys(group.group_id);
+      setGroupModalSurveys(Array.isArray(surveys) ? surveys : []);
+    } catch { setGroupModalSurveys([]); }
+    finally { setGroupModalSurveysLoading(false); }
+  };
+
+  const handleRemoveGroupMember = async (member, group) => {
+    try {
+      await api.adminMoveParticipant(member.participant_id, null);
       setGroupMembersByGroup(prev => ({
         ...prev,
-        [groupId]: Array.isArray(members) ? members : [],
+        [group.group_id]: (prev[group.group_id] || []).filter(m => m.participant_id !== member.participant_id),
       }));
-    } catch (err) {
-      msg(err.message || "Failed to load group members.", "error");
-      setGroupMembersByGroup(prev => ({ ...prev, [groupId]: [] }));
-    } finally {
-      setGroupMembersLoading(prev => ({ ...prev, [groupId]: false }));
-    }
+      setGroups(p => p.map(g => g.group_id === group.group_id ? { ...g, member_count: Math.max(0, Number(g.member_count || 0) - 1) } : g));
+      setUsers(p => p.map(u => u.id === member.participant_id ? { ...u, groupId: null, group: null } : u));
+      msg(`${member.name} removed from group.`);
+    } catch (err) { msg(err.message || "Failed to remove participant.", "error"); }
   };
 
   // ── Columns ────────────────────────────────────────────────────────────────
@@ -1055,19 +1433,20 @@ export default function UserManagementPage() {
       <style>{`@keyframes slide-in{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}.animate-slide-in{animation:slide-in .3s ease-out}`}</style>
       <Toast {...toast} onClose={() => setToast(p => ({ ...p, show: false }))} />
       <UserDrawer user={detailUser} users={users} groups={groups} caretakers={caretakers} onClose={() => setDetailUser(null)} onEdit={setEditTarget} onDeactivate={setDeactivateTarget} onReactivate={handleReactivate} onUnlock={handleUnlock} onDelete={setDeleteTarget} onChangeGroup={setChangeGroupTargets} onChangeRole={setChangeRoleTarget} />
-      <InviteModal open={showInvite} onClose={() => { setShowInvite(false); setInvitePreRole(""); }} groups={groups} preselectedRole={invitePreRole} onError={(m) => msg(m, "error")} onInviteSent={(d) => { setInvites(p => [{ invite_id: `inv${Date.now()}`, email: d.email, role: d.role, group_name: d.group_name, group_id: d.groupId, invited_by: "You", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 48 * 3600000).toISOString(), used: false, status: "pending" }, ...p]); msg("Invite sent."); }} />
+      <InviteModal open={showInvite} onClose={() => { setShowInvite(false); setInvitePreRole(""); }} groups={groups} preselectedRole={invitePreRole} onError={(m) => msg(m, "error")} onInviteSent={() => { refreshInvites(); msg("Invite sent."); }} />
       <CreateGroupModal open={showCreateGroup} onClose={() => setShowCreateGroup(false)} caretakers={caretakers} users={users} onConfirm={(newGroup, cId, error, assignedParticipants) => { if (error) { msg(error, "error"); return; } const ct = caretakers.find(c => String(c.user_id) === cId); const gid = String(newGroup.group_id); setGroups(p => [...p, { ...newGroup, group_id: gid, caretaker_id: cId || null, caretaker_name: ct?.name || null, member_count: (assignedParticipants || []).length }]); if (assignedParticipants?.length) { setUsers(p => p.map(u => assignedParticipants.includes(u.id) ? { ...u, groupId: gid, group: newGroup.name } : u)); } setShowCreateGroup(false); msg(`"${newGroup.name}" created${assignedParticipants?.length ? ` with ${assignedParticipants.length} participant${assignedParticipants.length > 1 ? "s" : ""}` : ""}.`); }} />
-      <EditUserModal open={!!editTarget} onClose={() => setEditTarget(null)} user={editTarget} onSave={handleEditSave} />
-      <ChangeGroupModal open={!!changeGroupTargets} onClose={() => setChangeGroupTargets(null)} targets={changeGroupTargets || []} groups={groups} onConfirm={handleChangeGroup} />
+      <EditUserModal key={editTarget?.id || "edit"} open={!!editTarget} onClose={() => setEditTarget(null)} user={editTarget} onSave={handleEditSave} />
+      <ChangeGroupModal open={!!changeGroupTargets} onClose={() => setChangeGroupTargets(null)} targets={changeGroupTargets || []} groups={groups} onMove={handleChangeGroup} />
       <ChangeRoleModal open={!!changeRoleTarget} onClose={() => setChangeRoleTarget(null)} user={changeRoleTarget} onConfirm={handleChangeRole} />
       <EditGroupModal open={!!editGroupTarget} onClose={() => setEditGroupTarget(null)} group={editGroupTarget} onSave={handleEditGroup} />
       <DeactivateModal open={!!deactivateTarget} onClose={() => setDeactivateTarget(null)} user={deactivateTarget} onConfirm={() => handleDeactivate(deactivateTarget)} loading={deactivateLoading} />
       <DeleteModal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} user={deleteTarget} onDelete={(mode) => handleDelete(deleteTarget, mode)} loading={deleteLoading} />
       <RevokeModal open={!!revokeTarget} onClose={() => setRevokeTarget(null)} onConfirm={async () => { setRevokeLoading(true); try { await api.adminRevokeInvite(revokeTarget.invite_id); } catch {} setInvites(p => p.map(i => i.invite_id === revokeTarget.invite_id ? { ...i, status: "revoked" } : i)); setRevokeLoading(false); setRevokeTarget(null); msg("Invite revoked."); }} invite={revokeTarget} loading={revokeLoading} />
       <AssignCaretakerModal open={!!assignCaretakerTarget} onClose={() => setAssignCaretakerTarget(null)} group={assignCaretakerTarget} caretakers={caretakers} onAssign={handleAssignCaretaker} />
+      <ReactivateModal open={!!reactivateTarget} onClose={() => setReactivateTarget(null)} user={reactivateTarget} onConfirm={confirmReactivate} loading={reactivateLoading} />
       <ReactivateAnonymizedModal open={!!reactivateAnonymizedTarget} onClose={() => setReactivateAnonymizedTarget(null)} user={reactivateAnonymizedTarget} onConfirm={handleAnonymizedReactivated} />
-      <GroupInviteModal open={!!groupInviteTarget} onClose={() => setGroupInviteTarget(null)} group={groupInviteTarget} onInviteSent={(d) => { setInvites(p => [{ invite_id: `inv${Date.now()}`, email: d.email, role: d.role, group_name: d.group_name, group_id: d.groupId, invited_by: "You", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 48 * 3600000).toISOString(), used: false, status: "pending" }, ...p]); msg("Invite sent."); }} onError={(m) => msg(m, "error")} />
-      <AddParticipantsModal open={!!addParticipantsTarget} onClose={() => setAddParticipantsTarget(null)} group={addParticipantsTarget} users={users} groups={groups} onConfirm={(group, pIds) => { setUsers(p => p.map(u => pIds.includes(u.id) ? { ...u, groupId: group.group_id, group: group.name } : u)); setGroups(prev => prev.map(g => g.group_id === group.group_id ? { ...g, member_count: Number(g.member_count || 0) + pIds.length } : g)); setGroupMembersByGroup(prev => { if (!Array.isArray(prev[group.group_id])) return prev; const additions = users.filter(u => pIds.includes(u.id)).map(u => ({ participant_id: u.id, name: `${u.firstName} ${u.lastName}`.trim() || u.email || "Unknown", joined_at: null })).filter(member => !prev[group.group_id].some(existing => existing.participant_id === member.participant_id)); return { ...prev, [group.group_id]: [...prev[group.group_id], ...additions] }; }); setAddParticipantsTarget(null); msg(`${pIds.length} participant${pIds.length > 1 ? "s" : ""} added to "${group.name}".`); }} />
+      <GroupInviteModal open={!!groupInviteTarget} onClose={() => setGroupInviteTarget(null)} group={groupInviteTarget} onInviteSent={() => { refreshInvites(); msg("Invite sent."); }} onError={(m) => msg(m, "error")} />
+      <AddParticipantsModal open={!!addParticipantsTarget} onClose={() => setAddParticipantsTarget(null)} group={addParticipantsTarget} onConfirm={(group, pIds) => { setUsers(p => p.map(u => pIds.includes(u.id) ? { ...u, groupId: group.group_id, group: group.name } : u)); setGroups(prev => prev.map(g => g.group_id === group.group_id ? { ...g, member_count: Number(g.member_count || 0) + pIds.length } : g)); setGroupMembersByGroup(prev => { if (!Array.isArray(prev[group.group_id])) return prev; const additions = users.filter(u => pIds.includes(u.id)).map(u => ({ participant_id: u.id, name: `${u.firstName} ${u.lastName}`.trim() || u.email || "Unknown", joined_at: null })).filter(member => !prev[group.group_id].some(existing => existing.participant_id === member.participant_id)); return { ...prev, [group.group_id]: [...prev[group.group_id], ...additions] }; }); setAddParticipantsTarget(null); msg(`${pIds.length} participant${pIds.length > 1 ? "s" : ""} added to "${group.name}".`); }} />
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"><div><h1 className="text-2xl font-bold text-slate-800">Users & Roles</h1><p className="text-sm text-slate-500 mt-1">Manage accounts, groups, invites, and permissions</p></div><div className="flex items-center gap-2 shrink-0"><button onClick={handleExportCSV} disabled={filtered.length === 0} className="px-4 py-2.5 text-sm font-semibold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl flex items-center gap-2 disabled:opacity-40"><IconDownload /> Export CSV</button><button onClick={() => setShowInvite(true)} className="px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl flex items-center gap-2"><IconMail /> Invite User</button></div></div>
@@ -1075,8 +1454,53 @@ export default function UserManagementPage() {
       {/* Role Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{ROLES.map(r => { const a = activeRole === r.value; return <button key={r.value} onClick={() => setActiveRole(a ? null : r.value)} className={`bg-white rounded-2xl p-5 border shadow-sm transition-all text-left ${a ? `${r.border} ring-2 ring-current ${r.lightBg}` : "border-slate-100 hover:border-slate-200 hover:shadow-md"}`}><div className="flex items-center justify-between mb-3"><div className={`w-10 h-10 rounded-xl flex items-center justify-center ${a ? `${r.color} text-white` : `${r.lightBg} ${r.lightText}`}`}><Ic d={r.icon} c="h-5 w-5" /></div>{a && <span className="text-[10px] font-bold uppercase text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Filtered</span>}</div><p className="text-3xl font-extrabold text-slate-800">{loading ? "—" : counts[r.value]}</p><p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-1">{r.label}</p></button>; })}</div>
 
-      {/* Groups (REAL API) */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><button onClick={() => setGroupsExpanded(!groupsExpanded)} className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center"><IconUsers /></div><div><h2 className="text-base font-bold text-slate-800">Groups & Cohorts</h2><p className="text-xs text-slate-400">{loading ? "Loading…" : `${groups.length} groups`}</p></div></div><div className="flex items-center gap-3"><span onClick={e => { e.stopPropagation(); setShowCreateGroup(true); }} className="text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg flex items-center gap-1"><IconPlus /> New</span><IconChevron open={groupsExpanded} /></div></button>{groupsExpanded && <div className="border-t border-slate-100 divide-y divide-slate-50">{groups.length === 0 ? <div className="px-6 py-8 text-center"><p className="text-sm text-slate-400">No groups yet. Create one above.</p></div> : groups.map(g => { const members = groupMembersByGroup[g.group_id] || []; const membersLoadingState = !!groupMembersLoading[g.group_id]; return <div key={g.group_id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${g.caretaker_id ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}><IconUsers /></div><div><p onClick={(e) => { e.stopPropagation(); handleToggleGroupExpanded(g.group_id); }} className="text-sm font-semibold text-blue-600 hover:text-blue-800 cursor-pointer hover:underline">{g.name}</p><div><p className="text-xs text-slate-500 mt-0.5">{g.description || <span className="italic text-slate-300">No description</span>}</p><span className="text-xs text-slate-400">{`${Number(g.member_count || 0)} member${Number(g.member_count || 0) !== 1 ? "s" : ""}`}</span></div></div></div><div className="flex items-center gap-2 pl-12 sm:pl-0 flex-wrap">{g.caretaker_name ? <><span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">{g.caretaker_name}</span><button onClick={(e) => { e.stopPropagation(); handleUnassignCaretaker(g); }} className="text-xs font-semibold text-rose-500 hover:text-rose-700">Unassign</button></> : <><span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">No caretaker</span><button onClick={(e) => { e.stopPropagation(); setAssignCaretakerTarget(g); }} className="text-xs font-semibold text-emerald-600 hover:text-emerald-800">Assign</button></>}<button onClick={(e) => { e.stopPropagation(); setEditGroupTarget(g); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Edit</button><button onClick={(e) => { e.stopPropagation(); setAddParticipantsTarget(g); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"><IconPlus /> Add</button><button onClick={(e) => { e.stopPropagation(); setGroupInviteTarget(g); }} className="text-xs font-semibold text-blue-600 hover:text-blue-800">Invite</button><button onClick={() => handleDeleteGroup(g)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50"><IconTrash /></button></div>{expandedGroupId === g.group_id && <div className="px-6 pb-4 pt-1"><div className="ml-12 bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">{membersLoadingState ? <p className="text-xs text-slate-400 italic p-3">Loading participants…</p> : members.length === 0 ? <p className="text-xs text-slate-400 italic p-3">No participants in this group</p> : <div className="divide-y divide-slate-100">{members.map(m => <div key={m.participant_id} className="px-3 py-2.5 flex items-center gap-3"><Avatar name={m.name} size="sm" /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-700 truncate">{m.name}</p></div><StatusDot status="active" /></div>)}</div>}</div></div>}</div>; })}</div>}</div>
+      {/* Groups & Cohorts */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <button onClick={() => setGroupsExpanded(!groupsExpanded)} className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50/50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center"><IconUsers /></div>
+            <div>
+              <h2 className="text-base font-bold text-slate-800">Groups & Cohorts</h2>
+              <p className="text-xs text-slate-400">{loading ? "Loading…" : `${groups.length} group${groups.length !== 1 ? "s" : ""}`}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span onClick={e => { e.stopPropagation(); setShowCreateGroup(true); }} className="text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors">
+              <IconPlus /> New
+            </span>
+            <IconChevron open={groupsExpanded} />
+          </div>
+        </button>
+        {groupsExpanded && (
+          <div className="border-t border-slate-100">
+            {groups.length === 0 ? (
+              <div className="px-6 py-8 text-center">
+                <p className="text-sm text-slate-400">No groups yet. Create one to get started.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-50">
+                {groups.map(g => (
+                  <button key={g.group_id} onClick={() => openGroupModal(g)}
+                    className="w-full px-6 py-4 flex items-center gap-3 text-left hover:bg-slate-50/60 transition-colors">
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${g.caretaker_id ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}>
+                      <IconUsers />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-800 truncate">{g.name}</p>
+                      {g.description && <p className="text-xs text-slate-500 mt-0.5 truncate">{g.description}</p>}
+                      <p className="text-xs text-slate-400 mt-0.5">{Number(g.member_count || 0)} member{Number(g.member_count || 0) !== 1 ? "s" : ""}</p>
+                    </div>
+                    {g.caretaker_name && (
+                      <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full shrink-0 hidden sm:inline-flex">{g.caretaker_name}</span>
+                    )}
+                    <svg className="h-4 w-4 text-slate-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Invites Tracker */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><button onClick={() => setInvitesExpanded(!invitesExpanded)} className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50/50"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center"><IconSend /></div><div><h2 className="text-base font-bold text-slate-800">Invites Tracker</h2><div className="flex items-center gap-2 mt-0.5 flex-wrap">{invites.length === 0 ? <span className="text-xs text-slate-400">{invitesAvailable === null || loading ? "Loading…" : invitesAvailable ? "No invites yet" : "Failed to load invites"}</span> : <>{inviteCounts.pending > 0 && <span className="text-xs font-semibold text-amber-600">{inviteCounts.pending} pending</span>}{inviteCounts.accepted > 0 && <><span className="text-xs text-slate-300">·</span><span className="text-xs text-emerald-600">{inviteCounts.accepted} accepted</span></>}</>}</div></div></div><IconChevron open={invitesExpanded} /></button>
@@ -1086,7 +1510,7 @@ export default function UserManagementPage() {
           ) : !invitesAvailable && invites.length === 0 ? (
             <div className="p-6"><ApiPendingBanner endpoint="GET /admin_only/invites" description="Could not load invites from backend. Try refresh, then check backend logs if it persists." /></div>
           ) : <>
-            <div className="px-6 py-3 border-b border-slate-50 space-y-3"><div className="flex gap-1.5 overflow-x-auto pb-0.5">{[{ v: "all", l: "All" }, { v: "pending", l: "Pending" }, { v: "accepted", l: "Accepted" }, { v: "expired", l: "Expired" }, { v: "revoked", l: "Revoked" }].map(t => <button key={t.v} onClick={() => setInviteFilter(t.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 ${inviteFilter === t.v ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{t.l} <span className="opacity-60">({inviteCounts[t.v]})</span></button>)}</div><div className="flex flex-col sm:flex-row gap-2"><div className="relative flex-1"><div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300"><IconSearch /></div><input value={inviteSearch} onChange={e => setInviteSearch(e.target.value)} placeholder="Email or sender…" className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 placeholder:text-slate-300" /></div><select value={inviteRoleFilter} onChange={e => setInviteRoleFilter(e.target.value)} className="px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-600"><option value="all">All Roles</option>{ROLES.map(r => <option key={r.value} value={r.value}>{r.label.replace(/s$/, "")}</option>)}</select><select value={inviteDateFilter} onChange={e => setInviteDateFilter(e.target.value)} className="px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-600"><option value="all">Any Time</option><option value="24h">24h</option><option value="7d">7 days</option><option value="30d">30 days</option></select></div>{hasInvFilters && <div className="flex items-center justify-between"><p className="text-xs text-slate-400">{filteredInvites.length} match</p><button onClick={() => { setInviteSearch(""); setInviteRoleFilter("all"); setInviteGroupFilter("all"); setInviteDateFilter("all"); }} className="text-xs font-semibold text-blue-600">Clear</button></div>}</div>
+            <div className="px-6 py-3 border-b border-slate-50 space-y-3"><div className="flex gap-1.5 overflow-x-auto pb-0.5">{[{ v: "all", l: "All" }, { v: "pending", l: "Pending" }, { v: "accepted", l: "Accepted" }, { v: "expired", l: "Expired" }, { v: "revoked", l: "Revoked" }].map(t => <button key={t.v} onClick={() => setInviteFilter(t.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 ${inviteFilter === t.v ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{t.l} <span className="opacity-60">({inviteCounts[t.v]})</span></button>)}</div><div className="flex flex-col sm:flex-row gap-2"><div className="relative flex-1"><div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300"><IconSearch /></div><input value={inviteSearch} onChange={e => setInviteSearch(e.target.value)} placeholder="Email or sender…" name="invite-search" autoComplete="off" className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 placeholder:text-slate-300" /></div><select value={inviteRoleFilter} onChange={e => setInviteRoleFilter(e.target.value)} className="px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-600"><option value="all">All Roles</option>{ROLES.map(r => <option key={r.value} value={r.value}>{r.label.replace(/s$/, "")}</option>)}</select><select value={inviteDateFilter} onChange={e => setInviteDateFilter(e.target.value)} className="px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-600"><option value="all">Any Time</option><option value="24h">24h</option><option value="7d">7 days</option><option value="30d">30 days</option></select></div>{hasInvFilters && <div className="flex items-center justify-between"><p className="text-xs text-slate-400">{filteredInvites.length} match</p><button onClick={() => { setInviteSearch(""); setInviteRoleFilter("all"); setInviteGroupFilter("all"); setInviteDateFilter("all"); }} className="text-xs font-semibold text-blue-600">Clear</button></div>}</div>
             {filteredInvites.length === 0 ? <div className="px-6 py-8 text-center"><p className="text-sm text-slate-400">No invites match your filters.</p></div> : <div className="divide-y divide-slate-50">{filteredInvites.map(inv => { const s = INV_STYLES[inv.status] || INV_STYLES.pending; return <div key={inv.invite_id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/50"><div className="flex items-center gap-3 flex-1 min-w-0"><div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${s.bg} ${s.text}`}><IconMail /></div><div className="min-w-0"><div className="flex items-center gap-2 flex-wrap"><p className="text-sm font-semibold text-slate-700 truncate">{inv.email}</p><RoleBadge role={inv.role} /></div><div className="flex items-center gap-2 mt-0.5 flex-wrap">{inv.group_name && <span className="text-xs text-emerald-600 font-medium">{inv.group_name}</span>}{inv.invited_by && <span className="text-xs text-slate-400">by {inv.invited_by}</span>}<span className="flex items-center gap-1 text-xs text-slate-400"><IconClock /> {fmtTime(inv.created_at)}</span></div></div></div><div className="flex items-center gap-2 pl-12 sm:pl-0 shrink-0">{inv.status === "pending" && inv.expires_at && <span className="text-xs text-amber-600 font-medium">{timeUntil(inv.expires_at)}</span>}<span className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${s.bg} ${s.text}`}><span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />{s.label}</span>{inv.status === "pending" && <button onClick={() => setRevokeTarget(inv)} className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50"><IconBan /></button>}{inv.status === "expired" && <button onClick={() => { setInvites(p => p.map(i => i.invite_id === inv.invite_id ? { ...i, status: "pending", expires_at: new Date(Date.now() + 48 * 3600000).toISOString() } : i)); msg(`Resent to ${inv.email}.`); }} className="p-1.5 rounded-lg text-slate-300 hover:text-blue-500 hover:bg-blue-50"><IconRefresh /></button>}</div></div>; })}</div>}
             {invitesHasMore && !hasInvFilters && (
               <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-between">
@@ -1110,7 +1534,7 @@ export default function UserManagementPage() {
         <div className="flex gap-2">
           <div className="relative flex-1">
             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300"><IconSearch /></div>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, email…"
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, email…" name="user-search" autoComplete="off"
               className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 placeholder:text-slate-300" />
           </div>
           {(search || activeFilterCount > 0) && (
@@ -1130,21 +1554,29 @@ export default function UserManagementPage() {
           </select>
 
           {showGroupColumn && groups.length > 0 && (
-            <select value={filterGroup} onChange={e => setFilterGroup(e.target.value)}
-              className="px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-600">
-              <option value="all">All Groups</option>
-              <option value="unassigned">Unassigned</option>
-              {groups.map(g => <option key={g.group_id} value={g.group_id}>{g.name}</option>)}
-            </select>
+            <SearchableSelect
+              value={filterGroup}
+              onChange={setFilterGroup}
+              placeholder="All Groups"
+              options={[
+                { value: "all", label: "All Groups" },
+                { value: "unassigned", label: "Unassigned" },
+                ...groups.map(g => ({ value: g.group_id, label: g.name })),
+              ]}
+            />
           )}
 
           {showGroupColumn && caretakers.length > 0 && (
-            <select value={filterCaretaker} onChange={e => setFilterCaretaker(e.target.value)}
-              className="px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-600">
-              <option value="all">All Caretakers</option>
-              <option value="none">No Caretaker</option>
-              {caretakers.map(c => <option key={c.caretaker_id} value={c.caretaker_id}>{c.name}</option>)}
-            </select>
+            <SearchableSelect
+              value={filterCaretaker}
+              onChange={setFilterCaretaker}
+              placeholder="All Caretakers"
+              options={[
+                { value: "all", label: "All Caretakers" },
+                { value: "none", label: "No Caretaker" },
+                ...caretakers.map(c => ({ value: c.caretaker_id, label: c.name })),
+              ]}
+            />
           )}
         </div>
 
@@ -1152,12 +1584,9 @@ export default function UserManagementPage() {
         <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Sort</span>
           {[
-            { field: "name", label: "Name" },
-            { field: "email", label: "Email" },
+            { field: "name",   label: "Name" },
             { field: "status", label: "Status" },
             { field: "joined", label: "Joined" },
-            ...(showGroupColumn ? [{ field: "group", label: "Group" }] : []),
-            ...(!activeRole ? [{ field: "role", label: "Role" }] : []),
           ].map(s => (
             <button key={s.field} onClick={() => handleSort(s.field)}
               className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${sort.field === s.field ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
@@ -1200,14 +1629,76 @@ export default function UserManagementPage() {
         {loading ? <div className="px-6 py-16 flex flex-col items-center gap-3"><BigSpinner /><p className="text-sm text-slate-400">Loading users…</p></div>
           : !usersAvailable && users.length === 0 ? <div className="p-6"><ApiPendingBanner endpoint="GET /admin_only/users (or /admin_only/users/paged)" description={usersError || "Could not load users from backend. Check API/container logs and retry."} /></div>
           : filtered.length === 0 ? <div className="px-6 py-12 text-center"><p className="text-sm text-slate-400">No users match your filters.</p><button onClick={clearFilters} className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">Clear all filters</button></div>
-          : <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="bg-slate-50/80"><th className="pl-4 pr-2 py-3 w-10"><input type="checkbox" checked={allSel} onChange={toggleAll} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" /></th>{columns.map(col => {
-            const sf = colSortMap[col];
-            return <th key={col} className="px-3 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">
-              {sf ? <button onClick={() => handleSort(sf)} className="inline-flex items-center gap-1 hover:text-slate-600 transition-colors">
-                {col}{sort.field === sf && <IconSort dir={sort.dir} />}
-              </button> : col}
-            </th>;
-          })}<th className="px-3 py-3 w-12"></th></tr></thead><tbody className="divide-y divide-slate-50">{filtered.map(user => <tr key={user.id} onClick={() => setDetailUser(user)} className={`transition-colors cursor-pointer ${selected.has(user.id) ? "bg-blue-50/50" : "hover:bg-slate-50"}`}><td className="pl-4 pr-2 py-3" onClick={e => e.stopPropagation()}><input type="checkbox" checked={selected.has(user.id)} onChange={() => toggleOne(user.id)} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" /></td>{columns.map(col => <td key={col} className="px-3 py-3 whitespace-nowrap">{getCell(user, col)}</td>)}<td className="px-3 py-3"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></td></tr>)}</tbody></table></div>}
+          : <>
+            {/* ── Mobile card list (< sm) ── */}
+            <div className="sm:hidden divide-y divide-slate-50">
+              {filtered.map(user => {
+                const isSel = selected.has(user.id);
+                return (
+                  <div key={user.id} onClick={() => setDetailUser(user)}
+                    className={`px-4 py-3.5 flex items-center gap-3 cursor-pointer transition-colors ${isSel ? "bg-blue-50/60" : "hover:bg-slate-50"}`}>
+                    <div onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={isSel} onChange={() => toggleOne(user.id)}
+                        className="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
+                    </div>
+                    <Avatar name={`${user.firstName} ${user.lastName}`} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-slate-800 truncate max-w-[160px]">
+                          {user.firstName} {user.lastName}
+                        </p>
+                        <RoleBadge role={user.role} />
+                      </div>
+                      <p className="text-xs text-slate-400 truncate mt-0.5">{user.email}</p>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <StatusDot status={user.status} />
+                        <span className="text-xs text-slate-500 capitalize">{user.status}</span>
+                        {user.group && <span className="text-xs text-emerald-600 font-medium">{user.group}</span>}
+                        {isLocked(user) && <span className="text-[9px] font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded uppercase">Locked</span>}
+                      </div>
+                    </div>
+                    <svg className="h-4 w-4 text-slate-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ── Desktop table (≥ sm) ── */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full text-left">
+                <thead><tr className="bg-slate-50/80">
+                  <th className="pl-4 pr-2 py-3 w-10"><input type="checkbox" checked={allSel} onChange={toggleAll} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" /></th>
+                  {columns.map(col => {
+                    const sf = colSortMap[col];
+                    return <th key={col} className="px-3 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                      {sf ? <button onClick={() => handleSort(sf)} className="inline-flex items-center gap-1 hover:text-slate-600 transition-colors">{col}{sort.field === sf && <IconSort dir={sort.dir} />}</button> : col}
+                    </th>;
+                  })}
+                  <th className="px-3 py-3 w-12"></th>
+                </tr></thead>
+                <tbody className="divide-y divide-slate-50">
+                  {filtered.map(user => (
+                    <tr key={user.id} onClick={() => setDetailUser(user)}
+                      className={`transition-colors cursor-pointer ${selected.has(user.id) ? "bg-blue-50/50" : "hover:bg-slate-50"}`}>
+                      <td className="pl-4 pr-2 py-3" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={selected.has(user.id)} onChange={() => toggleOne(user.id)} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
+                      </td>
+                      {columns.map(col => (
+                        <td key={col} className={`px-3 py-3 ${col === "Name" ? "max-w-[200px] overflow-hidden" : "whitespace-nowrap"}`}>
+                          {getCell(user, col)}
+                        </td>
+                      ))}
+                      <td className="px-3 py-3">
+                        <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>}
         {!loading && usersAvailable && hasMoreUsers && (
           <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
             <p className="text-xs text-slate-400">
@@ -1223,7 +1714,251 @@ export default function UserManagementPage() {
           </div>
         )}
       </div>
+
+      {/* ════════════ GROUP DETAIL MODAL ════════════ */}
+      {selectedGroupModal && (() => {
+        const g = groups.find(x => x.group_id === selectedGroupModal.group_id) || selectedGroupModal;
+        const modalMembers = groupMembersByGroup[g.group_id] || [];
+        const modalMembersLoading = !!groupMembersLoading[g.group_id];
+        const MODAL_TABS = ["Participants", "Survey forms", "Health goals"];
+        return (
+          <div className="fixed inset-0 z-40 flex flex-col sm:items-center sm:justify-center sm:bg-slate-900/40"
+            onClick={e => e.target === e.currentTarget && setSelectedGroupModal(null)}>
+            <div className="flex-1 sm:flex-none w-full sm:max-w-2xl bg-white sm:rounded-2xl sm:border sm:border-slate-200 sm:shadow-2xl flex flex-col sm:max-h-[90vh]">
+
+              {/* Header */}
+              <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4 border-b border-slate-100 shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0"><IconUsers /></div>
+                  <div className="min-w-0">
+                    <h2 className="text-base font-bold text-slate-800 truncate">{g.name}</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {g.description && <><span className="truncate">{g.description}</span><span className="mx-1.5">·</span></>}
+                      {Number(g.member_count || 0)} member{Number(g.member_count || 0) !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setSelectedGroupModal(null)} className="text-slate-400 hover:text-slate-600 transition-colors shrink-0 mt-0.5"><IconX /></button>
+              </div>
+
+              {/* Action buttons */}
+              <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap gap-2 shrink-0">
+                <button onClick={() => setAddParticipantsTarget(g)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
+                  <IconPlus /> Add participant
+                </button>
+                <button onClick={() => setGroupInviteTarget(g)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                  <IconMail /> Invite
+                </button>
+                <button onClick={() => setEditGroupTarget(g)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                  <IconEdit /> Edit
+                </button>
+                <button onClick={() => handleDeleteGroup(g)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 transition-colors">
+                  <IconTrash /> Delete
+                </button>
+              </div>
+
+              {/* Caretaker banner */}
+              <div className="px-5 py-2.5 border-b border-slate-100 bg-slate-50/50 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <p className="text-xs text-slate-600">
+                  {g.caretaker_name
+                    ? <><span className="text-slate-400">Caretaker: </span><span className="font-semibold text-slate-700">{g.caretaker_name}</span></>
+                    : <span className="text-amber-600 font-medium">No caretaker assigned</span>}
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={() => setAssignCaretakerTarget(g)}
+                    className="text-xs font-semibold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-lg hover:bg-slate-50 transition-colors">
+                    {g.caretaker_name ? "Reassign" : "Assign"}
+                  </button>
+                  {g.caretaker_name && (
+                    <button onClick={() => handleUnassignCaretaker(g)}
+                      className="text-xs font-semibold text-rose-500 hover:text-rose-700 transition-colors">
+                      Unassign
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex border-b border-slate-100 shrink-0 overflow-x-auto">
+                {MODAL_TABS.map(t => (
+                  <button key={t} onClick={() => { setGroupModalTab(t); setGroupModalPage(1); }}
+                    className={`px-5 py-3 text-sm font-semibold whitespace-nowrap border-b-2 -mb-px transition-colors ${
+                      groupModalTab === t ? "text-blue-600 border-blue-600 bg-blue-50/30" : "text-slate-500 border-transparent hover:text-slate-700 hover:bg-slate-50"
+                    }`}>
+                    {t}
+                    {t === "Participants" && <span className="ml-1.5 text-[11px] text-slate-400">({modalMembers.length})</span>}
+                    {t === "Survey forms" && groupModalSurveys.length > 0 && <span className="ml-1.5 text-[11px] text-slate-400">({groupModalSurveys.length})</span>}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              {(() => {
+                // Compute paged slices for all three tabs
+                const pMembers  = modalMembers;
+                const pSurveys  = groupModalSurveys;
+                const pGoals    = modalMembers; // iterate members for goals tab
+                const activeList = groupModalTab === "Participants" ? pMembers
+                                 : groupModalTab === "Survey forms"  ? pSurveys
+                                 : pGoals;
+                const totalPages = Math.max(1, Math.ceil(activeList.length / GROUP_MODAL_PAGE_SIZE));
+                const safePage   = Math.min(groupModalPage, totalPages);
+                const sliceStart = (safePage - 1) * GROUP_MODAL_PAGE_SIZE;
+                const sliceEnd   = sliceStart + GROUP_MODAL_PAGE_SIZE;
+                const pagedMembers  = pMembers.slice(sliceStart, sliceEnd);
+                const pagedSurveys  = pSurveys.slice(sliceStart, sliceEnd);
+                const pagedGoalRows = pGoals.slice(sliceStart, sliceEnd);
+
+                const Pagination = () => activeList.length <= GROUP_MODAL_PAGE_SIZE ? null : (
+                  <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 shrink-0 bg-white">
+                    <p className="text-xs text-slate-400">
+                      <span className="font-semibold text-slate-600">{sliceStart + 1}–{Math.min(sliceEnd, activeList.length)}</span> of {activeList.length}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setGroupModalPage(1)} disabled={safePage === 1}
+                        className="px-2 py-1 text-xs font-semibold text-slate-500 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed">First</button>
+                      <button onClick={() => setGroupModalPage(p => Math.max(1, p - 1))} disabled={safePage === 1}
+                        className="px-2 py-1 text-xs font-semibold text-slate-500 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed">‹</button>
+                      <span className="px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg">{safePage}</span>
+                      <button onClick={() => setGroupModalPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}
+                        className="px-2 py-1 text-xs font-semibold text-slate-500 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed">›</button>
+                      <button onClick={() => setGroupModalPage(totalPages)} disabled={safePage === totalPages}
+                        className="px-2 py-1 text-xs font-semibold text-slate-500 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed">Last</button>
+                    </div>
+                  </div>
+                );
+
+                return (
+                  <>
+                    <div className="overflow-y-auto flex-1">
+
+                      {/* Participants */}
+                      {groupModalTab === "Participants" && (
+                        modalMembersLoading ? (
+                          <div className="py-12 text-center"><div className="w-6 h-6 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto" /></div>
+                        ) : pMembers.length === 0 ? (
+                          <div className="py-14 text-center px-6">
+                            <p className="text-sm font-semibold text-slate-600 mb-1">No participants yet</p>
+                            <p className="text-xs text-slate-400 mb-4">Add or invite participants to this group.</p>
+                            <button onClick={() => setAddParticipantsTarget(g)}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700">
+                              <IconPlus /> Add participant
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-slate-50">
+                            {pagedMembers.map(m => (
+                              <div key={m.participant_id} className="px-5 py-3.5 flex items-center gap-3 hover:bg-slate-50/50 transition-colors">
+                                <Avatar name={m.name} size="sm" />
+                                <div className="flex-1 min-w-0">
+                                  <button onClick={() => { setSelectedGroupModal(null); navigate(`/admin/users/${m.participant_id}`); }}
+                                    className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline text-left truncate block">
+                                    {m.name}
+                                  </button>
+                                  <p className="text-xs text-slate-400 mt-0.5">Joined {fmt(m.joined_at)}</p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <StatusDot status={m.status || "active"} />
+                                  <span className="text-xs text-slate-500 capitalize hidden sm:inline">{m.status || "active"}</span>
+                                  <button onClick={() => handleRemoveGroupMember(m, g)}
+                                    className="text-xs font-semibold text-rose-400 hover:text-rose-600 transition-colors ml-1">
+                                    Remove
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      )}
+
+                      {/* Survey forms */}
+                      {groupModalTab === "Survey forms" && (
+                        groupModalSurveysLoading ? (
+                          <div className="py-12 text-center"><div className="w-6 h-6 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto" /></div>
+                        ) : pSurveys.length === 0 ? (
+                          <div className="py-14 text-center px-6">
+                            <p className="text-sm font-semibold text-slate-600 mb-1">No surveys published to this group</p>
+                            <p className="text-xs text-slate-400">Publish a survey from the Survey Builder to assign it here.</p>
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-slate-50">
+                            {pagedSurveys.map((s, i) => (
+                              <div key={s.form_id || s.id || i} className="px-5 py-3.5 flex items-center gap-3 hover:bg-slate-50/50 transition-colors">
+                                <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-slate-700 truncate">{s.title || s.name || "Untitled form"}</p>
+                                  {s.published_at && <p className="text-xs text-slate-400 mt-0.5">Published {fmt(s.published_at)}</p>}
+                                </div>
+                                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                                  s.status === "published" || s.is_published ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+                                }`}>
+                                  {s.status || (s.is_published ? "published" : "draft")}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      )}
+
+                      {/* Health goals */}
+                      {groupModalTab === "Health goals" && (
+                        groupModalGoalsLoading ? (
+                          <div className="py-12 text-center"><div className="w-6 h-6 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto" /></div>
+                        ) : pGoals.length === 0 ? (
+                          <div className="py-14 text-center px-6">
+                            <p className="text-sm text-slate-400">No participants to show goals for.</p>
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-slate-50">
+                            {pagedGoalRows.map(m => {
+                              const memberGoals = groupModalGoals?.[m.participant_id] || [];
+                              const active    = memberGoals.filter(gl => gl.status === "active" || gl.status === "in_progress").length;
+                              const completed = memberGoals.filter(gl => gl.status === "completed").length;
+                              return (
+                                <div key={m.participant_id} className="px-5 py-3.5 flex items-center gap-3 hover:bg-slate-50/50 transition-colors">
+                                  <Avatar name={m.name} size="sm" />
+                                  <div className="flex-1 min-w-0">
+                                    <button onClick={() => { setSelectedGroupModal(null); navigate(`/admin/users/${m.participant_id}`); }}
+                                      className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline text-left truncate block">
+                                      {m.name}
+                                    </button>
+                                    {groupModalGoals === null ? (
+                                      <p className="text-xs text-slate-400 mt-0.5">Loading…</p>
+                                    ) : memberGoals.length === 0 ? (
+                                      <p className="text-xs text-slate-400 italic mt-0.5">No goals set</p>
+                                    ) : (
+                                      <p className="text-xs text-slate-400 mt-0.5">
+                                        {active > 0 && <span className="text-blue-600 font-medium">{active} active</span>}
+                                        {active > 0 && completed > 0 && <span className="mx-1">·</span>}
+                                        {completed > 0 && <span className="text-emerald-600 font-medium">{completed} completed</span>}
+                                        {active === 0 && completed === 0 && `${memberGoals.length} goal${memberGoals.length !== 1 ? "s" : ""}`}
+                                      </p>
+                                    )}
+                                  </div>
+                                  {groupModalGoals !== null && memberGoals.length > 0 && (
+                                    <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full shrink-0">{memberGoals.length}</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )
+                      )}
+                    </div>
+                    <Pagination />
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
-
