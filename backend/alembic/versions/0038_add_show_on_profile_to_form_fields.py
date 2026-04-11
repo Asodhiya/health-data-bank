@@ -1,7 +1,7 @@
 """Add show_on_profile boolean to form_fields
 
-Revision ID: 0036
-Revises: 0035
+Revision ID: 0038
+Revises: 0037
 Create Date: 2026-04-11
 """
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0036"
-down_revision = "0035"
+revision = "0038"
+down_revision = "0037"
 branch_labels = None
 depends_on = None
 
