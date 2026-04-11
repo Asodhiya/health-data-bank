@@ -1823,6 +1823,8 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
    MAIN PAGE EXPORT
    ══════════════════════════════════════════════ */
 export default function SurveyBuilderPage() {
+  const BUILDER_SESSION_KEY = 'hdb_builder_session';
+  const BUILDER_RESTORE_KEY = 'hdb_builder_restore_pending';
   const { user } = useAuth();
   const [bootstrapping, setBootstrapping] = useState(true);
   const [view, setView]               = useState('list');
@@ -1855,28 +1857,41 @@ export default function SurveyBuilderPage() {
   }, [createdElements, metaElements]);
 
   useEffect(() => {
-    // Only restore the editor after a browser refresh, not when navigating back to the forms page.
+    // Restore the editor only after a real page refresh while the builder was open.
     try {
-      const navEntry = window.performance?.getEntriesByType?.('navigation')?.[0];
-      const isReload = navEntry?.type === 'reload';
-      if (!isReload) return;
-      const session = localStorage.getItem('hdb_builder_session');
-      if (session) {
-        const { formId, form } = JSON.parse(session);
-        // For new forms, restore from draft if available
-        const draftKey = `hdb_builder_draft_${formId}`;
-        const draft = localStorage.getItem(draftKey);
-        if (draft) {
-          const { title, description, fields } = JSON.parse(draft);
-          setEditingForm({ ...(form || {}), title, description, fields });
-        } else {
-          setEditingForm(form);
+      const shouldRestore = sessionStorage.getItem(BUILDER_RESTORE_KEY) === '1';
+      if (shouldRestore) {
+        sessionStorage.removeItem(BUILDER_RESTORE_KEY);
+        const session = localStorage.getItem(BUILDER_SESSION_KEY);
+        if (session) {
+          const { formId, form } = JSON.parse(session);
+          // For new forms, restore from draft if available
+          const draftKey = `hdb_builder_draft_${formId}`;
+          const draft = localStorage.getItem(draftKey);
+          if (draft) {
+            const { title, description, fields } = JSON.parse(draft);
+            setEditingForm({ ...(form || {}), title, description, fields });
+          } else {
+            setEditingForm(form);
+          }
+          setView('builder');
         }
-        setView('builder');
       }
     } catch { /* ignore */ }
     setBootstrapping(false);
-  }, []);
+  }, [BUILDER_RESTORE_KEY, BUILDER_SESSION_KEY]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (view === 'builder') {
+        sessionStorage.setItem(BUILDER_RESTORE_KEY, '1');
+      } else {
+        sessionStorage.removeItem(BUILDER_RESTORE_KEY);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [view, BUILDER_RESTORE_KEY]);
 
   /* Infer role context from URL path for display purposes */
   const isAdminContext = window.location.pathname.startsWith('/surveys');
@@ -1891,7 +1906,8 @@ export default function SurveyBuilderPage() {
     try {
       const fullForm = await api.getFormDetail(form.form_id);
       const transformed = { ...transformForEdit(fullForm), _locked: locked };
-      localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: fullForm.form_id, form: transformed }));
+      localStorage.setItem(BUILDER_SESSION_KEY, JSON.stringify({ formId: fullForm.form_id, form: transformed }));
+      sessionStorage.removeItem(BUILDER_RESTORE_KEY);
       setEditingForm(transformed);
       setView('builder');
     } catch (err) {
@@ -1912,7 +1928,8 @@ export default function SurveyBuilderPage() {
       showToast(`v${result.version} created — opening draft…`);
       const fullForm = await api.getFormDetail(result.form_id);
       const transformed = transformForEdit(fullForm);
-      localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: fullForm.form_id, form: transformed }));
+      localStorage.setItem(BUILDER_SESSION_KEY, JSON.stringify({ formId: fullForm.form_id, form: transformed }));
+      sessionStorage.removeItem(BUILDER_RESTORE_KEY);
       setEditingForm(transformed);
       setView('builder');
     } catch (err) {
@@ -1923,12 +1940,14 @@ export default function SurveyBuilderPage() {
   };
 
   const handleCreate = () => {
-    localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: 'new', form: null }));
+    localStorage.setItem(BUILDER_SESSION_KEY, JSON.stringify({ formId: 'new', form: null }));
+    sessionStorage.removeItem(BUILDER_RESTORE_KEY);
     setEditingForm(null);
     setView('builder');
   };
   const handleBack = () => {
-    localStorage.removeItem('hdb_builder_session');
+    localStorage.removeItem(BUILDER_SESSION_KEY);
+    sessionStorage.removeItem(BUILDER_RESTORE_KEY);
     setView('list');
     setEditingForm(null);
     setRefreshKey((v) => v + 1);
@@ -2027,7 +2046,8 @@ export default function SurveyBuilderPage() {
       await api.archiveForm(formId);
       showToast('Form archived');
       if (view === 'builder') {
-        localStorage.removeItem('hdb_builder_session');
+        localStorage.removeItem(BUILDER_SESSION_KEY);
+        sessionStorage.removeItem(BUILDER_RESTORE_KEY);
         setView('list');
         setEditingForm(null);
       }
