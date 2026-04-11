@@ -426,7 +426,12 @@ async def submit_intake(
         if field.profile_field not in valid_profile_fields:
             continue
 
-        val_text, val_num, val_json = _resolve_answer_value(field_uuid, val_text, val_num, val_json, field_meta)
+        # Conditional single_select fields (e.g. dependents Yes/No + number)
+        # store the actual numeric value, not an option index. Skip option-index
+        # resolution so the number isn't misinterpreted as an option lookup.
+        is_conditional = bool(field.config and field.config.get("conditional"))
+        if not is_conditional:
+            val_text, val_num, val_json = _resolve_answer_value(field_uuid, val_text, val_num, val_json, field_meta)
         raw_value = val_json if val_json is not None else val_num if val_num is not None else val_text
         raw_value = _resolve_profile_field_raw_value(field, raw_value)
         profile_updates[field.profile_field] = _normalize_profile_field_value(field.profile_field, raw_value)
@@ -450,7 +455,10 @@ async def submit_intake(
             mapping = field_map.get(field_uuid)
             if not mapping:
                 continue
-            val_text, val_num, val_json = _resolve_answer_value(field_uuid, val_text, val_num, val_json, field_meta)
+            field = form_fields.get(field_uuid)
+            is_cond = bool(field and field.config and field.config.get("conditional"))
+            if not is_cond:
+                val_text, val_num, val_json = _resolve_answer_value(field_uuid, val_text, val_num, val_json, field_meta)
             val_text, val_num, val_json = _apply_transform(val_text, val_num, val_json, mapping.transform_rule)
             db.add(HealthDataPoint(
                 participant_id=participant.participant_id,
