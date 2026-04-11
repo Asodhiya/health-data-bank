@@ -19,7 +19,7 @@ from app.services.auth_service import (
     validate_signup_invite_token,
 )
 from app.schemas.schemas import LoginRequest, UserResponse, ForgotPasswordIn, ResetPasswordIn
-from app.core.dependency import check_current_user, require_permissions
+from app.core.dependency import check_current_user, require_permissions, set_rls_context
 from app.core.permissions import SEND_INVITE
 from app.services.email_sender import send_reset_email, send_invite_email
 from app.core.security import InviteTokenGenerator
@@ -153,6 +153,7 @@ async def login(
 ):
     """Authenticates user by checking email and hashed password."""
     ip = _get_client_ip(request)
+    await set_rls_context(db, role="system")
 
     try:
         user = await authenticate_user(data.identifier, data.password, db)
@@ -257,6 +258,7 @@ async def register(
 ):
     """User registration via invite link."""
     ip = _get_client_ip(request)
+    await set_rls_context(db, role="system")
     return await register_user_from_invite(token, payload, ip, db)
 
 
@@ -357,6 +359,7 @@ async def self_deactivate_account(
             for group in groups:
                 group.caretaker_id = None
 
+    await set_rls_context(db, role="system")
     admin_rows = await db.execute(
         select(User.user_id)
         .join(UserRole, UserRole.user_id == User.user_id)
@@ -452,6 +455,7 @@ async def forgot_password(
     db: AsyncSession = Depends(get_db),
 ):
     ip = _get_client_ip(request)
+    await set_rls_context(db, role="system")
 
     await reset_forgot_password(payload, background, db)
 
@@ -475,6 +479,7 @@ async def reset_password_endpoint(
 ):
     """Validates the reset token and updates the user's password."""
     ip = _get_client_ip(request)
+    await set_rls_context(db, role="system")
 
     await reset_password(payload, db)
 
@@ -523,6 +528,7 @@ async def signup_invite(
         target_email=Payload.email,
         group_id=Payload.group_id,
     )
+    await set_rls_context(db, role="system")
     result = await generator.save(db)
     send_invite_email(Payload.email, result["invite_url"])
 

@@ -6,7 +6,7 @@ from datetime import date
 
 from app.db.session import get_db
 from app.db.models import User, SignupInvite, Role, Group
-from app.core.dependency import require_permissions
+from app.core.dependency import require_permissions, get_rls_db
 from app.core.permissions import (
     GROUP_READ,
     CARETAKER_READ,
@@ -154,7 +154,7 @@ async def list_group_members(
 @router.get("/groups/{group_id}/elements", response_model=list[GroupDataElementItem])
 async def list_group_elements(
     group_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GROUP_READ)),
 ):
     rows = await CaretakersQuery(db).get_group_elements(group_id, current_user.user_id)
@@ -595,7 +595,7 @@ async def delete_note(
 async def generate_group_report(
     group_id: UUID = Query(...),
     body: ReportGenerateRequest = ...,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GROUP_READ)),
 ):
     report = await CaretakersQuery(db).generate_group_report(
@@ -627,7 +627,7 @@ async def generate_comparison_report(
     compare_participant_id: Optional[UUID] = Query(default=None),
     group_id: Optional[UUID] = Query(default=None),
     body: ReportGenerateRequest = ...,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     if compare_with == "participant" and not compare_participant_id:
@@ -706,7 +706,7 @@ async def get_report(
 async def get_submission_detail(
     participant_id: UUID,
     submission_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
     row, answers = await CaretakersQuery(db).get_submission_detail(participant_id, submission_id, current_user.user_id)
@@ -737,7 +737,7 @@ async def get_submission_detail(
 @router.get("/participants/{participant_id}/goals")
 async def get_participant_goals(
     participant_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
     return await CaretakersQuery(db).get_participant_goals(participant_id, current_user.user_id)
@@ -751,7 +751,7 @@ async def get_health_trends(
     element_ids: Optional[list[UUID]] = Query(default=None),
     date_from: Optional[date] = Query(default=None),
     date_to: Optional[date] = Query(default=None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
     return await CaretakersQuery(db).get_health_trends(
@@ -767,7 +767,7 @@ async def get_health_trends(
 )
 async def list_participant_data_elements(
     participant_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
     """Reports v2: returns data elements relevant to this participant.
@@ -800,7 +800,7 @@ async def list_participant_data_elements(
 
 @router.get("/notifications", response_model=list[NotificationItem])
 async def list_notifications(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
 ):
     rows = await list_notifications_for_user(db, current_user.user_id, role_target="caretaker")
@@ -822,7 +822,7 @@ async def list_notifications(
 @router.patch("/notifications/{notification_id}", response_model=NotificationItem)
 async def mark_notification_read(
     notification_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(CARETAKER_WRITE)),
 ):
     n = await mark_notification_read_for_user(db, notification_id, current_user.user_id)

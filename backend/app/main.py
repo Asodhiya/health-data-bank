@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.dependency import set_rls_context
 from app.core.security import decode_access_token
 from app.api.routes import router as api_router
 from app.db.models import Role, UserRole
@@ -94,6 +95,7 @@ async def lifespan(app: FastAPI):
     try:
         async for db in get_db():
             try:
+                await set_rls_context(db, role="admin")
                 await seed_rbac(db)
                 await seed_onboarding_data(db)
                 await seed_profile_data_elements(db)

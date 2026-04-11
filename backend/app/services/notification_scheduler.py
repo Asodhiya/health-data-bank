@@ -8,6 +8,7 @@ from sqlalchemy.exc import ProgrammingError
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
+from app.core.dependency import set_rls_context
 from app.db.models import (
     Backup,
     BackupScheduleSettings,
@@ -211,6 +212,7 @@ async def refresh_backup_schedule_job(schedule: BackupScheduleSettings | dict | 
 
 async def _notify_backup_overdue() -> None:
     async with AsyncSessionLocal() as db:
+        await set_rls_context(db, role="admin")
         now = datetime.now(timezone.utc)
         latest_backup = _as_utc(await db.scalar(select(func.max(Backup.created_at))))
         overdue = not latest_backup or latest_backup < (now - timedelta(days=7))
@@ -249,6 +251,7 @@ async def _notify_backup_overdue() -> None:
 
 async def _run_scheduled_backup() -> None:
     async with AsyncSessionLocal() as db:
+        await set_rls_context(db, role="admin")
         schedule = await _load_backup_schedule(db)
         if not _get_schedule_attr(schedule, "enabled"):
             return
@@ -296,6 +299,7 @@ async def _run_scheduled_backup() -> None:
 
 async def _notify_goal_deadlines() -> None:
     async with AsyncSessionLocal() as db:
+        await set_rls_context(db, role="admin")
         now = datetime.now(timezone.utc)
         soon = now + timedelta(days=3)
 
@@ -342,6 +346,7 @@ async def _notify_goal_deadlines() -> None:
 
 async def _notify_inactivity() -> None:
     async with AsyncSessionLocal() as db:
+        await set_rls_context(db, role="admin")
         now = datetime.now(timezone.utc)
         threshold = now - timedelta(days=7)
 
@@ -429,6 +434,7 @@ async def _notify_inactivity() -> None:
 
 async def _notify_recurring_surveys() -> None:
     async with AsyncSessionLocal() as db:
+        await set_rls_context(db, role="admin")
         now = datetime.now(timezone.utc)
         rows = await db.execute(
             select(
@@ -559,4 +565,3 @@ def stop_notification_scheduler() -> None:
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
     _scheduler = None
-

@@ -9,8 +9,7 @@ from sqlalchemy.orm import selectinload
 from datetime import datetime, date, timezone
 from typing import Any
 
-from app.db.session import get_db
-from app.core.dependency import check_current_user, require_permissions
+from app.core.dependency import check_current_user, get_rls_db, require_permissions, set_rls_context
 from app.core.permissions import ONBOARDING_READ, ONBOARDING_SUBMIT, ONBOARDING_EDIT
 from app.db.models import (
     User, Role, UserRole, SurveyForm, FormField, FieldOption, FormSubmission,
@@ -268,7 +267,7 @@ def _resolve_profile_field_raw_value(field: FormField, raw_value: Any) -> Any:
 
 @router.get("/form")
 async def get_intake_form(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Return the intake form structure (form_id + fields + options) so the frontend knows field IDs.
@@ -329,7 +328,7 @@ async def get_intake_form(
 
 @router.get("/profile-fields")
 async def get_profile_intake_fields(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Return intake submission answers for fields marked show_on_profile=true."""
@@ -417,7 +416,7 @@ async def get_profile_intake_fields(
 @router.post("")
 async def submit_intake(
     payload: IntakeSubmission,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """
@@ -546,7 +545,7 @@ async def submit_intake(
 
 @router.get("/consent-form", dependencies=[Depends(require_permissions(ONBOARDING_READ))])
 async def get_consent_form(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Return the active consent form template."""
@@ -566,7 +565,7 @@ async def get_consent_form(
 
 @router.get("/background-info", dependencies=[Depends(require_permissions(ONBOARDING_READ))])
 async def get_background_info(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Return the active background info template."""
@@ -586,7 +585,7 @@ async def get_background_info(
 
 @router.get("/status", dependencies=[Depends(require_permissions(ONBOARDING_READ))])
 async def get_status(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Return the current participant's onboarding status."""
@@ -596,7 +595,7 @@ async def get_status(
 
 @router.post("/background-read", dependencies=[Depends(require_permissions(ONBOARDING_SUBMIT))])
 async def background_read(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Mark the background info as read (advances status from PENDING → BACKGROUND_READ)."""
@@ -610,7 +609,7 @@ async def background_read(
 @router.post("/consent", dependencies=[Depends(require_permissions(ONBOARDING_SUBMIT))])
 async def submit_consent_route(
     payload: ConsentSubmitIn,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Submit consent form answers and signature (advances status → CONSENT_GIVEN)."""
@@ -638,7 +637,7 @@ async def submit_consent_route(
 
 @router.post("/complete", dependencies=[Depends(require_permissions(ONBOARDING_SUBMIT))])
 async def complete_onboarding_route(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Complete onboarding (advances status from CONSENT_GIVEN → COMPLETED)."""
@@ -647,6 +646,7 @@ async def complete_onboarding_route(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    await set_rls_context(db, role="system")
     admin_rows = await db.execute(
         select(User.user_id)
         .join(UserRole, UserRole.user_id == User.user_id)
@@ -675,7 +675,7 @@ async def complete_onboarding_route(
 @router.put("/admin/consent-template", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
 async def update_consent_template_route(
     payload: ConsentTemplateUpdateIn,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Create a new version of the consent form template (deactivates previous)."""
@@ -692,7 +692,7 @@ async def update_consent_template_route(
 @router.put("/admin/background-template", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
 async def update_background_template_route(
     payload: BackgroundInfoUpdateIn,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Create a new version of the background info template (deactivates previous)."""
@@ -708,7 +708,7 @@ async def update_background_template_route(
 
 @router.get("/admin/intake-form", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
 async def get_admin_intake_form(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Return the intake form with all fields and options (admin view)."""
@@ -731,7 +731,7 @@ async def get_admin_intake_form(
 
 @router.get("/admin/intake-form/affected-count", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
 async def get_affected_participant_count(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     _current_user: User = Depends(check_current_user),
 ):
     """Return count of completed participants who would need to redo intake if the form changes."""
@@ -745,7 +745,7 @@ async def get_affected_participant_count(
 @router.put("/admin/intake-form", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
 async def update_intake_form_route(
     payload: IntakeFormUpdateIn,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Update intake fields in-place, auto-link to data elements, reset participants if changed."""

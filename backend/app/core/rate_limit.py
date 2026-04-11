@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.dependency import set_rls_context
 from app.db.models import AuditLog, Role, User, UserRole
 from app.db.session import get_db
 from app.services.audit_service import write_audit_log
@@ -161,6 +162,7 @@ async def _count_recent_rate_limit_exceedances(
 
 
 async def _get_admin_user_ids(db: AsyncSession) -> list:
+    await set_rls_context(db, role="system")
     result = await db.execute(
         select(User.user_id)
         .join(UserRole, UserRole.user_id == User.user_id)

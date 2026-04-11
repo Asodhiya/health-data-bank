@@ -3,10 +3,40 @@ from typing import Iterable, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Notification
+
+
+async def _ensure_notification_rls_context(
+    db: AsyncSession,
+    *,
+    user_id: UUID | None = None,
+) -> None:
+    current_result = await db.execute(
+        text(
+            """
+            SELECT
+              nullif(current_setting('app.current_user_id', true), ''),
+              nullif(current_setting('app.current_user_role', true), '')
+            """
+        )
+    )
+    current_user_id, current_role = current_result.one()
+
+    if not current_user_id and user_id is not None:
+        await db.execute(
+            text("SELECT set_config('app.current_user_id', :uid, TRUE)"),
+            {"uid": str(user_id)},
+        )
+
+    # Internal jobs and unauthenticated auth/rate-limit flows still need to create
+    # and dedupe notifications safely after notifications RLS is enabled.
+    if not current_role:
+        await db.execute(
+            text("SELECT set_config('app.current_user_role', 'admin', TRUE)")
+        )
 
 
 async def create_notification(
@@ -22,6 +52,7 @@ async def create_notification(
     source_id: Optional[UUID] = None,
     deployment_id: Optional[UUID] = None,
 ) -> Notification:
+    await _ensure_notification_rls_context(db, user_id=user_id)
     row = Notification(
         user_id=user_id,
         type=notification_type,
@@ -74,6 +105,7 @@ async def list_notifications_for_user(
     limit: int = 100,
     role_target: Optional[str] = None,
 ) -> list[Notification]:
+    await _ensure_notification_rls_context(db, user_id=user_id)
     stmt = (
         select(Notification)
         .where(Notification.user_id == user_id)
@@ -96,6 +128,7 @@ async def mark_notification_read_for_user(
     notification_id: UUID,
     user_id: UUID,
 ) -> Notification:
+    await _ensure_notification_rls_context(db, user_id=user_id)
     result = await db.execute(
         select(Notification).where(
             Notification.notification_id == notification_id,
@@ -120,6 +153,7 @@ async def notification_exists_recent(
     source_id: Optional[UUID],
     within_hours: int,
 ) -> bool:
+    await _ensure_notification_rls_context(db, user_id=user_id)
     since = datetime.now(timezone.utc) - timedelta(hours=within_hours)
     stmt = (
         select(Notification.notification_id)

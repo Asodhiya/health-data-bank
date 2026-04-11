@@ -6,8 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from uuid import UUID
 
-from app.db.session import get_db
-from app.core.dependency import check_current_user, require_permissions
+from app.core.dependency import check_current_user, get_rls_db, require_permissions
 from app.core.permissions import SURVEY_LIST_ASSIGNED, SURVEY_READ, SURVEY_SUBMIT
 from app.db.models import User
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, ParticipantSurveyItem
@@ -17,14 +16,14 @@ router = APIRouter()
 #TODO:dependencies do not work as of the moment, needs it to be initialized in the database/or when testing, remove it
 
 @router.get("/assigned", response_model=List[ParticipantSurveyItem], dependencies=[Depends(require_permissions(SURVEY_LIST_ASSIGNED))])
-async def list_assigned_surveys_route(db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
+async def list_assigned_surveys_route(db: AsyncSession = Depends(get_rls_db),current_user: User = Depends(check_current_user)):
     """List surveys assigned participant"""
     surveys = await list_assigned_surveys(current_user.user_id, db)
     return surveys
 
 
 @router.get("/{form_id}", response_model=SurveyDetailOut, dependencies=[Depends(require_permissions(SURVEY_READ))])
-async def get_survey_detail_route(form_id: UUID,db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
+async def get_survey_detail_route(form_id: UUID,db: AsyncSession = Depends(get_rls_db),current_user: User = Depends(check_current_user)):
     """Get details of a specific survey assigned to participant"""
     survey = await get_participant_survey_detail(form_id, current_user.user_id, db)
     if not survey:
@@ -32,7 +31,7 @@ async def get_survey_detail_route(form_id: UUID,db: AsyncSession = Depends(get_d
     return survey
 
 @router.get("/{form_id}/response", dependencies=[Depends(require_permissions(SURVEY_READ))])
-async def get_survey_response_route(form_id: UUID,db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
+async def get_survey_response_route(form_id: UUID,db: AsyncSession = Depends(get_rls_db),current_user: User = Depends(check_current_user)):
     """Get the existing submission (draft or completed) for a survey"""
     submission = await get_participant_survey_response(form_id, current_user.user_id, db)
     if not submission:
@@ -57,7 +56,7 @@ async def get_survey_response_route(form_id: UUID,db: AsyncSession = Depends(get
     }
 
 @router.post("/{form_id}/submit", dependencies=[Depends(require_permissions(SURVEY_SUBMIT))])
-async def submit_survey_response_route(form_id: UUID,answers: List[dict], db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
+async def submit_survey_response_route(form_id: UUID,answers: List[dict], db: AsyncSession = Depends(get_rls_db),current_user: User = Depends(check_current_user)):
     """Submit responses of a survey form (submit)"""
     try:
         submission = await submit_survey_response(form_id, current_user.user_id, answers, db)
@@ -70,7 +69,7 @@ async def submit_survey_response_route(form_id: UUID,answers: List[dict], db: As
 
 
 @router.post("/{form_id}/save", dependencies=[Depends(require_permissions(SURVEY_SUBMIT))])
-async def save_survey_draft_route(form_id: UUID,answers: List[dict], db: AsyncSession = Depends(get_db),current_user: User = Depends(check_current_user)):
+async def save_survey_draft_route(form_id: UUID,answers: List[dict], db: AsyncSession = Depends(get_rls_db),current_user: User = Depends(check_current_user)):
     """Save responses (NOT SUBMIT)"""
     try:
         submission = await save_survey_response(form_id, current_user.user_id, answers, db)

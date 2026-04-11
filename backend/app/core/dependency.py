@@ -11,6 +11,26 @@ from sqlalchemy import select, text
 from app.services.RBAC_service import RBACService
 from typing import Callable
 from app.db.models import User,UserRole,Role
+
+
+async def set_rls_context(
+    db: AsyncSession,
+    *,
+    user_id: str | UUID | None = None,
+    role: str | None = None,
+) -> None:
+    if user_id:
+        await db.execute(
+            text("SELECT set_config('app.current_user_id', :uid, TRUE)"),
+            {"uid": str(user_id)},
+        )
+    if role:
+        await db.execute(
+            text("SELECT set_config('app.current_user_role', :role, TRUE)"),
+            {"role": str(role)},
+        )
+
+
 async def check_current_user(request: Request, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("token")
     if not token:
@@ -25,10 +45,7 @@ async def check_current_user(request: Request, db: AsyncSession = Depends(get_db
     if not user_id or not session_id:
         raise HTTPException(401, detail="Invalid token")
 
-    await db.execute(
-        text("SELECT set_config('app.current_user_id', :uid, TRUE)"),
-        {"uid": str(user_id)},
-    )
+    await set_rls_context(db, user_id=user_id)
 
     try:
         session_uuid = UUID(session_id)
@@ -51,10 +68,7 @@ async def check_current_user(request: Request, db: AsyncSession = Depends(get_db
     )
     role_name = role_result.scalar_one_or_none()
     if role_name:
-        await db.execute(
-            text("SELECT set_config('app.current_user_role', :role, TRUE)"),
-            {"role": str(role_name)},
-        )
+        await set_rls_context(db, role=str(role_name))
 
     await touch_session(session, db)
     request.state.session = session
@@ -71,10 +85,7 @@ async def get_rls_db(
         if payload:
             user_id = payload.get("sub")
             if user_id:
-                await db.execute(
-                    text("SELECT set_config('app.current_user_id', :uid, TRUE)"),
-                    {"uid": str(user_id)},
-                )
+                await set_rls_context(db, user_id=user_id)
                 role_result = await db.execute(
                     select(Role.role_name)
                     .join(UserRole, UserRole.role_id == Role.role_id)
@@ -83,10 +94,7 @@ async def get_rls_db(
                 )
                 role_name = role_result.scalar_one_or_none()
                 if role_name:
-                    await db.execute(
-                        text("SELECT set_config('app.current_user_role', :role, TRUE)"),
-                        {"role": str(role_name)},
-                    )
+                    await set_rls_context(db, role=str(role_name))
     yield db
 
 

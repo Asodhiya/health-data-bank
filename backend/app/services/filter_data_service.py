@@ -167,13 +167,38 @@ async def _ensure_survey_access(
         select(SurveyForm.form_id).where(
             SurveyForm.form_id == survey_id,
             or_(
-                SurveyForm.created_by == current_user_id,
+                SurveyForm.status.in_(["PUBLISHED", "ARCHIVED"]),
                 SurveyForm.title == "Intake Form",
             ),
         )
     )
     if survey.scalar_one_or_none() is None:
         raise HTTPException(status_code=403, detail="You do not have access to this survey.")
+
+
+async def _get_survey_family_form_ids(
+    db: AsyncSession,
+    survey_id: str | UUID | None,
+) -> list[UUID]:
+    if not survey_id:
+        return []
+
+    root_id = await db.scalar(
+        select(func.coalesce(SurveyForm.parent_form_id, SurveyForm.form_id))
+        .where(SurveyForm.form_id == survey_id)
+        .limit(1)
+    )
+    if not root_id:
+        return []
+
+    result = await db.execute(
+        select(SurveyForm.form_id)
+        .where(
+            func.coalesce(SurveyForm.parent_form_id, SurveyForm.form_id) == root_id,
+            SurveyForm.status.in_(["PUBLISHED", "ARCHIVED"]),
+        )
+    )
+    return list(result.scalars().all())
 
 
 def _utc_today() -> date:
@@ -586,10 +611,14 @@ async def _filter_participant_ids_by_required_elements(
 
 
 async def get_mapped_element_ids(survey_id, db: AsyncSession) -> list:
+    family_form_ids = await _get_survey_family_form_ids(db, survey_id)
+    if not family_form_ids:
+        family_form_ids = [survey_id]
+
     result = await db.execute(
         select(FieldElementMap.element_id)
         .join(FormField, FormField.field_id == FieldElementMap.field_id)
-        .where(FormField.form_id == survey_id)
+        .where(FormField.form_id.in_(family_form_ids))
     )
     return list(result.scalars().all())
 
@@ -685,15 +714,10 @@ async def resolve_participant_ids(
 
 
 async def get_available_surveys(db: AsyncSession, current_user_id: UUID):
-    """Fetches forms (any status) that have at least one completed submission."""
-    stmt = (
+    """Fetch surveys available to researchers for dashboard filtering."""
+    submitted_stmt = (
         select(SurveyForm)
         .where(SurveyForm.status.in_(['PUBLISHED', 'ARCHIVED']))
-        .where(
-            or_(
-                SurveyForm.created_by == current_user_id,
-            )
-        )
         .where(SurveyForm.title != "Intake Form")
         .where(
             exists(
@@ -704,9 +728,36 @@ async def get_available_surveys(db: AsyncSession, current_user_id: UUID):
             )
         )
     )
+    submitted_result = await db.execute(submitted_stmt)
+    submitted_forms = submitted_result.scalars().all()
 
-    result = await db.execute(stmt)
-    forms = result.scalars().all()
+    if not submitted_forms:
+        return []
+
+    family_root_ids = list({form.parent_form_id or form.form_id for form in submitted_forms})
+
+    latest_result = await db.execute(
+        select(SurveyForm)
+        .where(func.coalesce(SurveyForm.parent_form_id, SurveyForm.form_id).in_(family_root_ids))
+        .where(SurveyForm.status.in_(["PUBLISHED", "ARCHIVED"]))
+        .where(SurveyForm.title != "Intake Form")
+        .order_by(
+            SurveyForm.title.asc(),
+            func.coalesce(SurveyForm.parent_form_id, SurveyForm.form_id),
+            SurveyForm.version.desc(),
+            SurveyForm.created_at.desc(),
+        )
+    )
+    latest_candidates = latest_result.scalars().all()
+
+    forms = []
+    seen_roots = set()
+    for form in latest_candidates:
+        root_key = str(form.parent_form_id or form.form_id)
+        if root_key in seen_roots:
+            continue
+        seen_roots.add(root_key)
+        forms.append(form)
 
     if forms:
         form_ids = [f.form_id for f in forms]
@@ -965,10 +1016,11 @@ async def get_survey_results_pivoted(
 
     survey_submission_ids = None
     if survey_id and "survey" in source_types:
+        survey_family_form_ids = await _get_survey_family_form_ids(db, survey_id)
         survey_submission_ids = (
             select(FormSubmission.submission_id)
             .where(
-                FormSubmission.form_id == survey_id,
+                FormSubmission.form_id.in_(survey_family_form_ids or [survey_id]),
                 FormSubmission.submitted_at.is_not(None),
             )
         )
