@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { api } from "../../services/api";
+import { useResearcherMeta } from "../../hooks/useResearcherMeta";
+import { normalizeAvailableSurveys } from "../../utils/researcherSurveys";
 import { LANGUAGES } from "../../utils/formOptions";
 import {
   Bar,
@@ -162,7 +164,7 @@ function createDefaultFilters() {
     group_ids: [],
     source_types: ["survey", "goal"],
     allow_null: true,
-    mode: "aggregate",
+    mode: "longitudinal",
     group_by: null,
     search: "",
     date_from: "",
@@ -237,11 +239,6 @@ export default function ResearcherDashboard() {
     has_more: false,
     next_offset: 0,
   });
-  const [availableSurveys, setAvailableSurveys] = useState([]);
-  const [availableElements, setAvailableElements] = useState([]);
-  const [allGroups, setAllGroups] = useState([]);
-  const [allForms, setAllForms] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [filtering, setFiltering] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [filterError, setFilterError] = useState("");
@@ -252,6 +249,8 @@ export default function ResearcherDashboard() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [showGroupMenu, setShowGroupMenu] = useState(false);
   const [showElementMenu, setShowElementMenu] = useState(false);
+  const [shouldLoadSurveys, setShouldLoadSurveys] = useState(true);
+  const [shouldLoadGroups, setShouldLoadGroups] = useState(false);
   const [elementSearch, setElementSearch] = useState("");
   const [elementDraft, setElementDraft] = useState(createElementFilterDraft);
   const [editingElementId, setEditingElementId] = useState(null);
@@ -259,10 +258,22 @@ export default function ResearcherDashboard() {
   const [editingDemographicField, setEditingDemographicField] = useState(null);
   const [viewMode, setViewMode] = useState("table");
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
+  const [hasRunQuery, setHasRunQuery] = useState(false);
 
   const groupMenuRef = useRef(null);
   const elementMenuRef = useRef(null);
   const loadResultsRef = useRef(null);
+  const {
+    surveys: availableSurveys,
+    elements: availableElements,
+    groups: allGroups,
+    loading,
+  } = useResearcherMeta({
+    includeSurveys: shouldLoadSurveys,
+    includeElements: true,
+    includeInactiveElements: true,
+    includeGroups: shouldLoadGroups,
+  });
 
   const numericElements = useMemo(
     () => (availableElements || []),
@@ -291,23 +302,18 @@ export default function ResearcherDashboard() {
     return markers;
   }, [queryData.data]);
 
-  const surveyOptions = useMemo(() => {
-    const sourceForms = allForms.length > 0 ? allForms : availableSurveys;
-    const uniqueForms = [];
-    const seen = new Set();
+  const surveyOptions = useMemo(
+    () => normalizeAvailableSurveys(availableSurveys),
+    [availableSurveys],
+  );
 
-    sourceForms.forEach((form) => {
-      const formId = String(form.form_id || form.id || "");
-      const status = String(form.status || "").toUpperCase();
-      if (!formId || seen.has(formId) || status === "DRAFT") return;
-      seen.add(formId);
-      uniqueForms.push(form);
-    });
-
-    return uniqueForms.sort((a, b) =>
-      String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: "base" }),
-    );
-  }, [allForms, availableSurveys]);
+  const appliedSurvey = useMemo(
+    () =>
+      availableSurveys.find(
+        (form) => String(form.form_id || form.id || "") === String(appliedFilters.survey_id || ""),
+      ) || null,
+    [appliedFilters.survey_id, availableSurveys],
+  );
 
   const groupByOptions = useMemo(() => {
     const options = [
@@ -463,12 +469,76 @@ export default function ResearcherDashboard() {
   }, [appliedFilters.group_by, queryData.data]);
 
   const stats = useMemo(() => {
-    const selectedCount = draftFilters.group_ids.length;
-    const selectedGroupName = selectedGroups[0]?.name || null;
+    const selectedCount = appliedFilters.group_ids.length;
+    const selectedSources = appliedFilters.source_types || ["survey", "goal"];
+    const selectedGroupName =
+      (appliedFilters.group_ids || [])
+        .map((groupId) =>
+          allGroups.find((group) => String(group.group_id || group.id) === String(groupId)),
+        )
+        .filter(Boolean)[0]?.name || null;
     const totalGroupCount = allGroups.length;
+    const sourceLabels = {
+      survey: "Survey",
+      goal: "Goal",
+    };
+    const sourceSummary = selectedSources
+      .map((sourceType) => sourceLabels[sourceType] || sourceType)
+      .join(" + ");
+    const dateSummary =
+      appliedFilters.date_from || appliedFilters.date_to
+        ? `${appliedFilters.date_from || "Any start"} to ${appliedFilters.date_to || "Today"}`
+        : "All dates";
+    const healthColumnsVisible = (queryData.columns || []).some(
+      (column) =>
+        column &&
+        !HIDDEN_SYSTEM_COLUMN_IDS.has(column.id) &&
+        !DEMOGRAPHIC_COLUMN_IDS.has(column.id),
+    );
+    const hasHealthScope =
+      Boolean(appliedFilters.survey_id) ||
+      Boolean(appliedFilters.group_by) ||
+      (appliedFilters.element_filters || []).length > 0 ||
+      healthColumnsVisible;
+    const isDemographicsOnlyView = !hasHealthScope;
+
+    const primaryLabel = isDemographicsOnlyView
+      ? "Participant profiles in scope"
+      : "Participants in current scope";
+    const primaryDescription = isDemographicsOnlyView
+      ? (
+        appliedFilters.date_from || appliedFilters.date_to
+          ? `Showing demographic profiles for participants with records from ${dateSummary}.`
+          : "Showing demographic profile data only."
+      )
+      : `${sourceSummary} data across ${dateSummary}.`;
+
+    const resultLabel = isDemographicsOnlyView
+      ? appliedFilters.survey_id
+        ? "Survey selected"
+        : "Available surveys"
+      : appliedFilters.group_by
+        ? "Grouped results"
+        : appliedFilters.mode === "longitudinal"
+          ? "Observations loaded"
+          : "Participant summaries";
+    const rowSummary = isDemographicsOnlyView
+      ? appliedFilters.survey_id
+        ? `${appliedSurvey?.title || "Selected survey"} is currently in scope for health data filters.`
+        : `${surveyOptions.length} surveys are available to add health data columns and filters.`
+      : appliedFilters.group_by
+        ? `Grouped by ${appliedGroupByLabel}.`
+        : appliedFilters.mode === "longitudinal"
+          ? "One row per observation."
+          : "One row per participant with summarized health data.";
+
     return {
       totalParticipants: pagination.total_participants,
-      filteredResults: queryData.data.length,
+      filteredResults: isDemographicsOnlyView
+        ? appliedFilters.survey_id
+          ? 1
+          : surveyOptions.length
+        : queryData.data.length,
       activeGroupsText:
         selectedGroupName
           ? selectedGroupName
@@ -476,8 +546,28 @@ export default function ResearcherDashboard() {
             ? `All (${totalGroupCount})`
             : "All participants",
       isGroupFiltered: selectedCount > 0,
+      primaryLabel,
+      primaryDescription,
+      resultLabel,
+      rowSummary,
     };
-  }, [draftFilters.group_ids, selectedGroups, allGroups.length, pagination.total_participants, queryData.data.length]);
+  }, [
+    appliedFilters.date_from,
+    appliedFilters.element_filters,
+    appliedFilters.group_by,
+    appliedFilters.group_ids,
+    appliedFilters.mode,
+    appliedFilters.source_types,
+    appliedFilters.survey_id,
+    appliedFilters.date_to,
+    allGroups,
+    appliedGroupByLabel,
+    pagination.total_participants,
+    appliedSurvey,
+    queryData.columns,
+    queryData.data.length,
+    surveyOptions.length,
+  ]);
 
   const chartData = useMemo(() => {
     const genderCounts = { Male: 0, Female: 0 };
@@ -690,41 +780,33 @@ export default function ResearcherDashboard() {
   }, []);
 
   useEffect(() => {
-    const loadMeta = async () => {
-      setLoading(true);
-      try {
-        const [surveys, elements, groups, forms] = await Promise.all([
-          api.getAvailableSurveys().catch(() => []),
-          api.listElements({ includeInactive: true }).catch(() => []),
-          api.listGroups().catch(() => []),
-          api.listForms().catch(() => []),
-        ]);
-
-        setAvailableSurveys(surveys || []);
-        setAvailableElements(elements || []);
-        setAllGroups(groups || []);
-        setAllForms(forms || []);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadMeta().then(() => {
-      loadResultsRef.current({
-        reset: true,
-        filters: createDefaultFilters(),
-        updateApplied: true,
-      });
+    if (loading || hasRunQuery) return;
+    setHasRunQuery(true);
+    loadResultsRef.current({
+      reset: true,
+      filters: createDefaultFilters(),
+      updateApplied: true,
     });
-  }, []);
+  }, [hasRunQuery, loading]);
 
   const selectedSurvey = useMemo(
     () =>
-      allForms.find((form) => String(form.form_id || form.id || "") === String(draftFilters.survey_id || "")) ||
       availableSurveys.find((form) => String(form.form_id || form.id || "") === String(draftFilters.survey_id || "")) ||
       null,
-    [allForms, availableSurveys, draftFilters.survey_id],
+    [availableSurveys, draftFilters.survey_id],
   );
+
+  useEffect(() => {
+    if (draftFilters.survey_id || appliedFilters.survey_id) {
+      setShouldLoadSurveys(true);
+    }
+  }, [appliedFilters.survey_id, draftFilters.survey_id]);
+
+  useEffect(() => {
+    if ((draftFilters.group_ids || []).length > 0 || (appliedFilters.group_ids || []).length > 0) {
+      setShouldLoadGroups(true);
+    }
+  }, [appliedFilters.group_ids, draftFilters.group_ids]);
 
   const surveyGroupMismatch = useMemo(() => {
     if (!draftFilters.survey_id || draftFilters.group_ids.length === 0) return false;
@@ -734,6 +816,7 @@ export default function ResearcherDashboard() {
   }, [draftFilters.survey_id, draftFilters.group_ids, selectedSurvey]);
 
   const handleSort = (key) => {
+    if (!hasRunQuery) return;
     const nextSort =
       sortConfig.key !== key
         ? { key, direction: "asc" }
@@ -757,6 +840,7 @@ export default function ResearcherDashboard() {
   };
 
   const applyFilters = () => {
+    setHasRunQuery(true);
     loadResultsRef.current({
       reset: true,
       filters: draftFilters,
@@ -773,11 +857,25 @@ export default function ResearcherDashboard() {
     setElementSearch("");
     setShowElementMenu(false);
     setHiddenColumns([]);
-    loadResultsRef.current({
-      reset: true,
-      filters: nextFilters,
-      updateApplied: true,
+    setQueryData({ columns: DEMOGRAPHIC_COLUMNS, data: [] });
+    setPagination({
+      offset: 0,
+      limit: PAGE_SIZE,
+      returned_participants: 0,
+      total_participants: 0,
+      has_more: false,
+      next_offset: 0,
     });
+    setFilterError("");
+    setSortConfig({ key: null, direction: "asc" });
+    if (hasRunQuery) {
+      loadResultsRef.current({
+        reset: true,
+        filters: nextFilters,
+        updateApplied: true,
+      });
+      return;
+    }
   };
 
   const toggleColumn = (columnId) => {
@@ -873,26 +971,17 @@ export default function ResearcherDashboard() {
   };
 
   const removeElementFilterById = (elementId) => {
-    let nextFilters = null;
     setDraftFilters((prev) => {
-      nextFilters = {
+      return {
         ...prev,
         element_filters: prev.element_filters.filter(
           (filter) => String(filter.element_id) !== String(elementId),
         ),
       };
-      return nextFilters;
     });
     if (String(editingElementId || "") === String(elementId)) {
       setElementDraft(createElementFilterDraft());
       setEditingElementId(null);
-    }
-    if (nextFilters) {
-      loadResultsRef.current({
-        reset: true,
-        filters: nextFilters,
-        updateApplied: true,
-      });
     }
   };
 
@@ -948,7 +1037,6 @@ export default function ResearcherDashboard() {
   const addElementFilter = () => {
     if (!elementDraft.element_id) return;
 
-    let nextFilters = null;
     setDraftFilters((prev) => {
       const nextFilter = {
         ...elementDraft,
@@ -961,64 +1049,45 @@ export default function ResearcherDashboard() {
         (filter) => String(filter.element_id) === String(nextFilter.element_id),
       );
       if (existingIndex >= 0) {
-        nextFilters = {
+        return {
           ...prev,
           element_filters: normalizeElementFilters(prev.element_filters.map((filter, index) =>
             index === existingIndex ? nextFilter : filter,
           )),
         };
-        return nextFilters;
       }
-      nextFilters = {
+      return {
         ...prev,
         element_filters: normalizeElementFilters([...prev.element_filters, nextFilter]),
       };
-      return nextFilters;
     });
     setElementDraft(createElementFilterDraft());
     setEditingElementId(null);
     setElementSearch("");
-    if (nextFilters) {
-      loadResultsRef.current({
-        reset: true,
-        filters: nextFilters,
-        updateApplied: true,
-      });
-    }
   };
 
   const addDemographicFilter = () => {
     if (demographicDraft.value === "") return;
-    let nextFilters = null;
     setDraftFilters((prev) => {
       const nextFilter = { ...demographicDraft };
       const existingIndex = prev.demographic_filters.findIndex(
         (filter) => String(filter.field) === String(nextFilter.field),
       );
       if (existingIndex >= 0) {
-        nextFilters = {
+        return {
           ...prev,
           demographic_filters: prev.demographic_filters.map((filter, index) =>
             index === existingIndex ? nextFilter : filter,
           ),
         };
-        return nextFilters;
       }
-      nextFilters = {
+      return {
         ...prev,
         demographic_filters: [...prev.demographic_filters, nextFilter],
       };
-      return nextFilters;
     });
     setDemographicDraft(createDemographicFilterDraft());
     setEditingDemographicField(null);
-    if (nextFilters) {
-      loadResultsRef.current({
-        reset: true,
-        filters: nextFilters,
-        updateApplied: true,
-      });
-    }
   };
 
   const updateDemographicDraft = (key, value) => {
@@ -1043,25 +1112,16 @@ export default function ResearcherDashboard() {
   };
 
   const removeDemographicFilter = (index) => {
-    let nextFilters = null;
     setDraftFilters((prev) => {
-      nextFilters = {
+      return {
         ...prev,
         demographic_filters: prev.demographic_filters.filter((_, filterIndex) => filterIndex !== index),
       };
-      return nextFilters;
     });
     const removedField = draftFilters.demographic_filters[index]?.field;
     if (removedField && String(editingDemographicField || "") === String(removedField)) {
       setDemographicDraft(createDemographicFilterDraft());
       setEditingDemographicField(null);
-    }
-    if (nextFilters) {
-      loadResultsRef.current({
-        reset: true,
-        filters: nextFilters,
-        updateApplied: true,
-      });
     }
   };
 
@@ -1116,7 +1176,7 @@ export default function ResearcherDashboard() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+        <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:justify-end">
           <button
             type="button"
             onClick={() => {
@@ -1182,7 +1242,7 @@ export default function ResearcherDashboard() {
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-end gap-3">
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
               <button
                 type="button"
                 onClick={() => setShowExportModal(false)}
@@ -1210,47 +1270,75 @@ export default function ResearcherDashboard() {
 
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
       <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-        <div className="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-5 shadow-sm">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2a3 3 0 00-5.356-1.857M15 7a4 4 0 11-8 0 4 4 0 018 0z" />
             </svg>
           </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Total participants</p>
-            <p className="text-2xl font-bold text-slate-900">{stats.totalParticipants}</p>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              Scope
+            </span>
+          </div>
+          <div className="mt-4">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">{stats.primaryLabel}</p>
+            <p className="mt-1 text-3xl font-bold text-slate-900">{stats.totalParticipants}</p>
+            <p className="mt-2 text-sm text-slate-500">
+              {stats.primaryDescription}
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-5 shadow-sm">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z" />
             </svg>
           </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Filtered results</p>
-            <p className="text-2xl font-bold text-slate-900">{stats.filteredResults} Rows</p>
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+              Output
+            </span>
+          </div>
+          <div className="mt-4">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">{stats.resultLabel}</p>
+            <p className="mt-1 text-3xl font-bold text-slate-900">{stats.filteredResults}</p>
+            <p className="mt-2 text-sm text-slate-500">
+              {stats.rowSummary}
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-5 shadow-sm">
-          <div className={`flex h-12 w-12 items-center justify-center rounded-full ${stats.isGroupFiltered ? "bg-amber-50 text-amber-600" : "bg-indigo-50 text-indigo-600"}`}>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${stats.isGroupFiltered ? "bg-amber-50 text-amber-600" : "bg-indigo-50 text-indigo-600"}`}>
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
           </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Active groups</p>
-            <p className="text-2xl font-bold text-slate-900">{stats.activeGroupsText}</p>
+            <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+              stats.isGroupFiltered
+                ? "bg-amber-50 text-amber-700"
+                : "bg-indigo-50 text-indigo-700"
+            }`}>
+              {stats.isGroupFiltered ? "Filtered group" : "All groups"}
+            </span>
+          </div>
+          <div className="mt-4">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Current group scope</p>
+            <p className="mt-1 text-3xl font-bold text-slate-900">{stats.activeGroupsText}</p>
+            <p className="mt-2 text-sm text-slate-500">
+              {stats.isGroupFiltered ? "Results are limited to the selected group." : "No group filter is applied."}
+            </p>
           </div>
         </div>
       </div>
 
       <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-6 py-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-1">
+        <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50 px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
+          <div className="inline-flex w-full flex-wrap rounded-xl border border-slate-200 bg-white p-1 md:w-auto">
             <button
               type="button"
               onClick={() => setViewMode("table")}
@@ -1277,7 +1365,7 @@ export default function ResearcherDashboard() {
           </div>
         )}
 
-        <div className="border-b border-slate-100 bg-white px-6 py-4">
+        <div className="border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex flex-wrap items-center gap-2">
               {(queryData.columns || [])
@@ -1310,17 +1398,25 @@ export default function ResearcherDashboard() {
             </div>
 
             {showAllowNullToggle && (
-              <div className="lg:max-w-xs lg:pl-4">
+              <div className="w-full lg:max-w-xs lg:pl-4">
                 <label className="flex cursor-pointer items-start gap-2">
                   <input
                     type="checkbox"
                     checked={draftFilters.allow_null}
                     onChange={(event) => {
-                      const nextFilters = { ...draftFilters, allow_null: event.target.checked };
+                      const nextAllowNull = event.target.checked;
+                      const nextAppliedFilters = {
+                        ...appliedFilters,
+                        allow_null: nextAllowNull,
+                      };
+                      const nextFilters = {
+                        ...draftFilters,
+                        allow_null: nextAllowNull,
+                      };
                       setDraftFilters(nextFilters);
                       loadResultsRef.current({
                         reset: true,
-                        filters: nextFilters,
+                        filters: nextAppliedFilters,
                         updateApplied: true,
                       });
                     }}
@@ -1455,26 +1551,32 @@ export default function ResearcherDashboard() {
               </tbody>
             </table>
 
-            {queryData.data.length === 0 && (loading || filtering) && (
+            {queryData.data.length === 0 && (filtering || (loading && hasRunQuery)) && (
               <div className="p-16 text-center text-slate-400">
                 <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
                 <p className="text-sm font-semibold text-slate-600">Loading participant table...</p>
               </div>
             )}
 
-            {queryData.data.length === 0 && !loading && !filtering && (
+            {queryData.data.length === 0 && !hasRunQuery && !loading && !filtering && (
+              <div className="p-16 text-center text-slate-400">
+                <p className="text-sm font-semibold text-slate-600">Choose your filters and click Apply to load dashboard results.</p>
+              </div>
+            )}
+
+            {queryData.data.length === 0 && hasRunQuery && !loading && !filtering && (
               <div className="p-16 text-center text-slate-400">
                 <p className="text-sm font-semibold">No participants match the current filters.</p>
               </div>
             )}
 
             {queryData.data.length > 0 && (
-              <div className="border-t border-slate-100 px-6 py-4 text-sm text-slate-500">
-                <div className="flex min-w-full items-center gap-3">
-                  <span className="whitespace-nowrap">
+              <div className="border-t border-slate-100 px-4 py-4 text-sm text-slate-500 sm:px-6">
+                <div className="flex min-w-full flex-col items-start gap-3 sm:flex-row sm:items-center">
+                  <span className="break-words">
                     Loaded {loadedParticipantCount} of {pagination.total_participants} participants
                   </span>
-                  <div className="sticky right-0 ml-auto bg-white pl-4 text-right">
+                  <div className="w-full sm:ml-auto sm:w-auto sm:pl-4 sm:text-right">
                     {loadingMore ? (
                       <span className="whitespace-nowrap font-medium text-blue-600">Loading more...</span>
                     ) : pagination.has_more ? (
@@ -1502,12 +1604,14 @@ export default function ResearcherDashboard() {
             </div>
           </div>
         ) : (
-          <div className="grid gap-8 bg-slate-50/50 p-8 md:grid-cols-2">
+          <div className="grid gap-6 bg-slate-50/50 p-4 sm:p-6 md:grid-cols-2 md:p-8">
             <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
               <h3 className="mb-6 text-center text-sm font-bold uppercase tracking-widest text-slate-700">
                 Gender Distribution
               </h3>
-              {chartData.gender.length === 0 ? (
+              {!hasRunQuery ? (
+                <div className="flex h-64 items-center justify-center text-sm text-slate-400">Apply filters to load chart data</div>
+              ) : chartData.gender.length === 0 ? (
                 <div className="flex h-64 items-center justify-center text-sm text-slate-400">No data to display</div>
               ) : (
                 <>
@@ -1531,7 +1635,9 @@ export default function ResearcherDashboard() {
               <h3 className="mb-6 text-center text-sm font-bold uppercase tracking-widest text-slate-700">
                 Age Demographics
               </h3>
-              {chartData.age.length === 0 ? (
+              {!hasRunQuery ? (
+                <div className="flex h-64 items-center justify-center text-sm text-slate-400">Apply filters to load chart data</div>
+              ) : chartData.age.length === 0 ? (
                 <div className="flex h-64 items-center justify-center text-sm text-slate-400">No data to display</div>
               ) : (
                 <div className="h-64">
@@ -1554,7 +1660,7 @@ export default function ResearcherDashboard() {
       </div>
       </div>
 
-      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5 xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
         <div className="flex flex-col gap-4">
           <div>
             <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
@@ -1563,16 +1669,24 @@ export default function ResearcherDashboard() {
             </div>
             <select
               value={draftFilters.survey_id}
-              onChange={(event) =>
-                setDraftFilters((prev) => ({
-                  ...prev,
-                  survey_id: event.target.value,
-                  mode: "aggregate",
-                }))
-              }
+              onFocus={() => setShouldLoadSurveys(true)}
+              onClick={() => setShouldLoadSurveys(true)}
+              onChange={(event) => {
+                const nextSurveyId = event.target.value;
+                const nextFilters = {
+                  ...draftFilters,
+                  survey_id: nextSurveyId,
+                };
+                setDraftFilters(nextFilters);
+              }}
               className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
             >
               <option value="">No survey selected</option>
+              {shouldLoadSurveys && surveyOptions.length === 0 ? (
+                <option value="" disabled>
+                  Loading surveys...
+                </option>
+              ) : null}
               {surveyOptions.map((survey) => (
                 <option key={survey.form_id || survey.id} value={survey.form_id || survey.id}>
                   {survey.title}
@@ -1588,12 +1702,17 @@ export default function ResearcherDashboard() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setShowGroupMenu((prev) => !prev)}
+                onClick={() => {
+                  setShouldLoadGroups(true);
+                  setShowGroupMenu((prev) => !prev);
+                }}
                 className="flex flex-1 items-center justify-between rounded-lg border border-slate-200 bg-white p-2.5 text-left text-sm text-slate-700 shadow-sm transition hover:border-slate-300"
               >
                 <span className="truncate">
                   {draftFilters.group_ids.length === 0
-                    ? "All participants"
+                    ? shouldLoadGroups
+                      ? "All participants"
+                      : "Choose group filter"
                     : selectedGroups[0]?.name || "1 group selected"}
                 </span>
                 <span className="text-slate-400">▾</span>
@@ -1604,11 +1723,6 @@ export default function ResearcherDashboard() {
                   onClick={() => {
                     const nextFilters = { ...draftFilters, group_ids: [] };
                     setDraftFilters(nextFilters);
-                    loadResultsRef.current({
-                      reset: true,
-                      filters: nextFilters,
-                      updateApplied: true,
-                    });
                   }}
                   className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                   aria-label="Clear selected group"
@@ -1619,21 +1733,20 @@ export default function ResearcherDashboard() {
             </div>
             {showGroupMenu && (
               <div className="absolute left-0 right-0 top-full z-20 mt-2 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const nextFilters = { ...draftFilters, group_ids: [] };
-                    setDraftFilters(nextFilters);
-                    loadResultsRef.current({
-                      reset: true,
-                      filters: nextFilters,
-                      updateApplied: true,
-                    });
-                  }}
-                  className="mb-2 w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-50"
-                >
-                  All participants
-                </button>
+                {shouldLoadGroups && allGroups.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextFilters = { ...draftFilters, group_ids: [] };
+                      setDraftFilters(nextFilters);
+                    }}
+                    className="mb-2 w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    All participants
+                  </button>
+                ) : (
+                  <p className="px-3 py-2 text-sm text-slate-500">Loading groups...</p>
+                )}
                 {allGroups.map((group) => {
                   const groupId = group.group_id || group.id;
                   const checked = draftFilters.group_ids.some(
@@ -1656,19 +1769,6 @@ export default function ResearcherDashboard() {
                               : [groupId],
                           };
                           setDraftFilters(nextFilters);
-                          const deployedGroupIds = new Set((selectedSurvey?.deployed_group_ids || []).map(String));
-                          const hasMismatch =
-                            nextFilters.survey_id &&
-                            nextFilters.group_ids.length > 0 &&
-                            deployedGroupIds.size > 0 &&
-                            !nextFilters.group_ids.some((id) => deployedGroupIds.has(String(id)));
-                          if (!hasMismatch) {
-                            loadResultsRef.current({
-                              reset: true,
-                              filters: nextFilters,
-                              updateApplied: true,
-                            });
-                          }
                         }}
                         className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                       />
@@ -2084,7 +2184,7 @@ export default function ResearcherDashboard() {
           </div>
         )}
 
-        <div className="flex gap-2 pt-1">
+        <div className="flex flex-col gap-2 pt-1 sm:flex-row">
           <button
             type="button"
             onClick={applyFilters}

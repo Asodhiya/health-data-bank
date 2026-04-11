@@ -36,6 +36,7 @@ function NotiIcon({ type }) {
 export default function NotificationBell({ role }) {
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const ref = useRef(null);
   const navigate = useNavigate();
 
@@ -44,18 +45,32 @@ export default function NotificationBell({ role }) {
     try {
       const data = await api.getNotifications(role);
       setNotifications(data.map(n => ({ ...n, id: n.notification_id || n.id })));
+      setHasLoaded(true);
     } catch {
       setNotifications([]);
+      setHasLoaded(true);
     }
   }, [role]);
 
-  useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchNotifications();
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [fetchNotifications]);
 
   // Poll every 60 seconds for new notifications
   useEffect(() => {
-    const interval = setInterval(fetchNotifications, 60000);
+    const interval = setInterval(() => {
+      fetchNotifications();
+    }, 60000);
     return () => clearInterval(interval);
   }, [fetchNotifications]);
+
+  useEffect(() => {
+    if (!open || hasLoaded) return;
+    fetchNotifications();
+  }, [open, hasLoaded, fetchNotifications]);
 
   // Close on outside click
   useEffect(() => {

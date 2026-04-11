@@ -13,7 +13,13 @@ from app.core.dependency import check_current_user, require_permissions
 from app.core.permissions import FORM_VIEW, FORM_CREATE, FORM_GET, FORM_UPDATE, FORM_DELETE, FORM_PUBLISH, FORM_UNPUBLISH
 from app.db.models import User, Group, FormDeployment, SurveyForm
 from sqlalchemy import func
-from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate, SurveyListPage
+from app.schemas.survey_schema import (
+    SurveyDetailOut,
+    SurveyListItem,
+    SurveyCreate,
+    SurveyListPage,
+    PublishSurveyRequest,
+)
 from app.services.form_management_service import (
     list_researcher_forms,
     list_researcher_forms_paged,
@@ -143,10 +149,15 @@ async def publish_preview(form_id: UUID, group_ids: str, db: AsyncSession = Depe
 
 
 @router.post("/{form_id}/publish", dependencies=[Depends(require_permissions(FORM_PUBLISH))])
-async def publish_form(form_id: UUID, group_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(check_current_user)):
+async def publish_form(
+    form_id: UUID,
+    payload: PublishSurveyRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_current_user),
+):
     """Publish a form (make it available to participants)"""
     try:
-        publish = await publish_survey_form(form_id, group_id, current_user.user_id, db)
+        publish = await publish_survey_form(form_id, payload.group_id, payload.cadence, current_user.user_id, db)
         return publish
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

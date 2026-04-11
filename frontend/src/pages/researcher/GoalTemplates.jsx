@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "../../services/api";
+import { useResearcherMeta } from "../../hooks/useResearcherMeta";
+import { getApiErrorMessage } from "../../utils/apiErrors";
 import { SearchDataElementModal } from "../../components/survey/FieldEditor";
 import {
   LineChart, Line, BarChart, Bar,
@@ -149,7 +151,7 @@ function StatsPanel({ template, dataElements, onClose }) {
   return (
     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6">
       {/* Header */}
-      <div className="flex items-start justify-between px-6 pt-5 pb-3">
+      <div className="flex flex-col gap-3 px-4 pt-5 pb-3 sm:px-6 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-lg font-bold text-slate-900">{toTitleCase(template.name)}</h2>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -158,7 +160,7 @@ function StatsPanel({ template, dataElements, onClose }) {
             {" · "}{template.direction === "at_most" ? "At most" : "At least"} · {template.progress_mode === "absolute" ? "Absolute" : "Incremental"}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setView("progress")}
             className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
@@ -289,7 +291,7 @@ function StatsPanel({ template, dataElements, onClose }) {
       ) : (
         <>
           {/* Stat cards */}
-          <div className="grid grid-cols-4 gap-3 px-6 pb-4">
+          <div className="grid grid-cols-1 gap-3 px-4 pb-4 sm:grid-cols-2 sm:px-6 xl:grid-cols-4">
             {[
               { label: "Participants tracking", value: stats?.participants_tracking ?? "—" },
               { label: "Avg current value", value: fmt(stats?.avg_current_value, unit) },
@@ -304,7 +306,7 @@ function StatsPanel({ template, dataElements, onClose }) {
           </div>
 
           {/* Chart */}
-          <div className="px-6 pb-6">
+          <div className="px-4 pb-6 sm:px-6">
             {view === "progress" ? (
               stats?.progress_over_time?.length > 0 ? (
                 <div className="h-56">
@@ -406,7 +408,7 @@ export default function GoalTemplates() {
   const [deletedTemplates, setDeletedTemplates] = useState([]);
   const [restoringId, setRestoringId] = useState(null);
   const [showDeleted, setShowDeleted] = useState(false);
-  const [dataElements, setDataElements] = useState([]);
+  const [createdElements, setCreatedElements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -418,6 +420,7 @@ export default function GoalTemplates() {
   const [sort, setSort] = useState("newest");
   const [showHelp, setShowHelp] = useState(false);
   const [toast, setToast] = useState(null);
+  const { elements: metaElements, refresh: refreshMetaElements } = useResearcherMeta({ includeElements: true });
 
   useEffect(() => {
     if (!toast) return;
@@ -439,15 +442,12 @@ export default function GoalTemplates() {
   const fetchAllData = useCallback(async () => {
     setLoading(true);
     try {
-      const [templatesData, elementsData, deletedData] = await Promise.all([
+      const [templatesData, deletedData] = await Promise.all([
         api.listGoalTemplates(),
-        api.listElements(),
         api.listDeletedGoalTemplates(),
       ]);
       setTemplates(templatesData || []);
       setDeletedTemplates(deletedData || []);
-      const metricsList = Array.isArray(elementsData) ? elementsData : elementsData.elements || [];
-      setDataElements(metricsList);
     } catch (err) {
       console.error("Failed to fetch data:", err);
     } finally {
@@ -456,6 +456,19 @@ export default function GoalTemplates() {
   }, []);
 
   useEffect(() => { fetchAllData(); }, [fetchAllData]);
+
+  const dataElements = useMemo(() => {
+    if (createdElements.length === 0) return metaElements;
+    const merged = [...metaElements];
+    const seen = new Set(metaElements.map((element) => String(element.element_id)));
+    createdElements.forEach((element) => {
+      const key = String(element?.element_id || "");
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      merged.push(element);
+    });
+    return merged;
+  }, [createdElements, metaElements]);
 
   const openCreateModal = () => {
     setEditingId(null);
@@ -516,7 +529,7 @@ export default function GoalTemplates() {
       setShowModal(false);
       fetchAllData();
     } catch (err) {
-      showToast(err.message || "Save failed");
+      showToast(getApiErrorMessage(err, "Save failed"));
     }
   };
 
@@ -528,7 +541,7 @@ export default function GoalTemplates() {
       setDeleteTarget(null);
       fetchAllData();
     } catch (err) {
-      showToast(err.message || "Delete failed");
+      showToast(getApiErrorMessage(err, "Delete failed"));
     }
   };
 
@@ -538,7 +551,7 @@ export default function GoalTemplates() {
       await api.restoreGoalTemplate(template_id);
       fetchAllData();
     } catch (err) {
-      showToast(err.message || "Restore failed");
+      showToast(getApiErrorMessage(err, "Restore failed"));
     } finally {
       setRestoringId(null);
     }
@@ -548,24 +561,32 @@ export default function GoalTemplates() {
     setSelectedTemplate((prev) => prev?.template_id === t.template_id ? null : t);
   };
 
-  const filtered = (showDeleted ? deletedTemplates : templates).filter((t) => {
+  const elementLabelMap = useMemo(
+    () => new Map(dataElements.map((element) => [String(element.element_id), element.label || "Unknown"])),
+    [dataElements],
+  );
+
+  const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    const elLabel = showDeleted
-      ? (t.element?.label || "Unknown")
-      : (dataElements.find((el) => el.element_id === t.element_id)?.label || "Unknown");
-    return t.name.toLowerCase().includes(q) || elLabel.toLowerCase().includes(q);
-  }).sort((a, b) => {
-    if (sort === "alpha") return (a.name || "").localeCompare(b.name || "");
-    if (sort === "modified") {
-      const ta = a.modified_at ? new Date(a.modified_at).getTime() : 0;
-      const tb = b.modified_at ? new Date(b.modified_at).getTime() : 0;
-      return tb - ta;
-    }
-    // newest (default)
-    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-    return tb - ta;
-  });
+    return [...(showDeleted ? deletedTemplates : templates)]
+      .filter((t) => {
+        const elLabel = showDeleted
+          ? (t.element?.label || "Unknown")
+          : (elementLabelMap.get(String(t.element_id)) || "Unknown");
+        return t.name.toLowerCase().includes(q) || elLabel.toLowerCase().includes(q);
+      })
+      .sort((a, b) => {
+        if (sort === "alpha") return (a.name || "").localeCompare(b.name || "");
+        if (sort === "modified") {
+          const ta = a.modified_at ? new Date(a.modified_at).getTime() : 0;
+          const tb = b.modified_at ? new Date(b.modified_at).getTime() : 0;
+          return tb - ta;
+        }
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return tb - ta;
+      });
+  }, [deletedTemplates, elementLabelMap, search, showDeleted, sort, templates]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -634,12 +655,12 @@ export default function GoalTemplates() {
       )}
 
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Health Goals</h1>
           <p className="text-sm text-slate-500 mt-1">Define goal templates for participants to track</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center md:w-auto md:justify-end">
           <button
             onClick={() => setShowHelp(true)}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition"
@@ -673,8 +694,8 @@ export default function GoalTemplates() {
       )}
 
       {/* Search + Sort + Active/Deleted toggle */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex items-center gap-3">
-        <div className="flex-1 flex items-center border border-slate-200 rounded-xl p-1.5 bg-white focus-within:border-slate-400 transition-all">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col gap-3">
+        <div className="flex w-full items-center border border-slate-200 rounded-xl p-1.5 bg-white focus-within:border-slate-400 transition-all">
           <span className="pl-2 pr-2 text-slate-400">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -687,18 +708,19 @@ export default function GoalTemplates() {
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 text-sm text-slate-800 p-1 outline-none bg-transparent placeholder-slate-400"
           />
-          <span className="text-xs text-slate-400 font-medium pr-2">
+          <span className="hidden pr-2 text-xs font-medium text-slate-400 sm:inline">
             {filtered.length} template{filtered.length !== 1 ? "s" : ""}
           </span>
         </div>
 
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         {/* Sort */}
-        <div className="flex items-center bg-slate-100 rounded-lg p-1 gap-1 shrink-0">
+        <div className="flex max-w-full items-center gap-1 overflow-x-auto rounded-lg bg-slate-100 p-1 shrink-0">
           {[{ key: "newest", label: "Newest" }, { key: "modified", label: "Modified" }, { key: "alpha", label: "A → Z" }].map(({ key, label }) => (
             <button
               key={key}
               onClick={() => setSort(key)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${
+              className={`shrink-0 px-3 py-1.5 text-xs font-semibold rounded-md transition ${
                 sort === key ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
               }`}
             >
@@ -708,7 +730,7 @@ export default function GoalTemplates() {
         </div>
 
         {/* Active / Deleted toggle */}
-        <div className="flex items-center bg-slate-100 rounded-lg p-1 gap-1 shrink-0">
+        <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1 shrink-0">
           <button
             onClick={() => { setShowDeleted(false); setSearch(""); setSelectedTemplate(null); }}
             className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${
@@ -730,6 +752,7 @@ export default function GoalTemplates() {
               </span>
             )}
           </button>
+        </div>
         </div>
       </div>
 
@@ -876,7 +899,7 @@ export default function GoalTemplates() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 pt-2">
+        <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
@@ -1070,7 +1093,7 @@ export default function GoalTemplates() {
                 </div>
 
                 {/* Direction + Progress Mode */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Direction</label>
                     <select
@@ -1108,7 +1131,7 @@ export default function GoalTemplates() {
                 </div>
               </div>
 
-              <div className="px-6 pb-5 flex gap-3 justify-end">
+              <div className="flex flex-col gap-3 px-6 pb-5 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
@@ -1134,7 +1157,10 @@ export default function GoalTemplates() {
           value={formData.element_id}
           dataElements={editingId ? dataElements : selectableDataElements}
           onChange={(id) => { setFormData((prev) => ({ ...prev, element_id: id })); setShowCreateElement(false); }}
-          onCreated={(newElement) => { setDataElements((prev) => [...prev, newElement]); }}
+          onCreated={(newElement) => {
+            setCreatedElements((prev) => [...prev, newElement]);
+            refreshMetaElements();
+          }}
           onClose={() => setShowCreateElement(false)}
         />
       )}

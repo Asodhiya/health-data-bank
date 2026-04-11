@@ -325,6 +325,8 @@ class SurveyForm(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False)
+    cadence: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'once'"))
+    cadence_anchor_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     version: Mapped[int | None] = mapped_column(Integer, server_default=text("1"))
     parent_form_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id"), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id"))
@@ -368,6 +370,8 @@ class FormDeployment(Base):
     form_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id", ondelete="SET NULL"))
     group_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("groups.group_id"))
     deployed_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id"))
+    cadence: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'once'"))
+    cadence_anchor_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     deployed_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     revoked_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
 
@@ -379,6 +383,7 @@ class FormSubmission(Base):
     form_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id"))
     participant_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("participant_profile.participant_id"))
     group_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("groups.group_id"))
+    cycle_key: Mapped[str | None] = mapped_column(Text, server_default=text("'once'"))
     submitted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     #submitted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()")) #what it used to be
     is_valid: Mapped[bool | None] = mapped_column(Boolean, server_default=text("TRUE"))

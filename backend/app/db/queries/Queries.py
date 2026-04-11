@@ -650,13 +650,31 @@ class GoalTemplateQuery:
             select(HealthGoal.goal_id).where(HealthGoal.template_id == template_id).limit(1)
         )
         if has_goals:
+            participant_user_rows = await self.db.execute(
+                select(ParticipantProfile.user_id)
+                .join(HealthGoal, HealthGoal.participant_id == ParticipantProfile.participant_id)
+                .where(HealthGoal.template_id == template_id)
+                .where(ParticipantProfile.user_id.is_not(None))
+                .distinct()
+            )
+            participant_user_ids = [row[0] for row in participant_user_rows.all() if row[0] is not None]
             template.is_active = False
             await self.db.commit()
-            return {"deleted": False, "msg": "Template deactivated"}
+            return {
+                "deleted": False,
+                "msg": "Template deactivated",
+                "affected_participant_user_ids": participant_user_ids,
+                "template_name": template.name,
+            }
         else:
             await self.db.delete(template)
             await self.db.commit()
-            return {"deleted": True, "msg": "Template permanently deleted"}
+            return {
+                "deleted": True,
+                "msg": "Template permanently deleted",
+                "affected_participant_user_ids": [],
+                "template_name": template.name,
+            }
 
     async def restore_template(self, template_id: uuid.UUID):
         template = await self.db.get(GoalTemplate, template_id)

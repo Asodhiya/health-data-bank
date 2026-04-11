@@ -52,7 +52,6 @@ const ResearcherOnboardingPage = lazy(() => import("./pages/researcher/Researche
 const DataElementManager = lazy(() => import("./pages/researcher/DataElementManager"));
 const Groups = lazy(() => import("./pages/researcher/Group_Chorts"));
 const GoalTemplates = lazy(() => import("./pages/researcher/GoalTemplates"));
-const ElementTimeseriesPage = lazy(() => import("./pages/researcher/ElementTimeseriesPage"));
 const ResearcherSubmissionDetailPage = lazy(() => import("./pages/researcher/ResearcherSubmissionDetailPage"));
 
 // ── Caretaker pages ──
@@ -182,10 +181,6 @@ function App() {
             <Route
               path="/researcher/data-elements"
               element={<DataElementManager />}
-            />
-            <Route
-              path="/researcher/timeseries"
-              element={<ElementTimeseriesPage />}
             />
             <Route
               path="/researcher/submissions/:participantId/:submissionId"

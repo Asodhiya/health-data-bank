@@ -14,6 +14,7 @@ from app.db.models import (
     FieldElementMap, HealthDataPoint, Group, CaretakerProfile, FieldOption
 )
 from app.services.notification_service import create_notification, notification_exists_recent
+from app.services.survey_cadence import as_utc, get_cycle_key, get_cycle_label, normalize_cadence
 
 async def _get_participant(user_id: UUID, db: AsyncSession) -> Optional[ParticipantProfile]:
     """Resolve user_id to ParticipantProfile, or return None."""
@@ -41,17 +42,64 @@ async def _get_deployed_forms(participant_id: UUID, db: AsyncSession):
     return result.all()
 
 
-async def _get_submissions_map(participant_id: UUID, form_ids: list, db: AsyncSession) -> dict:
-    """Return {form_id: FormSubmission} for the participant across the given forms."""
+def _resolve_cycle_context(
+    survey: SurveyForm,
+    deployment: FormDeployment,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current_time = as_utc(now) or datetime.now(timezone.utc)
+    cadence = normalize_cadence(
+        getattr(deployment, "cadence", None) or getattr(survey, "cadence", "once")
+    )
+    anchor = (
+        as_utc(getattr(deployment, "cadence_anchor_at", None))
+        or as_utc(getattr(deployment, "deployed_at", None))
+        or as_utc(getattr(survey, "cadence_anchor_at", None))
+        or as_utc(getattr(survey, "created_at", None))
+        or current_time
+    )
+    return {
+        "cadence": cadence,
+        "anchor": anchor,
+        "cycle_key": get_cycle_key(cadence, current_time, anchor),
+        "cycle_label": get_cycle_label(cadence),
+    }
+
+
+async def _get_submissions_map(
+    participant_id: UUID,
+    deployment_rows: list,
+    db: AsyncSession,
+) -> dict:
+    """Return {(form_id, cycle_key): FormSubmission} for the participant across deployed forms."""
+    if not deployment_rows:
+        return {}
+
+    form_ids = list({survey.form_id for survey, _ in deployment_rows})
     result = await db.execute(
-        select(FormSubmission).where(
+        select(FormSubmission)
+        .where(
             and_(
                 FormSubmission.participant_id == participant_id,
-                FormSubmission.form_id.in_(form_ids)
+                FormSubmission.form_id.in_(form_ids),
             )
         )
+        .order_by(desc(FormSubmission.submitted_at))
     )
-    return {sub.form_id: sub for sub in result.scalars()}
+
+    expected_cycle_keys = {
+        (survey.form_id, _resolve_cycle_context(survey, deployment)["cycle_key"])
+        for survey, deployment in deployment_rows
+    }
+    submissions = {}
+    for sub in result.scalars().all():
+        cycle_key = sub.cycle_key or "once"
+        key = (sub.form_id, cycle_key)
+        if key not in expected_cycle_keys or key in submissions:
+            continue
+        submissions[key] = sub
+    return submissions
 
 
 async def _get_answer_counts(sub_ids: list, db: AsyncSession) -> dict:
@@ -93,16 +141,25 @@ async def list_assigned_surveys(user_id: UUID, db: AsyncSession) -> List[Dict[st
     if not rows:
         return []
 
-    form_ids = [row.SurveyForm.form_id for row in rows]
-    submissions_map = await _get_submissions_map(participant.participant_id, form_ids, db)
+    deduped_rows = []
+    seen_form_ids = set()
+    for survey, deployment in rows:
+        if survey.form_id in seen_form_ids:
+            continue
+        seen_form_ids.add(survey.form_id)
+        deduped_rows.append((survey, deployment))
+
+    form_ids = [survey.form_id for survey, _ in deduped_rows]
+    submissions_map = await _get_submissions_map(participant.participant_id, deduped_rows, db)
 
     sub_ids = [sub.submission_id for sub in submissions_map.values()]
     answer_counts = await _get_answer_counts(sub_ids, db) if sub_ids else {}
     question_counts = await _get_question_counts(form_ids, db)
 
     output = []
-    for survey, deployment in rows:
-        sub = submissions_map.get(survey.form_id)
+    for survey, deployment in deduped_rows:
+        cycle_context = _resolve_cycle_context(survey, deployment)
+        sub = submissions_map.get((survey.form_id, cycle_context["cycle_key"]))
         status, submitted_at = _build_survey_status(sub)
         answered = answer_counts.get(sub.submission_id, 0) if sub else 0
 
@@ -111,6 +168,9 @@ async def list_assigned_surveys(user_id: UUID, db: AsyncSession) -> List[Dict[st
             "title": survey.title,
             "description": survey.description,
             "status": status,
+            "cadence": cycle_context["cadence"],
+            "cycle_key": cycle_context["cycle_key"],
+            "cycle_label": cycle_context["cycle_label"],
             "version": survey.version or 1,
             "due_date": None,
             "deployed_at": deployment.deployed_at,
@@ -134,12 +194,13 @@ async def get_participant_survey_detail(form_id: UUID, user_id: UUID, db: AsyncS
             and_(
                 FormDeployment.form_id == form_id,
                 GroupMember.participant_id == participant.participant_id,
-                FormDeployment.revoked_at.is_(None)
+                FormDeployment.revoked_at.is_(None),
             )
         )
+        .order_by(desc(FormDeployment.deployed_at))
     )
     result = await db.execute(stmt)
-    deployment = result.scalar_one_or_none()
+    deployment = result.scalars().first()
     
     if not deployment:
         return None 
@@ -158,15 +219,37 @@ async def get_participant_survey_response(form_id: UUID, user_id: UUID, db: Asyn
     if not participant:
         return None
 
+    deployment_stmt = (
+        select(SurveyForm, FormDeployment)
+        .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
+        .join(GroupMember, GroupMember.group_id == FormDeployment.group_id)
+        .where(
+            and_(
+                SurveyForm.form_id == form_id,
+                GroupMember.participant_id == participant.participant_id,
+                FormDeployment.revoked_at.is_(None),
+            )
+        )
+        .order_by(desc(FormDeployment.deployed_at))
+    )
+    deployment_result = await db.execute(deployment_stmt)
+    deployment_row = deployment_result.first()
+    if not deployment_row:
+        return None
+
+    survey, deployment = deployment_row
+    cycle_context = _resolve_cycle_context(survey, deployment)
+
     stmt = (
         select(FormSubmission)
         .where(
             and_(
                 FormSubmission.form_id == form_id,
-                FormSubmission.participant_id == participant.participant_id
+                FormSubmission.participant_id == participant.participant_id,
+                FormSubmission.cycle_key == cycle_context["cycle_key"],
             )
         )
-        .order_by(desc(FormSubmission.submitted_at)) 
+        .order_by(desc(FormSubmission.submitted_at))
     )
     result = await db.execute(stmt)
     submission = result.scalars().first()
@@ -191,24 +274,30 @@ async def _get_participant_and_submission(
         raise ValueError("User is not a participant")
 
     stmt = (
-        select(FormDeployment)
+        select(SurveyForm, FormDeployment)
+        .join(SurveyForm, SurveyForm.form_id == FormDeployment.form_id)
         .join(GroupMember, GroupMember.group_id == FormDeployment.group_id)
         .where(
             and_(
                 FormDeployment.form_id == form_id,
-                GroupMember.participant_id == participant.participant_id
+                GroupMember.participant_id == participant.participant_id,
+                FormDeployment.revoked_at.is_(None),
             )
         )
+        .order_by(desc(FormDeployment.deployed_at))
     )
     result = await db.execute(stmt)
-    deployment = result.scalar_one_or_none()
-    if not deployment:
+    deployment_row = result.first()
+    if not deployment_row:
         raise ValueError("Form not assigned to participant")
+    form, deployment = deployment_row
+    cycle_context = _resolve_cycle_context(form, deployment)
 
     stmt = select(FormSubmission).where(
         and_(
             FormSubmission.form_id == form_id,
-            FormSubmission.participant_id == participant.participant_id
+            FormSubmission.participant_id == participant.participant_id,
+            FormSubmission.cycle_key == cycle_context["cycle_key"],
         )
     )
     result = await db.execute(stmt)
@@ -223,7 +312,8 @@ async def _get_participant_and_submission(
         submission = FormSubmission(
             form_id=form_id,
             participant_id=participant.participant_id,
-            group_id=deployment.group_id
+            group_id=deployment.group_id,
+            cycle_key=cycle_context["cycle_key"],
         )
         db.add(submission)
         await db.flush()

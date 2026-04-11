@@ -1,4 +1,4 @@
-from sqlalchemy import select, and_, or_, func, cast, String
+from sqlalchemy import select, and_, or_, func, cast, String, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 from app.db.models import (
@@ -6,7 +6,7 @@ from app.db.models import (
     HealthDataPoint, DataElement, UserRole, Role, FormDeployment, Group, GroupMember,
     FormField, FieldElementMap,
 )
-from app.schemas.filter_data_schema import ParticipantFilter, TimeseriesFilter
+from app.schemas.filter_data_schema import ParticipantFilter
 from datetime import date, datetime, timedelta, timezone, time
 import csv
 import io
@@ -530,13 +530,12 @@ async def get_available_surveys(db: AsyncSession):
         .where(SurveyForm.status.in_(['PUBLISHED', 'ARCHIVED', 'DELETED']))
         .where(SurveyForm.title != "Intake Form")
         .where(
-            select(func.count(FormSubmission.submission_id))
-            .where(
-                FormSubmission.form_id == SurveyForm.form_id,
-                FormSubmission.submitted_at.is_not(None),
+            exists(
+                select(1).where(
+                    FormSubmission.form_id == SurveyForm.form_id,
+                    FormSubmission.submitted_at.is_not(None),
+                )
             )
-            .correlate(SurveyForm)
-            .scalar_subquery() > 0
         )
     )
 
@@ -546,15 +545,18 @@ async def get_available_surveys(db: AsyncSession):
     if forms:
         form_ids = [f.form_id for f in forms]
         dep_result = await db.execute(
-            select(FormDeployment.form_id, Group.name)
+            select(FormDeployment.form_id, Group.group_id, Group.name)
             .join(Group, Group.group_id == FormDeployment.group_id)
             .where(FormDeployment.form_id.in_(form_ids))
         )
         group_map: dict = {}
-        for fid, gname in dep_result.all():
+        group_id_map: dict = {}
+        for fid, gid, gname in dep_result.all():
             group_map.setdefault(fid, []).append(gname)
+            group_id_map.setdefault(fid, []).append(gid)
         for form in forms:
             form.deployed_groups = group_map.get(form.form_id, [])
+            form.deployed_group_ids = group_id_map.get(form.form_id, [])
 
     return forms
 
@@ -647,6 +649,46 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
         and not has_selected_element_columns
         and not getattr(base_filters, "group_ids", None)
     ):
+        if participant_ids and (observed_at_from is not None or observed_at_to is not None):
+            dated_participant_stmt = (
+                select(HealthDataPoint.participant_id)
+                .distinct()
+                .where(HealthDataPoint.participant_id.in_(participant_ids))
+                .where(HealthDataPoint.source_type.in_(source_types))
+            )
+            if observed_at_from is not None:
+                dated_participant_stmt = dated_participant_stmt.where(
+                    HealthDataPoint.observed_at >= observed_at_from
+                )
+            if observed_at_to is not None:
+                dated_participant_stmt = dated_participant_stmt.where(
+                    HealthDataPoint.observed_at < observed_at_to
+                )
+
+            dated_participant_result = await db.execute(dated_participant_stmt)
+            dated_participant_ids = set(dated_participant_result.scalars().all())
+            participant_ids = [
+                participant_id
+                for participant_id in participant_ids
+                if participant_id in dated_participant_ids
+            ]
+
+        sort_columns = {
+            "participant": ParticipantProfile.participant_id,
+            "gender": ParticipantProfile.gender,
+            "pronouns": ParticipantProfile.pronouns,
+            "primary_language": ParticipantProfile.primary_language,
+            "occupation_status": ParticipantProfile.occupation_status,
+            "living_arrangement": ParticipantProfile.living_arrangement,
+            "highest_education_level": ParticipantProfile.highest_education_level,
+            "dependents": ParticipantProfile.dependents,
+            "marital_status": ParticipantProfile.marital_status,
+            "age": func.date_part("year", func.age(func.current_date(), ParticipantProfile.dob)),
+        }
+        valid_sort_keys = set(sort_columns.keys())
+        if sort_by and sort_by not in valid_sort_keys:
+            raise HTTPException(status_code=400, detail=f"Unknown sort column: '{sort_by}'.")
+
         stmt = (
             select(*demographic_columns)
             .select_from(User)
@@ -658,25 +700,23 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
         else:
             stmt = stmt.where(False)
 
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total_participants = int((await db.execute(count_stmt)).scalar() or 0)
+
+        if sort_by:
+            sort_expr = sort_columns[sort_by]
+            stmt = stmt.order_by(
+                sort_expr.is_(None).asc(),
+                sort_expr.desc() if sort_dir == "desc" else sort_expr.asc(),
+            )
+
+        if limit is not None:
+            stmt = stmt.limit(limit).offset(offset)
+        elif offset:
+            stmt = stmt.offset(offset)
+
         result = await db.execute(stmt)
         data = result.all()
-
-        pivoted_data = []
-        for row in data:
-            pivoted_data.append(
-                {
-                    "_participant_id": str(row.participant_id),
-                    "gender": row.gender,
-                    "pronouns": row.pronouns,
-                    "primary_language": row.primary_language,
-                    "occupation_status": row.occupation_status,
-                    "living_arrangement": row.living_arrangement,
-                    "highest_education_level": row.highest_education_level,
-                    "dependents": row.dependents,
-                    "marital_status": row.marital_status,
-                    "age": calculate_age(row.dob),
-                }
-            )
 
         columns_list = [
             {"id": "gender", "text": "Gender"},
@@ -689,13 +729,21 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
             {"id": "marital_status", "text": "Marital Status"},
             {"id": "age", "text": "Age"},
         ]
-
-        if sort_by and sort_by not in {"participant", *pivoted_data[0].keys()}:
-            raise HTTPException(status_code=400, detail=f"Unknown sort column: '{sort_by}'.")
-        ordered_rows = _sort_rows(pivoted_data, sort_by, sort_dir)
-        paged_rows = ordered_rows[offset:]
-        if limit is not None:
-            paged_rows = paged_rows[:limit]
+        paged_rows = [
+            {
+                "_participant_id": str(row.participant_id),
+                "gender": row.gender,
+                "pronouns": row.pronouns,
+                "primary_language": row.primary_language,
+                "occupation_status": row.occupation_status,
+                "living_arrangement": row.living_arrangement,
+                "highest_education_level": row.highest_education_level,
+                "dependents": row.dependents,
+                "marital_status": row.marital_status,
+                "age": calculate_age(row.dob),
+            }
+            for row in data
+        ]
 
         return {
             "columns": columns_list,
@@ -704,8 +752,8 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
                 "offset": offset,
                 "limit": limit,
                 "returned_participants": len(paged_rows),
-                "total_participants": len(ordered_rows),
-                "has_more": (offset + len(paged_rows)) < len(ordered_rows),
+                "total_participants": total_participants,
+                "has_more": (offset + len(paged_rows)) < total_participants,
                 "next_offset": offset + len(paged_rows),
             },
         }
@@ -1057,177 +1105,6 @@ async def get_survey_results_pivoted(db: AsyncSession, survey_id: str = None, fi
             "next_offset": offset + len(paged_rows),
         },
     }
-
-
-async def _get_timeseries_raw(
-    participant_ids: list,
-    filters: TimeseriesFilter,
-    db: AsyncSession,
-):
-    source_types = _normalized_source_types(filters)
-    observed_at_from, observed_at_to = _observed_at_bounds(filters)
-
-    stmt = (
-        select(
-            HealthDataPoint.participant_id,
-            HealthDataPoint.element_id,
-            DataElement.label.label("element_name"),
-            DataElement.unit,
-            HealthDataPoint.value_number,
-            HealthDataPoint.value_text,
-            HealthDataPoint.value_date,
-            HealthDataPoint.observed_at,
-            HealthDataPoint.source_type,
-            HealthDataPoint.source_submission_id,
-        )
-        .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
-        .where(HealthDataPoint.participant_id.in_(participant_ids))
-        .where(HealthDataPoint.element_id.in_(filters.element_ids))
-        .where(HealthDataPoint.source_type.in_(source_types))
-        .order_by(
-            HealthDataPoint.observed_at.desc(),
-            HealthDataPoint.participant_id,
-            HealthDataPoint.element_id,
-        )
-    )
-
-    if observed_at_from is not None:
-        stmt = stmt.where(HealthDataPoint.observed_at >= observed_at_from)
-    if observed_at_to is not None:
-        stmt = stmt.where(HealthDataPoint.observed_at < observed_at_to)
-
-    result = await db.execute(stmt)
-    return [
-        {
-            "participant_id": str(row.participant_id),
-            "element_id": str(row.element_id),
-            "element_name": row.element_name,
-            "unit": row.unit,
-            "value_number": float(row.value_number) if row.value_number is not None else None,
-            "value_text": row.value_text,
-            "value_date": row.value_date.isoformat() if row.value_date else None,
-            "observed_at": row.observed_at.isoformat() if row.observed_at else None,
-            "source_type": row.source_type,
-            "source_submission_id": str(row.source_submission_id) if row.source_submission_id else None,
-        }
-        for row in result.all()
-    ]
-
-
-async def _get_timeseries_aggregate(
-    participant_ids: list,
-    filters: TimeseriesFilter,
-    db: AsyncSession,
-):
-    source_types = _normalized_source_types(filters)
-    observed_at_from, observed_at_to = _observed_at_bounds(filters)
-
-    latest_values = (
-        select(
-            HealthDataPoint.participant_id,
-            HealthDataPoint.element_id,
-            HealthDataPoint.value_number.label("value_latest"),
-        )
-        .distinct(
-            HealthDataPoint.participant_id,
-            HealthDataPoint.element_id,
-        )
-        .where(HealthDataPoint.participant_id.in_(participant_ids))
-        .where(HealthDataPoint.element_id.in_(filters.element_ids))
-        .where(HealthDataPoint.source_type.in_(source_types))
-        .order_by(
-            HealthDataPoint.participant_id,
-            HealthDataPoint.element_id,
-            HealthDataPoint.observed_at.desc(),
-        )
-    )
-
-    if observed_at_from is not None:
-        latest_values = latest_values.where(HealthDataPoint.observed_at >= observed_at_from)
-    if observed_at_to is not None:
-        latest_values = latest_values.where(HealthDataPoint.observed_at < observed_at_to)
-
-    latest_values = latest_values.subquery()
-
-    stmt = (
-        select(
-            HealthDataPoint.participant_id,
-            HealthDataPoint.element_id,
-            DataElement.label.label("element_name"),
-            DataElement.unit,
-            func.avg(HealthDataPoint.value_number).label("value_mean"),
-            func.min(HealthDataPoint.value_number).label("value_min"),
-            func.max(HealthDataPoint.value_number).label("value_max"),
-            latest_values.c.value_latest,
-            func.count().label("observation_count"),
-            func.count().filter(HealthDataPoint.source_type == "survey").label("survey_count"),
-            func.count().filter(HealthDataPoint.source_type == "goal").label("goal_count"),
-        )
-        .join(
-            latest_values,
-            and_(
-                latest_values.c.participant_id == HealthDataPoint.participant_id,
-                latest_values.c.element_id == HealthDataPoint.element_id,
-            )
-        )
-        .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
-        .where(HealthDataPoint.participant_id.in_(participant_ids))
-        .where(HealthDataPoint.element_id.in_(filters.element_ids))
-        .where(HealthDataPoint.source_type.in_(source_types))
-        .group_by(
-            HealthDataPoint.participant_id,
-            HealthDataPoint.element_id,
-            DataElement.label,
-            DataElement.unit,
-            latest_values.c.value_latest,
-        )
-        .order_by(HealthDataPoint.participant_id, HealthDataPoint.element_id)
-    )
-
-    if observed_at_from is not None:
-        stmt = stmt.where(HealthDataPoint.observed_at >= observed_at_from)
-    if observed_at_to is not None:
-        stmt = stmt.where(HealthDataPoint.observed_at < observed_at_to)
-
-    result = await db.execute(stmt)
-    return [
-        {
-            "participant_id": str(row.participant_id),
-            "element_id": str(row.element_id),
-            "element_name": row.element_name,
-            "unit": row.unit,
-            "value_mean": float(row.value_mean) if row.value_mean is not None else None,
-            "value_min": float(row.value_min) if row.value_min is not None else None,
-            "value_max": float(row.value_max) if row.value_max is not None else None,
-            "value_latest": float(row.value_latest) if row.value_latest is not None else None,
-            "observation_count": row.observation_count,
-            "survey_count": row.survey_count,
-            "goal_count": row.goal_count,
-            "date_from": filters.date_from.isoformat() if filters.date_from else None,
-            "date_to": filters.date_to.isoformat() if filters.date_to else None,
-        }
-        for row in result.all()
-    ]
-
-
-async def get_timeseries(filters: TimeseriesFilter, db: AsyncSession):
-    if filters.survey_id:
-        mapped = await get_mapped_element_ids(filters.survey_id, db)
-        invalid = [eid for eid in filters.element_ids if eid not in mapped]
-        if invalid:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "detail": "element_ids not mapped to this survey",
-                    "invalid_element_ids": [str(e) for e in invalid],
-                },
-            )
-
-    participant_ids = await resolve_participant_ids(filters, db)
-
-    if filters.mode == "raw":
-        return await _get_timeseries_raw(participant_ids, filters, db)
-    return await _get_timeseries_aggregate(participant_ids, filters, db)
 
 
 async def get_survey_results_grouped(

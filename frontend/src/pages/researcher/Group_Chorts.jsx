@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../services/api";
+import { useResearcherMeta } from "../../hooks/useResearcherMeta";
 
 const STATUS_STYLES = {
   PUBLISHED:   "bg-emerald-50 text-emerald-600",
@@ -82,7 +83,7 @@ function SurveyModal({ group, onClose }) {
         )}
 
         {/* Survey list */}
-        <div className="px-6 py-3 max-h-[55vh] overflow-y-auto">
+        <div className="max-h-[55vh] overflow-y-auto px-4 py-3 sm:px-6">
           {loading ? (
             <div className="py-10 text-center text-slate-400 text-sm animate-pulse">Loading surveys…</div>
           ) : loadError ? (
@@ -109,7 +110,7 @@ function SurveyModal({ group, onClose }) {
           ) : (
             <div className="divide-y divide-slate-100">
               {visible.map((s) => (
-                <div key={s.form_id} className="py-3.5 flex items-center justify-between gap-4">
+                <div key={s.form_id} className="flex flex-col gap-2 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-slate-800 truncate">
                       {s.title}
@@ -124,7 +125,7 @@ function SurveyModal({ group, onClose }) {
                       )}
                     </p>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0 sm:gap-3">
                     <span className="text-[11px] text-slate-400 font-medium">
                       {s.submission_count ?? 0} submission{(s.submission_count ?? 0) !== 1 ? "s" : ""}
                     </span>
@@ -157,23 +158,11 @@ function GroupSkeleton() {
 }
 
 export default function Groups() {
-  const [groups, setGroups] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const { groups, loading, error, refresh } = useResearcherMeta({ includeGroups: true });
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
-
-  const fetchGroups = () => {
-    setLoading(true);
-    setLoadError(false);
-    api.listGroups()
-      .then((data) => setGroups(Array.isArray(data) ? data : []))
-      .catch(() => setLoadError(true))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => { fetchGroups(); }, []);
+  const loadError = Boolean(error);
 
   const filtered = groups.filter((g) =>
     g.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -277,7 +266,7 @@ export default function Groups() {
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 text-sm text-slate-800 p-1 outline-none bg-transparent placeholder-slate-400"
           />
-          <span className="text-xs text-slate-400 font-medium pr-2">
+          <span className="hidden pr-2 text-xs font-medium text-slate-400 sm:inline">
             {filtered.length} group{filtered.length !== 1 ? "s" : ""}
           </span>
         </div>
@@ -291,7 +280,7 @@ export default function Groups() {
       ) : loadError ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 py-16 text-center text-sm">
           <p className="text-slate-400">Failed to load groups.</p>
-          <button onClick={fetchGroups} className="mt-2 text-xs text-blue-500 hover:underline">Retry</button>
+          <button onClick={refresh} className="mt-2 text-xs text-blue-500 hover:underline">Retry</button>
         </div>
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 py-16 text-center text-slate-400 text-sm">

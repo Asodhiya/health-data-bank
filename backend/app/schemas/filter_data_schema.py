@@ -12,6 +12,7 @@ class AvailableSurvey(BaseModel):
     version: Optional[int] = 1
     parent_form_id: Optional[UUID] = None
     deployed_groups: list[str] = []
+    deployed_group_ids: list[UUID] = []
 
     class Config:
         from_attributes = True
@@ -174,13 +175,6 @@ class HealthDataPointOut(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class TimeseriesFilter(ParticipantFilter):
-    element_ids: List[UUID]
-    survey_id: Optional[UUID] = None
-    source_types: List[str] = ["survey", "goal"]
-    mode: Literal["raw", "aggregate"] = "raw"
 
 
 class ParticipantExportFilter(ParticipantFilter):

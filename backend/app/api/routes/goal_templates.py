@@ -15,6 +15,7 @@ from app.core.dependency import require_permissions
 from app.core.permissions import GOAL_TEMPLATE_VIEW, GOAL_TEMPLATE_CREATE, GOAL_TEMPLATE_EDIT
 from app.db.queries.Queries import GoalTemplateQuery
 from app.schemas.schemas import GoalTemplateCreate, GoalTemplateUpdate
+from app.services.notification_service import create_notifications_bulk
 
 router = APIRouter()
 
@@ -125,4 +126,25 @@ async def deactivate_goal_template(
     _=Depends(require_permissions(GOAL_TEMPLATE_EDIT)),
 ):
     """Soft-delete a goal template (sets is_active=False)."""
-    await GoalTemplateQuery(db).delete_template(template_id)
+    result = await GoalTemplateQuery(db).delete_template(template_id)
+
+    participant_user_ids = result.get("affected_participant_user_ids") or []
+    if participant_user_ids:
+        template_name = result.get("template_name") or "A goal template"
+        await create_notifications_bulk(
+            db=db,
+            user_ids=participant_user_ids,
+            notification_type="goal",
+            title="Goal template retired",
+            message=(
+                f'The goal template "{template_name}" is no longer available for new use. '
+                "Your existing goal will stay on your dashboard."
+            ),
+            link="/participant/healthgoals",
+            role_target="participant",
+            source_type="goal_template_deleted",
+            source_id=template_id,
+        )
+        await db.commit()
+
+    return {"detail": result.get("msg", "Template deleted")}

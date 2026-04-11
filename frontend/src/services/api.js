@@ -213,9 +213,13 @@ export const api = {
   listGroups: () => request("/form_management/groups"),
   getGroupSurveys: (groupId) => request(`/form_management/groups/${groupId}/surveys`),
 
-  publishForm: (formId, groupId) =>
-    request(`/form_management/${formId}/publish?group_id=${groupId}`, {
+  publishForm: (formId, { groupId, cadence = "once" }) =>
+    request(`/form_management/${formId}/publish`, {
       method: "POST",
+      body: JSON.stringify({
+        group_id: groupId,
+        cadence,
+      }),
     }),
 
   unpublishForm: (formId) =>
@@ -970,12 +974,6 @@ export const api = {
     a.remove();
     window.URL.revokeObjectURL(url);
   },
-
-  getResearcherTimeseries: (payload) =>
-    request("/researcher/query/timeseries", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
 
   // ── Goal Templates (Researcher) ──
   listGoalTemplates: () => request("/goal-templates"),

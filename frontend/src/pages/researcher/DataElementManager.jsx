@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { api } from "../../services/api";
+import { getApiErrorMessage } from "../../utils/apiErrors";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -172,7 +173,7 @@ const DataElementManager = () => {
       setPage(1);
       await loadData();
     } catch (err) {
-      alert(err.message || "Code already exists.");
+      alert(getApiErrorMessage(err, "Code already exists."));
     } finally {
       setCreating(false);
     }
@@ -193,7 +194,7 @@ const DataElementManager = () => {
       setDeleteTarget(null);
       await loadData();
     } catch (err) {
-      alert("Delete failed: " + err.message);
+      alert(`Delete failed: ${getApiErrorMessage(err, "Unknown error")}`);
     } finally {
       setDeleting(false);
     }
@@ -209,7 +210,7 @@ const DataElementManager = () => {
       }
       await loadData();
     } catch (err) {
-      alert("Restore failed: " + err.message);
+      alert(`Restore failed: ${getApiErrorMessage(err, "Unknown error")}`);
     } finally {
       setRestoringId(null);
     }
@@ -280,15 +281,15 @@ const DataElementManager = () => {
       )}
 
       {/* ── Page header ── */}
-      <div className="px-6 pt-8 pb-2">
-        <div className="flex items-start justify-between mb-4">
+      <div className="px-4 pt-6 pb-2 sm:px-6 sm:pt-8">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Data Elements</h1>
             <p className="text-sm text-slate-500 mt-0.5">
               Browse and manage your standardized metrics library
             </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:self-start">
             <button
               onClick={() => setShowHelp(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition"
@@ -351,7 +352,7 @@ const DataElementManager = () => {
           const mapped = filtered.filter((el) => (surveyCountMap[el.element_id || el.id] || 0) > 0 || (goalCountMap[el.element_id || el.id] || 0) > 0).length;
           const unmapped = pageTotal - mapped;
           return (
-            <div className="grid grid-cols-4 gap-3 mb-5">
+            <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <div className="bg-slate-50 rounded-xl px-4 py-3">
                 <p className="text-xs text-slate-400 font-medium mb-0.5">{showDeleted ? "Deleted total" : "Active total"}</p>
                 <p className="text-2xl font-bold text-slate-900">{totalCount}</p>
@@ -767,7 +768,7 @@ const DataElementManager = () => {
           <div className="flex-1 bg-black/20" onClick={() => setSelectedEl(null)} />
 
           {/* panel */}
-          <div className="w-full max-w-lg bg-white shadow-2xl flex flex-col overflow-hidden">
+          <div className="flex h-full w-full max-w-lg flex-col overflow-hidden bg-white shadow-2xl">
 
             {/* Drawer header */}
             <div className="px-6 py-5 border-b flex items-start justify-between shrink-0">
@@ -839,7 +840,7 @@ const DataElementManager = () => {
                     <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-3">
                       Details
                     </p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="bg-slate-50 rounded-xl px-4 py-3">
                         <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-0.5">Type</p>
                         <p className="text-sm font-semibold text-slate-800">{typeLabel(selectedEl.datatype)}</p>
