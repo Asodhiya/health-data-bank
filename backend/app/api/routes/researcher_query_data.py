@@ -9,7 +9,6 @@ from app.schemas.filter_data_schema import (
     ParticipantFilter,
     ParticipantExportFilter,
     AvailableSurvey,
-    TimeseriesFilter,
 )
 from app.services.filter_data_service import (
     get_survey_results_pivoted,
@@ -19,7 +18,6 @@ from app.services.filter_data_service import (
     export_survey_results_excel,
     export_grouped_results_csv,
     export_grouped_results_excel,
-    get_timeseries,
 )
 
 router = APIRouter()
@@ -103,15 +101,6 @@ async def download_grouped_results_excel(
 async def list_available_surveys(db: AsyncSession = Depends(get_db)):
     """Get a list of all surveys with submissions (any status) for the data filter dropdown"""
     return await get_available_surveys(db)
-
-
-@router.post("/timeseries", dependencies=[Depends(require_permissions(FORM_VIEW))])
-async def query_timeseries(
-    filters: TimeseriesFilter,
-    db: AsyncSession = Depends(get_db),
-):
-    return await get_timeseries(filters, db)
-
 
 @router.get("/config", dependencies=[Depends(require_permissions(FORM_VIEW))])
 async def get_query_config():

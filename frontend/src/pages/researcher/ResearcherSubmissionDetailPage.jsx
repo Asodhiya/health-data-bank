@@ -48,7 +48,7 @@ export default function ResearcherSubmissionDetailPage() {
         </Link>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         {loading ? (
           <p className="text-sm text-slate-400">Loading submission details...</p>
         ) : error ? (

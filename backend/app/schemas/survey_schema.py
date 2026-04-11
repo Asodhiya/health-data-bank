@@ -47,6 +47,8 @@ class SurveyDetailOut(BaseModel):
     form_id: UUID
     title: str
     description: Optional[str] = None
+    cadence: str = "once"
+    cadence_anchor_at: Optional[datetime] = None
     version: int
     parent_form_id: Optional[UUID] = None
     status: Optional[str] = None
@@ -62,6 +64,8 @@ class SurveyListItem(BaseModel):
     form_id: UUID
     title: str
     description: Optional[str] = None
+    cadence: str = "once"
+    cadence_anchor_at: Optional[datetime] = None
     version: Optional[int] = 1
     parent_form_id: Optional[UUID] = None
     created_by: Optional[UUID] = None
@@ -93,6 +97,9 @@ class ParticipantSurveyItem(BaseModel):
     title: str
     description: Optional[str] = None
     status: str # NEW, IN_PROGRESS, COMPLETED
+    cadence: str = "once"
+    cycle_key: Optional[str] = None
+    cycle_label: Optional[str] = None
     version: Optional[int] = 1
     deployed_at: Optional[datetime] = None
     submitted_at: Optional[datetime] = None
@@ -102,3 +109,8 @@ class ParticipantSurveyItem(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PublishSurveyRequest(BaseModel):
+    group_id: UUID
+    cadence: str = "once"

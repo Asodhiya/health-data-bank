@@ -32,6 +32,9 @@ const transformAssigned = (item) => ({
   question_count: item.question_count || 0,
   version: item.version || 1,
   status: STATUS_MAP[item.status] || item.status || "pending",
+  cadence: item.cadence || "once",
+  cycle_key: item.cycle_key || null,
+  cycle_label: item.cycle_label || null,
   category: item.category || "",
   answered: item.answered_count ?? item.answered ?? 0,
   deployed_at: fmtDateStr(item.deployed_at),
@@ -276,6 +279,19 @@ function FormRow({ form, onStart }) {
   const dueDays = daysUntil(form.due_date);
   const isOverdue = !isDone && form.due_date && dueDays < 0;
   const isDueSoon = !isDone && form.due_date && dueDays >= 0 && dueDays <= 3;
+  const cadenceLabelMap = {
+    once: "One-time",
+    daily: "Daily",
+    weekly: "Weekly",
+    monthly: "Monthly",
+  };
+  const cadenceLabel = cadenceLabelMap[form.cadence] || "One-time";
+  const cycleCompletionLabel = {
+    daily: "Completed for this day",
+    weekly: "Completed for this week",
+    monthly: "Completed for this month",
+    once: "Submitted",
+  }[form.cadence || "once"];
 
   return (
     <div
@@ -292,6 +308,9 @@ function FormRow({ form, onStart }) {
               {form.category}
             </span>
           )}
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
+            {cadenceLabel}
+          </span>
           {/* #3 — due date pill */}
           {form.due_date && !isDone && (
             <span
@@ -346,7 +365,7 @@ function FormRow({ form, onStart }) {
           </div>
         ) : isDone ? (
           <span className="flex items-center gap-1 text-xs font-bold text-emerald-600">
-            <CheckSmallIco /> Submitted
+            <CheckSmallIco /> {cycleCompletionLabel}
             {/* #12 — submission timestamp */}
             {form.submitted_at && (
               <span className="font-normal text-slate-400 ml-1">
@@ -355,7 +374,11 @@ function FormRow({ form, onStart }) {
             )}
           </span>
         ) : (
-          <div />
+          <span className="text-xs text-slate-400">
+            {form.cadence === "once"
+              ? "Ready to complete"
+              : `${form.cycle_label || cadenceLabel} check-in available`}
+          </span>
         )}
 
         <button

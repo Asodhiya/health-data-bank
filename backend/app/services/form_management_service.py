@@ -1,24 +1,59 @@
 """
 researcher form service
 """
+from collections import defaultdict
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, delete as sa_delete, func
+from sqlalchemy import select, desc, delete as sa_delete, func, case
 from sqlalchemy.orm import selectinload
 from uuid import UUID, uuid4
 from typing import List, Optional
 import asyncio
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.db.models import (
     SurveyForm, FormField, FieldOption, FormDeployment, Group, FieldElementMap,
     FormSubmission, GroupMember, ParticipantProfile, CaretakerProfile
 )
 from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, SurveyCreate
-from app.services.notification_service import create_notifications_bulk
+from app.services.notification_service import create_notification, create_notifications_bulk
+from app.services.survey_cadence import normalize_cadence
 
 ONBOARDING_FORM_TITLES = {"Intake Form"}
+
+
+async def _get_group_participant_user_ids(
+    db: AsyncSession,
+    group_ids: list[UUID],
+) -> list[UUID]:
+    if not group_ids:
+        return []
+
+    result = await db.execute(
+        select(ParticipantProfile.user_id)
+        .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+        .where(GroupMember.group_id.in_(group_ids))
+        .where(GroupMember.left_at.is_(None))
+        .where(ParticipantProfile.user_id.is_not(None))
+    )
+    return list({row[0] for row in result.all() if row[0] is not None})
+
+
+async def _get_group_caretaker_user_ids(
+    db: AsyncSession,
+    group_ids: list[UUID],
+) -> list[UUID]:
+    if not group_ids:
+        return []
+
+    result = await db.execute(
+        select(CaretakerProfile.user_id)
+        .join(Group, Group.caretaker_id == CaretakerProfile.caretaker_id)
+        .where(Group.group_id.in_(group_ids))
+        .where(CaretakerProfile.user_id.isnot(None))
+    )
+    return list({row[0] for row in result.all() if row[0] is not None})
 
 
 async def create_survey_form(form_data: SurveyCreate, user_id: UUID, db: AsyncSession) -> SurveyForm:
@@ -72,60 +107,70 @@ async def create_survey_form(form_data: SurveyCreate, user_id: UUID, db: AsyncSe
 
     return full_form
 
+
+async def _attach_form_list_metadata(db: AsyncSession, forms: list[SurveyForm]) -> list[SurveyForm]:
+    if not forms:
+        return forms
+
+    form_ids = [form.form_id for form in forms]
+
+    field_count_result = await db.execute(
+        select(FormField.form_id, func.count(FormField.field_id))
+        .where(FormField.form_id.in_(form_ids))
+        .group_by(FormField.form_id)
+    )
+    field_count_map = {form_id: count for form_id, count in field_count_result.all()}
+
+    submission_count_result = await db.execute(
+        select(FormSubmission.form_id, func.count(FormSubmission.submission_id))
+        .where(FormSubmission.form_id.in_(form_ids))
+        .where(FormSubmission.submitted_at.is_not(None))
+        .group_by(FormSubmission.form_id)
+    )
+    submission_count_map = {form_id: count for form_id, count in submission_count_result.all()}
+
+    dep_result = await db.execute(
+        select(
+            FormDeployment.form_id,
+            FormDeployment.deployed_by,
+            FormDeployment.deployed_at,
+            Group.group_id,
+            Group.name,
+        )
+        .join(Group, Group.group_id == FormDeployment.group_id)
+        .where(FormDeployment.form_id.in_(form_ids))
+    )
+    group_map: dict = {}
+    group_id_map: dict = {}
+    deployer_map: dict = {}
+    deployed_at_map: dict = {}
+    for fid, deployed_by, deployed_at, gid, gname in dep_result.all():
+        group_map.setdefault(fid, []).append(gname)
+        group_id_map.setdefault(fid, []).append(gid)
+        deployer_map.setdefault(fid, {})[str(gid)] = str(deployed_by) if deployed_by else None
+        deployed_at_map.setdefault(fid, {})[str(gid)] = deployed_at
+
+    for form in forms:
+        form.field_count = int(field_count_map.get(form.form_id, 0) or 0)
+        form.submission_count = int(submission_count_map.get(form.form_id, 0) or 0)
+        form.deployed_groups = group_map.get(form.form_id, [])
+        form.deployed_group_ids = group_id_map.get(form.form_id, [])
+        form.deployed_group_deployers = deployer_map.get(form.form_id, {})
+        form.deployed_group_deployed_at = deployed_at_map.get(form.form_id, {})
+
+    return forms
+
 async def list_researcher_forms(db: AsyncSession):
     """List all researcher forms"""
-    field_count_subq = (
-        select(func.count(FormField.field_id))
-        .where(FormField.form_id == SurveyForm.form_id)
-        .correlate(SurveyForm)
-        .scalar_subquery()
-    )
-    submission_count_subq = (
-        select(func.count(FormSubmission.submission_id))
-        .where(
-            FormSubmission.form_id == SurveyForm.form_id,
-            FormSubmission.submitted_at.is_not(None),
-        )
-        .correlate(SurveyForm)
-        .scalar_subquery()
-    )
     query = (
-        select(SurveyForm, field_count_subq.label("field_count"), submission_count_subq.label("submission_count"))
+        select(SurveyForm)
         .where(SurveyForm.status != "DELETED")
         .where(~SurveyForm.title.in_(ONBOARDING_FORM_TITLES))
         .order_by(desc(SurveyForm.created_at))
     )
     result = await db.execute(query)
-    rows = result.all()
-    for form, count, sub_count in rows:
-        form.field_count = count
-        form.submission_count = sub_count
-    forms = [form for form, _, __ in rows]
-
-    # Attach deployed group names and deployer metadata
-    if forms:
-        form_ids = [f.form_id for f in forms]
-        dep_result = await db.execute(
-            select(FormDeployment.form_id, FormDeployment.deployed_by, FormDeployment.deployed_at, Group.group_id, Group.name)
-            .join(Group, Group.group_id == FormDeployment.group_id)
-            .where(FormDeployment.form_id.in_(form_ids))
-        )
-        group_map: dict = {}
-        group_id_map: dict = {}
-        deployer_map: dict = {}
-        deployed_at_map: dict = {}
-        for fid, deployed_by, deployed_at, gid, gname in dep_result.all():
-            group_map.setdefault(fid, []).append(gname)
-            group_id_map.setdefault(fid, []).append(gid)
-            deployer_map.setdefault(fid, {})[str(gid)] = str(deployed_by) if deployed_by else None
-            deployed_at_map.setdefault(fid, {})[str(gid)] = deployed_at
-        for form in forms:
-            form.deployed_groups = group_map.get(form.form_id, [])
-            form.deployed_group_ids = group_id_map.get(form.form_id, [])
-            form.deployed_group_deployers = deployer_map.get(form.form_id, {})
-            form.deployed_group_deployed_at = deployed_at_map.get(form.form_id, {})
-
-    return forms
+    forms = result.scalars().all()
+    return await _attach_form_list_metadata(db, forms)
 
 async def list_researcher_forms_paged(
     db: AsyncSession,
@@ -141,41 +186,32 @@ async def list_researcher_forms_paged(
     ownership_filter: str | None = None,
     current_user_id: UUID | None = None,
 ):
-    forms = await list_researcher_forms(db)
+    root_expr = func.coalesce(SurveyForm.parent_form_id, SurveyForm.form_id)
+    latest_rank = case(
+        (SurveyForm.status.not_in(["DELETED", "ARCHIVED"]), 0),
+        (SurveyForm.status == "ARCHIVED", 1),
+        else_=2,
+    )
 
-    family_map = {}
-    for form in forms:
-      root_id = str(form.parent_form_id or form.form_id)
-      family_map.setdefault(root_id, []).append(form)
+    latest_stmt = (
+        select(SurveyForm, root_expr.label("root_id"))
+        .where(~SurveyForm.title.in_(ONBOARDING_FORM_TITLES))
+        .order_by(
+            root_expr,
+            latest_rank.asc(),
+            SurveyForm.version.desc(),
+            SurveyForm.created_at.desc(),
+        )
+        .distinct(root_expr)
+    )
+    latest_result = await db.execute(latest_stmt)
+    latest_rows = latest_result.all()
+    latest_forms = [form for form, _ in latest_rows if form.status != "DELETED"]
+    latest_forms = await _attach_form_list_metadata(db, latest_forms)
 
-    families = []
-    for fam in family_map.values():
-        by_version = sorted(fam, key=lambda f: (f.version or 1), reverse=True)
-        active = [f for f in by_version if f.status not in {"DELETED", "ARCHIVED"}]
-        inactive = [f for f in by_version if f.status in {"ARCHIVED", "DELETED"}]
-        if not active:
-            top_archived = next((f for f in inactive if f.status == "ARCHIVED"), None)
-            if not top_archived:
-                continue
-            rest = [f for f in inactive if f.form_id != top_archived.form_id]
-            families.append({
-                "latest": top_archived,
-                "history": rest,
-                "root_id": str(top_archived.parent_form_id or top_archived.form_id),
-            })
-            continue
-        latest = active[0]
-        families.append({
-            "latest": latest,
-            "history": [*active[1:], *inactive],
-            "root_id": str(latest.parent_form_id or latest.form_id),
-        })
-
-    counts = {
-        "ALL": len(families),
-        "DRAFT": sum(1 for fam in families if fam["latest"].status == "DRAFT"),
-        "PUBLISHED": sum(1 for fam in families if fam["latest"].status == "PUBLISHED"),
-        "ARCHIVED": sum(1 for fam in families if fam["latest"].status == "ARCHIVED"),
+    latest_by_root = {
+        str(form.parent_form_id or form.form_id): form
+        for form in latest_forms
     }
 
     normalized_search = (search or "").strip().lower()
@@ -183,8 +219,7 @@ async def list_researcher_forms_paged(
     normalized_ownership = (ownership_filter or "ALL").upper()
     current_user_str = str(current_user_id or "")
 
-    def matches(family):
-        form = family["latest"]
+    def matches(form):
         deployed_ids = [str(v or "") for v in (form.deployed_group_deployers or {}).values()]
         is_created_by_me = str(form.created_by or "") == current_user_str
         published_by_me = current_user_str and current_user_str in deployed_ids
@@ -209,10 +244,16 @@ async def list_researcher_forms_paged(
         )
         return match_search and match_status and match_group and match_from and match_to and match_ownership
 
-    filtered = [family for family in families if matches(family)]
+    filtered_latest = [form for form in latest_forms if matches(form)]
 
-    def sort_key(item):
-        form = item["latest"]
+    counts = {
+        "ALL": len(latest_forms),
+        "DRAFT": sum(1 for form in latest_forms if form.status == "DRAFT"),
+        "PUBLISHED": sum(1 for form in latest_forms if form.status == "PUBLISHED"),
+        "ARCHIVED": sum(1 for form in latest_forms if form.status == "ARCHIVED"),
+    }
+
+    def sort_key(form):
         if sort == "newest":
             return form.created_at or datetime.min
         if sort == "oldest":
@@ -222,18 +263,41 @@ async def list_researcher_forms_paged(
         return form.modified_at or form.created_at or datetime.min
 
     reverse = sort != "oldest" and sort != "alpha"
-    filtered = sorted(filtered, key=sort_key, reverse=reverse)
+    filtered_latest = sorted(filtered_latest, key=sort_key, reverse=reverse)
 
-    total_count = len(filtered)
+    total_count = len(filtered_latest)
     total_pages = max(1, math.ceil(total_count / page_size))
     page = max(1, min(page, total_pages))
     start = (page - 1) * page_size
-    page_families = filtered[start:start + page_size]
+    page_latest = filtered_latest[start:start + page_size]
+    page_root_ids = [str(form.parent_form_id or form.form_id) for form in page_latest]
+
+    history_stmt = (
+        select(SurveyForm)
+        .where(root_expr.in_(page_root_ids))
+        .where(~SurveyForm.title.in_(ONBOARDING_FORM_TITLES))
+        .order_by(root_expr, SurveyForm.version.desc(), SurveyForm.created_at.desc())
+    )
+    history_result = await db.execute(history_stmt)
+    page_forms = await _attach_form_list_metadata(db, history_result.scalars().all())
+
+    family_map = defaultdict(list)
+    for form in page_forms:
+        family_map[str(form.parent_form_id or form.form_id)].append(form)
 
     items = []
-    for family in page_families:
-        items.append(family["latest"])
-        items.extend(family["history"])
+    for root_id in page_root_ids:
+        family_forms = family_map.get(root_id, [])
+        latest_form = latest_by_root.get(root_id)
+        if not latest_form:
+            continue
+        items.append(latest_form)
+        history_items = [
+            form
+            for form in family_forms
+            if form.form_id != latest_form.form_id and matches(form)
+        ]
+        items.extend(history_items)
 
     return {
         "items": items,
@@ -437,6 +501,8 @@ async def branch_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
         title=original.title,
         description=original.description,
         status="DRAFT",
+        cadence=normalize_cadence(original.cadence),
+        cadence_anchor_at=None,
         version=max_version + 1,
         parent_form_id=root_id,
         created_by=user_id,
@@ -449,6 +515,22 @@ async def branch_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
         select(FormField).where(FormField.form_id == form_id)
     )
     old_fields = old_fields_result.scalars().all()
+    old_field_ids = [field.field_id for field in old_fields]
+
+    option_map: dict = {}
+    mapping_map: dict = {}
+    if old_field_ids:
+        options_result = await db.execute(
+            select(FieldOption).where(FieldOption.field_id.in_(old_field_ids))
+        )
+        for option in options_result.scalars().all():
+            option_map.setdefault(option.field_id, []).append(option)
+
+        mappings_result = await db.execute(
+            select(FieldElementMap).where(FieldElementMap.field_id.in_(old_field_ids))
+        )
+        for mapping in mappings_result.scalars().all():
+            mapping_map.setdefault(mapping.field_id, []).append(mapping)
 
     for old_field in old_fields:
         new_field_id = uuid4()
@@ -460,13 +542,8 @@ async def branch_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
             is_required=old_field.is_required,
             display_order=old_field.display_order,
         ))
-        await db.flush()
 
-        # Copy field options
-        options_result = await db.execute(
-            select(FieldOption).where(FieldOption.field_id == old_field.field_id)
-        )
-        for opt in options_result.scalars().all():
+        for opt in option_map.get(old_field.field_id, []):
             db.add(FieldOption(
                 field_id=new_field_id,
                 label=opt.label,
@@ -474,11 +551,7 @@ async def branch_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
                 display_order=opt.display_order,
             ))
 
-        # Copy element mappings
-        maps_result = await db.execute(
-            select(FieldElementMap).where(FieldElementMap.field_id == old_field.field_id)
-        )
-        for m in maps_result.scalars().all():
+        for m in mapping_map.get(old_field.field_id, []):
             db.add(FieldElementMap(field_id=new_field_id, element_id=m.element_id))
 
     await db.commit()
@@ -535,22 +608,86 @@ async def get_publish_preview(form_id: UUID, group_ids: List[UUID], db: AsyncSes
     return results
 
 
-async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: AsyncSession):
+async def publish_survey_form(
+    form_id: UUID,
+    group_id: UUID,
+    cadence: str,
+    user_id: UUID,
+    db: AsyncSession,
+):
     """Publish form and assign to a group"""
     form = await get_form_by_id(form_id, db)
     if not form:
         raise HTTPException(status_code=404, detail="Form not found.")
+
+    normalized_cadence = normalize_cadence(cadence)
+    if normalized_cadence not in {"once", "daily", "weekly", "monthly"}:
+        raise HTTPException(status_code=400, detail="Cadence must be once, daily, weekly, or monthly.")
 
     group_query = select(Group).where(Group.group_id == group_id)
     group_result = await db.execute(group_query)
     if not group_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Group not found. Make sure the group exists before publishing.")
 
-    existing_deployment = await db.execute(
+    existing_deployment_result = await db.execute(
         select(FormDeployment).where(FormDeployment.form_id == form_id, FormDeployment.group_id == group_id)
     )
-    if existing_deployment.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="This form is already deployed to that group.")
+    existing_deployment = existing_deployment_result.scalar_one_or_none()
+    if existing_deployment:
+        if existing_deployment.cadence != normalized_cadence:
+            existing_deployment.cadence = normalized_cadence
+            form.cadence = normalized_cadence
+
+            # Notify participants in this group that the survey cadence changed
+            participant_rows = await db.execute(
+                select(ParticipantProfile.user_id)
+                .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+                .where(GroupMember.group_id == group_id)
+                .where(GroupMember.left_at.is_(None))
+            )
+            participant_user_ids = [row[0] for row in participant_rows.all()]
+            if participant_user_ids:
+                await create_notifications_bulk(
+                    db=db,
+                    user_ids=participant_user_ids,
+                    notification_type="submission",
+                    title="Survey schedule updated",
+                    message=f"'{form.title}' is now available on a {normalized_cadence} basis.",
+                    link="/participant/survey",
+                    role_target="participant",
+                    source_type="survey_cadence_changed",
+                    source_id=form_id,
+                    deployment_id=existing_deployment.deployment_id,
+                )
+
+            # Notify caretakers of this group
+            caretaker_rows = await db.execute(
+                select(CaretakerProfile.user_id)
+                .join(Group, Group.caretaker_id == CaretakerProfile.caretaker_id)
+                .where(Group.group_id == group_id)
+            )
+            caretaker_user_ids = [row[0] for row in caretaker_rows.all()]
+            if caretaker_user_ids:
+                await create_notifications_bulk(
+                    db=db,
+                    user_ids=caretaker_user_ids,
+                    notification_type="summary",
+                    title="Survey cadence changed",
+                    message=f"'{form.title}' recurrence changed to {normalized_cadence} for your group.",
+                    link="/caretaker/reports",
+                    role_target="caretaker",
+                    source_type="survey_cadence_changed",
+                    source_id=form_id,
+                    deployment_id=existing_deployment.deployment_id,
+                )
+
+            await db.commit()
+        return {"msg": "cadence updated", "cadence": normalized_cadence}
+
+    active_deployments_result = await db.execute(
+        select(FormDeployment).where(FormDeployment.form_id == form_id)
+    )
+    active_deployments = active_deployments_result.scalars().all()
 
     # Publishing a new version supersedes all older versions in the family globally:
     # remove their deployments from every group and archive them.
@@ -578,10 +715,13 @@ async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: 
     deployment = FormDeployment(
         form_id=form_id,
         group_id=group_id,
-        deployed_by=user_id
+        deployed_by=user_id,
+        cadence=normalized_cadence,
     )
     db.add(deployment)
     await db.flush()
+    if deployment.cadence_anchor_at is None:
+        deployment.cadence_anchor_at = deployment.deployed_at or datetime.now(timezone.utc)
 
     participant_user_rows = await db.execute(
         select(ParticipantProfile.user_id)
@@ -625,9 +765,12 @@ async def publish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db: 
         )
 
     form.status = "PUBLISHED"
+    form.cadence = normalized_cadence
+    if not active_deployments or form.cadence_anchor_at is None:
+        form.cadence_anchor_at = deployment.cadence_anchor_at or deployment.deployed_at or datetime.now(timezone.utc)
     form.modified_at = func.now()
     await db.commit()
-    return {"msg": "form has been published and assigned to group"}
+    return {"msg": "form has been published and assigned to group", "cadence": normalized_cadence}
 
 
 async def unpublish_survey_form_all(form_id: UUID, user_id: UUID, db: AsyncSession):
@@ -646,17 +789,9 @@ async def unpublish_survey_form_all(form_id: UUID, user_id: UUID, db: AsyncSessi
     )
     deployments = deployment_result.scalars().all()
 
-    # Collect caretaker user IDs for affected groups before deleting deployments
     affected_group_ids = [d.group_id for d in deployments if d.group_id]
-    caretaker_user_ids = []
-    if affected_group_ids:
-        ct_result = await db.execute(
-            select(CaretakerProfile.user_id)
-            .join(Group, Group.caretaker_id == CaretakerProfile.caretaker_id)
-            .where(Group.group_id.in_(affected_group_ids))
-            .where(CaretakerProfile.user_id.isnot(None))
-        )
-        caretaker_user_ids = list({row[0] for row in ct_result.all()})
+    participant_user_ids = await _get_group_participant_user_ids(db, affected_group_ids)
+    caretaker_user_ids = await _get_group_caretaker_user_ids(db, affected_group_ids)
 
     for deployment in deployments:
         await db.delete(deployment)
@@ -664,7 +799,19 @@ async def unpublish_survey_form_all(form_id: UUID, user_id: UUID, db: AsyncSessi
     form.status = "ARCHIVED"
     form.modified_at = func.now()
 
-    # Notify affected caretakers
+    if participant_user_ids:
+        await create_notifications_bulk(
+            db=db,
+            user_ids=participant_user_ids,
+            notification_type="flag",
+            title="Survey removed",
+            message=f'The survey "{form.title}" has been removed from your group.',
+            link="/participant/survey",
+            role_target="participant",
+            source_type="form_unpublished",
+            source_id=form_id,
+        )
+
     if caretaker_user_ids:
         await create_notifications_bulk(
             db=db,
@@ -697,6 +844,8 @@ async def unpublish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db
     if str(form.created_by) != str(user_id) and str(deployment.deployed_by) != str(user_id):
         raise HTTPException(status_code=403, detail="Only the researcher who deployed this form to this group can unpublish it.")
 
+    participant_user_ids = await _get_group_participant_user_ids(db, [group_id])
+
     # Find the caretaker for this group before deleting the deployment
     ct_result = await db.execute(
         select(CaretakerProfile.user_id, Group.name)
@@ -716,7 +865,20 @@ async def unpublish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db
         form.status = "ARCHIVED"
         form.modified_at = func.now()
 
-    # Notify the affected caretaker
+    if participant_user_ids:
+        group_name = ct_row.name if ct_row and ct_row.name else "your group"
+        await create_notifications_bulk(
+            db=db,
+            user_ids=participant_user_ids,
+            notification_type="flag",
+            title="Survey removed",
+            message=f'The survey "{form.title}" has been removed from {group_name}.',
+            link="/participant/survey",
+            role_target="participant",
+            source_type="form_unpublished",
+            source_id=form_id,
+        )
+
     if ct_row and ct_row.user_id:
         group_name = ct_row.name or "your group"
         await create_notifications_bulk(
@@ -745,12 +907,14 @@ async def archive_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
         raise HTTPException(status_code=404, detail="Form not found.")
     if str(form.created_by) != str(user_id):
         raise HTTPException(status_code=403, detail="Only the researcher who created this form can archive it.")
+    affected_group_ids: list[UUID] = []
     if form.status == "PUBLISHED":
-        # Remove all deployments so participants lose access, then archive
         deployments_result = await db.execute(
             select(FormDeployment).where(FormDeployment.form_id == form_id)
         )
-        for dep in deployments_result.scalars().all():
+        deployments = deployments_result.scalars().all()
+        affected_group_ids = [dep.group_id for dep in deployments if dep.group_id]
+        for dep in deployments:
             await db.delete(dep)
     if form.status == "DELETED":
         raise HTTPException(status_code=400, detail="Deleted forms cannot be archived.")
@@ -759,5 +923,36 @@ async def archive_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
 
     form.status = "ARCHIVED"
     form.modified_at = func.now()
+
+    if affected_group_ids:
+        participant_user_ids = await _get_group_participant_user_ids(db, affected_group_ids)
+        caretaker_user_ids = await _get_group_caretaker_user_ids(db, affected_group_ids)
+
+        if participant_user_ids:
+            await create_notifications_bulk(
+                db=db,
+                user_ids=participant_user_ids,
+                notification_type="flag",
+                title="Survey archived",
+                message=f'The survey "{form.title}" has been archived and removed from your group.',
+                link="/participant/survey",
+                role_target="participant",
+                source_type="form_archived",
+                source_id=form_id,
+            )
+
+        if caretaker_user_ids:
+            await create_notifications_bulk(
+                db=db,
+                user_ids=caretaker_user_ids,
+                notification_type="flag",
+                title="Survey archived",
+                message=f'The survey "{form.title}" has been archived and removed from one of your groups.',
+                link="/caretaker",
+                role_target="caretaker",
+                source_type="form_archived",
+                source_id=form_id,
+            )
+
     await db.commit()
     return {"msg": "Form archived."}

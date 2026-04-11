@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import FieldInput from '../../components/survey/FieldInput';
 import { FieldCard, AddFieldPanel, newField, uid } from '../../components/survey/FieldEditor';
 import { api } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useResearcherMeta } from '../../hooks/useResearcherMeta';
+import { getApiErrorMessage } from '../../utils/apiErrors';
 
 /* Toast animation — injected once, not per render */
 if (typeof document !== 'undefined' && !document.getElementById('hdb-toast-styles')) {
@@ -136,7 +138,7 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
         <h3 className="text-lg font-bold text-slate-900 mb-2">{title}</h3>
         <p className="text-sm text-slate-500 mb-4">{message}</p>
         {children}
-        <div className="flex justify-end gap-2 mt-4">
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium hover:text-slate-700 transition">Cancel</button>
           <button onClick={onConfirm} disabled={disabled}
             className={`px-4 py-2 text-sm text-white rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${confirmClass || 'bg-blue-600 hover:bg-blue-700'}`}>
@@ -182,6 +184,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
   const [publishGroups, setPublishGroups] = useState(new Set());
   const [unpublishGroups, setUnpublishGroups] = useState(new Set());
   const [publishGroupSearch, setPublishGroupSearch] = useState('');
+  const [publishCadence, setPublishCadence] = useState('once');
   const [publishError, setPublishError] = useState('');
   const [expandedHistory, setExpandedHistory] = useState(new Set());
   const [page, setPage] = useState(1);
@@ -193,7 +196,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
   const activeFilterCount = (hasDateFilter ? 1 : 0) + (hasGroupFilter ? 1 : 0) + (hasOwnershipFilter ? 1 : 0);
 
   /* Group forms into version families — each family shows only its latest non-deleted version */
-  const families = (() => {
+  const families = useMemo(() => {
     const familyMap = {};
     forms.forEach((f) => {
       const rootId = String(f.parent_form_id || f.form_id);
@@ -214,7 +217,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
       const latest = active[0];
       return [{ latest, history: [...active.slice(1), ...inactive], rootId: String(latest.parent_form_id || latest.form_id) }];
     });
-  })();
+  }, [forms]);
   const sortLabels = { newest: 'Newest first', oldest: 'Oldest first', alpha: 'A → Z', edited: 'Recently edited' };
 
   const toggleHistory = (rootId) => {
@@ -348,11 +351,13 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
     const groupIds = [...publishGroups];
     modal.ids.forEach((id) => {
       const f = forms.find((x) => x.form_id === id);
-      if (f && (f.status === 'DRAFT' || f.status === 'ARCHIVED')) onPublish(id, groupIds);
+      if (f && (f.status === 'DRAFT' || f.status === 'ARCHIVED')) onPublish(id, groupIds, publishCadence);
     });
     setSelected((prev) => { const n = new Set(prev); modal.ids.forEach((id) => n.delete(id)); return n; });
     setModal(null);
     setPublishGroups(new Set());
+    setPublishGroupSearch('');
+    setPublishCadence('once');
   };
   const handleConfirmUnpublish = () => {
     if (unpublishGroups.size === 0) return;
@@ -394,7 +399,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
   return (
     <div>
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-1.5 text-xs mb-1">
             <span className="text-slate-400">Dashboard</span><span className="text-slate-300">/</span><span className="text-slate-600 font-medium">Surveys</span>
@@ -402,7 +407,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
           <h2 className="text-2xl font-bold text-slate-900">{pageTitle}</h2>
           <p className="text-sm text-slate-500 mt-0.5">{totalCount} form{totalCount !== 1 ? 's' : ''} total</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full flex-col gap-2 shrink-0 sm:w-auto sm:flex-row sm:items-center">
           <button onClick={() => setShowHelp(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition">
             <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">?</span>
             How it works
@@ -447,7 +452,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
 
       {/* Search + Status + Sort + Filters */}
       <div className="flex flex-col gap-3 mb-5">
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex flex-col gap-3 lg:flex-row">
           <div className="relative flex-1">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><SearchIco /></span>
             <input value={search} onChange={(e) => setSearch(e.target.value)}
@@ -456,7 +461,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
           </div>
 
           {/* #6 — Tabs with counts */}
-          <div className="flex gap-0.5 bg-slate-100 p-1 rounded-xl shrink-0 self-start">
+          <div className="flex max-w-full gap-0.5 overflow-x-auto rounded-xl bg-slate-100 p-1 shrink-0 self-start">
             {['ALL', 'DRAFT', 'PUBLISHED', 'ARCHIVED'].map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
                 className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${statusFilter === f ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
@@ -501,29 +506,29 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
 
         {showFilters && (
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-            <div className="flex flex-wrap items-end gap-4">
-              <div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="min-w-0">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Created After</label>
                 <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-                  className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                  className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Created On or Before</label>
                 <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-                  className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                  className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
               </div>
-              <div className="relative" ref={groupDropdownRef}>
+              <div className="relative min-w-0" ref={groupDropdownRef}>
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Group</label>
                 <button
                   onClick={() => setGroupDropdownOpen((o) => !o)}
-                  className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400 transition min-w-[200px] w-full">
+                  className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400 transition">
                   <span className="truncate text-slate-700">
                     {groupFilter === 'ALL' ? 'All Groups' : (groups.find((g) => String(g.group_id) === groupFilter)?.name ?? 'All Groups')}
                   </span>
                   <Svg size={14} d="M6 9l6 6 6-6" className="shrink-0 text-slate-400" />
                 </button>
                 {groupDropdownOpen && (
-                  <div className="absolute z-20 mt-1 w-full min-w-[220px] bg-white border border-slate-200 rounded-xl shadow-lg">
+                  <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg">
                     <div className="p-2 border-b border-slate-100">
                       <input
                         autoFocus
@@ -555,12 +560,12 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                   </div>
                 )}
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Ownership / Publisher</label>
                 <select
                   value={ownershipFilter}
                   onChange={(e) => setOwnershipFilter(e.target.value)}
-                  className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition min-w-[220px]">
+                  className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition">
                   <option value="ALL">All forms</option>
                   <option value="CREATED_BY_ME">Created by you</option>
                   <option value="CREATED_BY_OTHERS">Created by others</option>
@@ -568,10 +573,10 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                   <option value="PUBLISHED_BY_OTHERS">Published by others</option>
                 </select>
               </div>
-              {(hasDateFilter || hasGroupFilter || hasOwnershipFilter) && (
-                <button onClick={clearFilters} className="text-xs text-slate-400 hover:text-rose-500 font-medium transition pb-1">Clear all filters</button>
-              )}
             </div>
+            {(hasDateFilter || hasGroupFilter || hasOwnershipFilter) && (
+              <button onClick={clearFilters} className="mt-4 text-xs text-slate-400 hover:text-rose-500 font-medium transition">Clear all filters</button>
+            )}
           </div>
         )}
       </div>
@@ -583,7 +588,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
       )}
 
       {/* Multi-select toolbar */}
-      <div className={`flex items-center justify-between bg-white border rounded-xl px-4 py-2.5 mb-3 transition-all ${
+      <div className={`flex flex-col gap-3 bg-white border rounded-xl px-4 py-2.5 mb-3 transition-all sm:flex-row sm:items-center sm:justify-between ${
         selected.size > 0 ? 'border-blue-200 bg-blue-50/50' : 'border-slate-200'
       }`}>
         <label className="flex items-center gap-2.5 text-sm text-slate-600 cursor-pointer select-none">
@@ -594,10 +599,13 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
             : <span className="text-slate-400">Select forms</span>}
         </label>
         {selected.size > 0 && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {selectedDrafts.length > 0 && (
               <button
-                onClick={() => setModal({ type: 'publish', ids: selectedDrafts.map((f) => f.form_id) })}
+                onClick={() => {
+                  setPublishCadence('once');
+                  setModal({ type: 'publish', ids: selectedDrafts.map((f) => f.form_id), cadenceLocked: false });
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition text-emerald-700 bg-emerald-100 hover:bg-emerald-200">
                 <CheckIco /> Publish{selectedDrafts.length > 1 ? ` (${selectedDrafts.length})` : ''}
               </button>
@@ -663,15 +671,15 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                 'border-slate-200 hover:border-slate-300 hover:shadow-md'
               }`}>
               {/* Main card row */}
-              <div className="p-4 sm:p-5 flex items-start gap-3 cursor-pointer" onClick={() => onEdit(form)}>
+              <div className="cursor-pointer p-4 sm:p-5 flex flex-col gap-3 sm:flex-row sm:items-start" onClick={() => onEdit(form)}>
                 <input type="checkbox" checked={isSel}
                   onChange={() => toggleSelect(form.form_id)}
                   onClick={(e) => e.stopPropagation()}
                   className="w-4 h-4 mt-1 rounded border-slate-300 text-blue-600 focus:ring-blue-400 shrink-0 cursor-pointer" />
 
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2.5 mb-1">
-                    <h3 className="text-sm font-bold text-slate-900 truncate group-hover:text-blue-600 transition-colors">{toTitleCase(form.title)}</h3>
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <h3 className="min-w-0 text-sm font-bold text-slate-900 transition-colors group-hover:text-blue-600 sm:truncate">{toTitleCase(form.title)}</h3>
                     <StatusBadge status={form.status} />
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 shrink-0">
                       v{form.version || 1}
@@ -684,7 +692,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                   </div>
                   {form.description && <p className="text-xs text-slate-500 line-clamp-1">{form.description}</p>}
                   {form.deployed_groups?.length > 0 && (
-                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                       {(form.deployed_group_ids || []).map((groupId, index) => {
                         const groupIdStr = String(groupId);
                         const groupName = form.deployed_groups?.[index] || 'Group';
@@ -692,11 +700,12 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                         const deployedAt = form.deployed_group_deployed_at?.[groupIdStr];
                         const mine = deployedBy === String(currentUser?.user_id || '');
                         return (
-                          <span key={groupIdStr} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${
+                          <span key={groupIdStr} className={`inline-flex max-w-full items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${
                             mine ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'
                           }`}>
-                            <UsersIco />{groupName}
-                            <span className="opacity-70">
+                            <UsersIco />
+                            <span className="truncate">{groupName}</span>
+                            <span className="hidden opacity-70 sm:inline">
                               {mine ? 'by you' : 'by another researcher'}{deployedAt ? ` · ${new Date(deployedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
                             </span>
                           </span>
@@ -721,7 +730,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                     </div>
                   )}
                   <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5">
-                    <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
                         <InfoIco />
                         Survey history
@@ -758,7 +767,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                 </div>
 
                 {/* Quick actions on hover */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-1 opacity-100 transition-opacity shrink-0 sm:opacity-0 sm:group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
                   {form.status === 'DRAFT' && (
                     <button
                       className="p-1.5 rounded-lg transition text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
@@ -772,7 +781,13 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                           return;
                         }
                         setPublishError('');
-                        setModal({ type: 'publish', ids: [form.form_id], formTitle: form.title });
+                        setPublishCadence(form.cadence || 'once');
+                        setModal({
+                          type: 'publish',
+                          ids: [form.form_id],
+                          formTitle: form.title,
+                          cadenceLocked: false,
+                        });
                       }}>
                       <CheckIco />
                     </button>
@@ -812,7 +827,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                   </button>
                 </div>
 
-                <span className="text-slate-300 group-hover:text-blue-500 transition-colors mt-1 shrink-0">
+                <span className="self-end text-slate-300 transition-colors sm:mt-1 sm:self-auto shrink-0 group-hover:text-blue-500">
                   <Svg size={18} d="M9 5l7 7-7 7" />
                 </span>
               </div>
@@ -868,11 +883,11 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
 
       {/* Pagination */}
       {!listLoading && totalPages > 1 && (
-        <div className="flex items-center justify-between pt-2">
+        <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-xs text-slate-400">
             Showing {totalCount === 0 ? 0 : ((page - 1) * PAGE_SIZE + 1)}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} forms
           </span>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
@@ -958,7 +973,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                 </div>
               )}
             </div>
-            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+            <div className="px-6 py-4 border-t border-slate-100 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button onClick={() => setModal(null)} className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
                 Cancel
               </button>
@@ -978,8 +993,27 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
           message={modal.formTitle ? `Assign "${toTitleCase(modal.formTitle)}" to one or more groups.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select groups to assign.`}
           confirmLabel={publishGroups.size > 1 ? `Publish to ${publishGroups.size} Groups` : 'Publish'}
           confirmClass="bg-emerald-600 hover:bg-emerald-700" onConfirm={handleConfirmPublish}
-          onClose={() => { setModal(null); setPublishGroups(new Set()); setPublishGroupSearch(''); }} disabled={publishGroups.size === 0}>
+          onClose={() => { setModal(null); setPublishGroups(new Set()); setPublishGroupSearch(''); setPublishCadence('once'); }} disabled={publishGroups.size === 0}>
           <div className="mb-1">
+            <div className="mb-3">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Survey cadence</label>
+              <select
+                value={publishCadence}
+                disabled={modal.cadenceLocked}
+                onChange={(e) => setPublishCadence(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 transition disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                <option value="once">One-time</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+              <p className="mt-1.5 text-xs text-slate-400">
+                {modal.cadenceLocked
+                  ? 'This survey already has active deployments. Unpublish it everywhere before changing cadence.'
+                  : 'Participants can complete the survey once per selected cycle.'}
+              </p>
+            </div>
             <input
               autoFocus
               value={publishGroupSearch}
@@ -1179,21 +1213,29 @@ function PreviewView({ title, description, fields }) {
    PUBLISH MODAL — multi-group checkbox select
    Used by BuilderView; fetches groups via api.listGroups()
    ══════════════════════════════════════════════ */
-function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds = [], formId }) {
-  const [groups, setGroups] = useState([]);
+function PublishModal({
+  onClose,
+  onConfirm,
+  title: formTitle,
+  deployedGroupIds = [],
+  formId,
+  groups = [],
+  initialCadence = 'once',
+  cadenceLocked = false,
+}) {
   const [selectedGroups, setSelectedGroups] = useState(new Set());
   const [groupSearch, setGroupSearch] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [cadence, setCadence] = useState(initialCadence || 'once');
   const [preview, setPreview] = useState({}); // { groupId: inProgressCount }
   const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
-    api.listGroups().then((data) => {
-      setGroups(data);
-      setSelectedGroups(new Set(deployedGroupIds.map(String)));
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, []);
+    setSelectedGroups(new Set(deployedGroupIds.map(String)));
+  }, [deployedGroupIds]);
+
+  useEffect(() => {
+    setCadence(initialCadence || 'once');
+  }, [initialCadence]);
 
   // Fetch in-progress counts whenever selection changes (only if form has a parent, i.e. is a version)
   useEffect(() => {
@@ -1231,17 +1273,34 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
         <p className="text-sm text-slate-500 mb-4">
           {formTitle ? `Assign "${formTitle}" to one or more groups.` : 'Select groups to assign this survey to.'}
         </p>
-        {loading ? (
-          <div className="space-y-2 mb-4">
-            {[1, 2, 3].map((i) => <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />)}
-          </div>
-        ) : groups.length === 0 ? (
+        {groups.length === 0 ? (
           <div className="text-center py-6 mb-4">
             <p className="text-sm text-slate-400">No groups available.</p>
             <p className="text-xs text-slate-400 mt-1">Create a participant group first.</p>
           </div>
         ) : (
           <div className="mb-4">
+            <div className="mb-3">
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Survey cadence
+              </label>
+              <select
+                value={cadence}
+                disabled={cadenceLocked}
+                onChange={(e) => setCadence(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                <option value="once">One-time</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+              <p className="mt-1.5 text-xs text-slate-400">
+                {cadenceLocked
+                  ? 'This survey already has an active cadence. Unpublish it everywhere before changing recurrence.'
+                  : 'Participants can submit once per selected cycle, and it becomes available again in the next cycle.'}
+              </p>
+            </div>
             <input
               autoFocus
               value={groupSearch}
@@ -1300,7 +1359,7 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium hover:text-slate-700 transition">Cancel</button>
           <button
-            onClick={() => onConfirm([...selectedGroups], new Set(deployedGroupIds.map(String)))}
+            onClick={() => onConfirm([...selectedGroups], new Set(deployedGroupIds.map(String)), cadence)}
             disabled={(selectedGroups.size === 0 && deployedGroupIds.length === 0) || previewLoading}
             className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">
             {previewLoading ? 'Checking…' : 'Save'}
@@ -1316,7 +1375,7 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
    BUILDER VIEW
    #1 unsaved changes, #2 auto-save, #3 drag reorder, #4 validation
    ══════════════════════════════════════════════ */
-function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onArchive, dataElements, onDataElementCreated }) {
+function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onArchive, dataElements, onDataElementCreated, groups }) {
   const [title, setTitle]       = useState(form?.title || '');
   const [desc, setDesc]         = useState(form?.description || '');
   const [fields, setFields]     = useState(form?.fields || []);
@@ -1488,7 +1547,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <button onClick={handleBackClick} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 font-medium transition">
             <BackIco /> All Forms
@@ -1577,7 +1636,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
         </div>
       )}
       {!isDraft && !isLocked && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-xs text-amber-800 flex items-center justify-between gap-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-xs text-amber-800 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
           <span>This form is {form?.status === 'ARCHIVED' ? 'archived' : 'published'} and cannot be edited directly. Create a new version to make changes — the original and its responses are preserved.</span>
           {onBranch && (
             <button onClick={() => onBranch(form)}
@@ -1601,7 +1660,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
 
           {/* Multi-select toolbar for questions */}
           {fields.length > 0 && (
-            <div className={`flex items-center justify-between bg-white border rounded-xl px-4 py-2.5 mb-3 transition-all ${
+            <div className={`flex flex-col gap-3 bg-white border rounded-xl px-4 py-2.5 mb-3 transition-all sm:flex-row sm:items-center sm:justify-between ${
               selected.size > 0 ? 'border-rose-200 bg-rose-50/50' : 'border-slate-200'
             }`}>
               <label className="flex items-center gap-2.5 text-sm text-slate-600 cursor-pointer select-none">
@@ -1663,7 +1722,18 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
       )}
 
       {showPublish && (
-        <PublishModal title={title} formId={form?.form_id} onClose={() => setShowPublish(false)} deployedGroupIds={form?.deployed_group_ids || []} onConfirm={(groupIds, prevDeployed) => onPublish({ ...form, title, description: desc, fields }, groupIds, prevDeployed)} />
+        <PublishModal
+          title={title}
+          formId={form?.form_id}
+          groups={groups}
+          initialCadence={form?.cadence || 'once'}
+          cadenceLocked={false}
+          onClose={() => setShowPublish(false)}
+          deployedGroupIds={form?.deployed_group_ids || []}
+          onConfirm={(groupIds, prevDeployed, cadence) =>
+            onPublish({ ...form, title, description: desc, fields }, groupIds, prevDeployed, cadence)
+          }
+        />
       )}
 
       {showDelete && (
@@ -1703,7 +1773,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                 </div>
               </div>
             </div>
-            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+            <div className="px-6 py-4 border-t border-slate-100 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button onClick={() => setShowArchiveModal(false)}
                 className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
                 Cancel
@@ -1754,29 +1824,37 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
    ══════════════════════════════════════════════ */
 export default function SurveyBuilderPage() {
   const { user } = useAuth();
-  const [groups, setGroups]           = useState([]);
-  const [loading, setLoading]         = useState(true);
+  const [bootstrapping, setBootstrapping] = useState(true);
   const [view, setView]               = useState('list');
   const [editingForm, setEditingForm] = useState(null);
   const [toast, setToast]             = useState(null);
-  const [dataElements, setDataElements] = useState([]);
+  const [createdElements, setCreatedElements] = useState([]);
   const [branchModal, setBranchModal] = useState(null); // { form }
   const [branching, setBranching]     = useState(false);
   const [refreshKey, setRefreshKey]   = useState(0);
+  const {
+    groups,
+    elements: metaElements,
+    loading: metaLoading,
+  } = useResearcherMeta({
+    includeGroups: true,
+    includeElements: true,
+  });
 
-  useEffect(() => { api.listElements().then(setDataElements).catch(() => {}); }, []);
-
-  const loadGroups = async () => {
-    try {
-      const data = await api.listGroups();
-      setGroups(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const dataElements = useMemo(() => {
+    if (createdElements.length === 0) return metaElements;
+    const merged = [...metaElements];
+    const seen = new Set(metaElements.map((element) => String(element.element_id)));
+    createdElements.forEach((element) => {
+      const key = String(element?.element_id || '');
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      merged.push(element);
+    });
+    return merged;
+  }, [createdElements, metaElements]);
 
   useEffect(() => {
-    loadGroups();
     // Only restore the editor after a browser refresh, not when navigating back to the forms page.
     try {
       const navEntry = window.performance?.getEntriesByType?.('navigation')?.[0];
@@ -1797,7 +1875,7 @@ export default function SurveyBuilderPage() {
         setView('builder');
       }
     } catch { /* ignore */ }
-    setLoading(false);
+    setBootstrapping(false);
   }, []);
 
   /* Infer role context from URL path for display purposes */
@@ -1817,7 +1895,7 @@ export default function SurveyBuilderPage() {
       setEditingForm(transformed);
       setView('builder');
     } catch (err) {
-      showToast('Error loading form');
+      showToast(getApiErrorMessage(err, 'Error loading form'));
     }
   };
 
@@ -1838,7 +1916,7 @@ export default function SurveyBuilderPage() {
       setEditingForm(transformed);
       setView('builder');
     } catch (err) {
-      showToast(err.message || 'Error creating new version');
+      showToast(getApiErrorMessage(err, 'Error creating new version'));
     } finally {
       setBranching(false);
     }
@@ -1867,11 +1945,16 @@ export default function SurveyBuilderPage() {
       showToast('Draft saved!');
       handleBack();
     } catch (err) {
-      showToast(err.message || 'Error saving form');
+      showToast(getApiErrorMessage(err, 'Error saving form'));
     }
   };
 
-  const handlePublishFromBuilder = async (formData, groupIds, prevDeployed = new Set()) => {
+  const handlePublishFromBuilder = async (
+    formData,
+    groupIds,
+    prevDeployed = new Set(),
+    cadence = 'once',
+  ) => {
     try {
       let formId = formData.form_id;
       if (!formId || formId.startsWith('tmp-')) {
@@ -1882,18 +1965,20 @@ export default function SurveyBuilderPage() {
       const finalIds = new Set(Array.isArray(groupIds) ? groupIds : [groupIds]);
       const toPublish   = [...finalIds].filter((gid) => !prevDeployed.has(gid));
       const toUnpublish = [...prevDeployed].filter((gid) => !finalIds.has(gid));
+      const toUpdateCadence = [...finalIds].filter((gid) => prevDeployed.has(gid));
       if (finalIds.size === 0 && prevDeployed.size > 0) {
         await api.unpublishForm(formId);
       } else {
         await Promise.all([
-          ...toPublish.map((gid) => api.publishForm(formId, gid)),
+          ...toPublish.map((gid) => api.publishForm(formId, { groupId: gid, cadence })),
           ...toUnpublish.map((gid) => api.unpublishFormFromGroup(formId, gid)),
+          ...toUpdateCadence.map((gid) => api.publishForm(formId, { groupId: gid, cadence })),
         ]);
       }
       showToast('Group assignments saved!');
       handleBack();
     } catch (err) {
-      showToast(err.message || 'Error saving group assignments');
+      showToast(getApiErrorMessage(err, 'Error saving group assignments'));
     }
   };
 
@@ -1908,18 +1993,18 @@ export default function SurveyBuilderPage() {
       else setRefreshKey((v) => v + 1);
       showToast('Form deleted');
     } catch (err) {
-      showToast(err.message || 'Error deleting form');
+      showToast(getApiErrorMessage(err, 'Error deleting form'));
     }
   };
 
-  const handlePublishFromList = async (formId, groupIds) => {
+  const handlePublishFromList = async (formId, groupIds, cadence = 'once') => {
     try {
       const ids = Array.isArray(groupIds) ? groupIds : [groupIds];
-      await Promise.all(ids.map((gid) => api.publishForm(formId, gid)));
+      await Promise.all(ids.map((gid) => api.publishForm(formId, { groupId: gid, cadence })));
       showToast(ids.length > 1 ? `Published to ${ids.length} groups!` : 'Form published!');
       setRefreshKey((v) => v + 1);
     } catch (err) {
-      showToast(err.message || 'Error publishing form');
+      showToast(getApiErrorMessage(err, 'Error publishing form'));
     }
   };
 
@@ -1933,7 +2018,7 @@ export default function SurveyBuilderPage() {
       showToast('Form unpublished');
       setRefreshKey((v) => v + 1);
     } catch (err) {
-      showToast(err.message || 'Error unpublishing form');
+      showToast(getApiErrorMessage(err, 'Error unpublishing form'));
     }
   };
 
@@ -1948,13 +2033,13 @@ export default function SurveyBuilderPage() {
       }
       setRefreshKey((v) => v + 1);
     } catch (err) {
-      showToast(err.message || 'Error archiving form');
+      showToast(getApiErrorMessage(err, 'Error archiving form'));
     }
   };
 
 
-  if (loading) return (
-    <div className="max-w-4xl mx-auto">
+  if (bootstrapping || metaLoading) return (
+    <div className="max-w-4xl mx-auto px-4 sm:px-0">
       <div className="flex items-center justify-between mb-6"><div className="h-7 w-40 bg-slate-200 rounded-lg animate-pulse" /><div className="h-10 w-28 bg-slate-200 rounded-xl animate-pulse" /></div>
       <div className="space-y-3">
         {[1, 2, 3].map((i) => (
@@ -1969,7 +2054,7 @@ export default function SurveyBuilderPage() {
   );
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-4xl mx-auto px-4 sm:px-0">
       {view === 'list' && (
         <FormListView
           fetchForms={api.listFormsPaged}
@@ -1997,7 +2082,8 @@ export default function SurveyBuilderPage() {
           onBranch={handleBranch}
           onArchive={handleArchive}
           dataElements={dataElements}
-          onDataElementCreated={(el) => setDataElements((prev) => [...prev, el])}
+          onDataElementCreated={(el) => setCreatedElements((prev) => [...prev, el])}
+          groups={groups}
         />
       )}
 
@@ -2036,7 +2122,7 @@ export default function SurveyBuilderPage() {
               </div>
             </div>
 
-            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+            <div className="px-6 py-4 border-t border-slate-100 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button onClick={() => setBranchModal(null)} disabled={branching}
                 className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition disabled:opacity-50">
                 Cancel
@@ -2051,8 +2137,8 @@ export default function SurveyBuilderPage() {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-[toastSlideUp_0.3s_ease-out]">
-          <div className="bg-slate-800 text-white px-5 py-2.5 rounded-xl shadow-lg text-sm font-medium">{toast}</div>
+        <div className="fixed bottom-6 left-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 animate-[toastSlideUp_0.3s_ease-out]">
+          <div className="bg-slate-800 text-white px-5 py-2.5 rounded-xl shadow-lg text-center text-sm font-medium">{toast}</div>
         </div>
       )}
     </div>
