@@ -39,17 +39,15 @@ class DataElementCreate(BaseModel):
         normalized = (value or "number").strip().lower()
         aliases = {
             "numeric": "number",
-            "int": "number",
-            "integer": "number",
-            "float": "number",
-            "double": "number",
-            "decimal": "number",
+            "int": "integer",
+            "double": "float",
+            "decimal": "float",
             "string": "text",
             "bool": "boolean",
         }
         normalized = aliases.get(normalized, normalized)
-        if normalized not in {"number", "text", "boolean", "date"}:
-            raise ValueError("Datatype must be one of: number, text, boolean, date.")
+        if normalized not in {"number", "integer", "float", "text", "boolean", "date"}:
+            raise ValueError("Datatype must be one of: number, integer, float, text, boolean, date.")
         return normalized
 
     @field_validator("unit")
@@ -63,6 +61,56 @@ class DataElementCreate(BaseModel):
     @field_validator("description")
     @classmethod
     def normalize_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @model_validator(mode="after")
+    def validate_unit_for_datatype(self):
+        if self.datatype in {"text", "boolean", "date"} and self.unit:
+            raise ValueError(
+                f"{self.datatype.title()} data elements cannot have a unit. Leave the unit blank."
+            )
+        return self
+
+
+class DataElementUpdate(BaseModel):
+    label: Optional[str] = None
+    datatype: Optional[str] = None
+    unit: Optional[str] = None
+    description: Optional[str] = None
+
+    @field_validator("label", "description")
+    @classmethod
+    def normalize_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("datatype")
+    @classmethod
+    def normalize_datatype(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        aliases = {
+            "numeric": "number",
+            "int": "integer",
+            "double": "float",
+            "decimal": "float",
+            "string": "text",
+            "bool": "boolean",
+        }
+        normalized = aliases.get(normalized, normalized)
+        if normalized not in {"number", "integer", "float", "text", "boolean", "date"}:
+            raise ValueError("Datatype must be one of: number, integer, float, text, boolean, date.")
+        return normalized
+
+    @field_validator("unit")
+    @classmethod
+    def normalize_unit(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         cleaned = value.strip()

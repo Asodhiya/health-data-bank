@@ -41,6 +41,7 @@ from app.schemas.onboarding_schema import (
     IntakeFormUpdateIn,
 )
 from app.services.notification_service import create_notifications_bulk
+from app.services.audit_service import write_audit_log
 
 router = APIRouter()
 
@@ -662,11 +663,27 @@ async def complete_onboarding_route(
             notification_type="summary",
             title="Participant completed onboarding",
             message=f"{display_name} completed onboarding.",
-            link="/admin/system-insights",
+            link="/admin/insights",
             role_target="admin",
             source_type="onboarding_completed",
             source_id=current_user.user_id,
         )
+
+    await write_audit_log(
+        db,
+        action="ONBOARDING_COMPLETED",
+        actor_user_id=current_user.user_id,
+        entity_type="user",
+        entity_id=current_user.user_id,
+        details={
+            "target_user": display_name if admin_ids else (
+                f"{current_user.first_name or ''} {current_user.last_name or ''}".strip() or current_user.email
+            ),
+            "status": "completed",
+        },
+        commit=False,
+    )
+    await db.commit()
     return {"message": "Onboarding completed."}
 
 

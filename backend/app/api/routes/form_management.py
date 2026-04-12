@@ -240,7 +240,11 @@ async def list_groups_for_publish(db: AsyncSession = Depends(get_rls_db)):
 
 
 @router.get("/groups/{group_id}/surveys", dependencies=[Depends(require_permissions(FORM_PUBLISH))])
-async def list_surveys_for_group(group_id: UUID, db: AsyncSession = Depends(get_rls_db)):
+async def list_surveys_for_group(
+    group_id: UUID,
+    db: AsyncSession = Depends(get_rls_db),
+    current_user: User = Depends(check_current_user),
+):
     """List all survey forms deployed to a specific group."""
     from app.db.models import FormSubmission
     result = await db.execute(
@@ -249,6 +253,8 @@ async def list_surveys_for_group(group_id: UUID, db: AsyncSession = Depends(get_
             SurveyForm.title,
             SurveyForm.status,
             SurveyForm.version,
+            SurveyForm.created_by,
+            FormDeployment.deployed_by,
             FormDeployment.deployed_at,
             FormDeployment.revoked_at,
             func.count(FormSubmission.submission_id).label("submission_count"),
@@ -264,6 +270,8 @@ async def list_surveys_for_group(group_id: UUID, db: AsyncSession = Depends(get_
             SurveyForm.title,
             SurveyForm.status,
             SurveyForm.version,
+            SurveyForm.created_by,
+            FormDeployment.deployed_by,
             FormDeployment.deployed_at,
             FormDeployment.revoked_at,
         )
@@ -275,6 +283,15 @@ async def list_surveys_for_group(group_id: UUID, db: AsyncSession = Depends(get_
             "title": row.title,
             "status": "UNPUBLISHED" if row.revoked_at else row.status,
             "version": row.version,
+            "created_by": str(row.created_by) if row.created_by else None,
+            "deployed_by": str(row.deployed_by) if row.deployed_by else None,
+            "can_unpublish": (
+                row.revoked_at is None
+                and (
+                    str(row.created_by or "") == str(current_user.user_id)
+                    or str(row.deployed_by or "") == str(current_user.user_id)
+                )
+            ),
             "deployed_at": row.deployed_at.isoformat() if row.deployed_at else None,
             "revoked_at": row.revoked_at.isoformat() if row.revoked_at else None,
             "submission_count": row.submission_count,

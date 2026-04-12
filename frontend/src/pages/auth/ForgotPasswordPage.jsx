@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { sanitizeEmail } from '../../utils/sanitize';
 import { api } from '../../services/api';
 
 const COOLDOWN_SECONDS = 90;  // 1 minute 30 seconds
@@ -16,9 +15,11 @@ function getForgotPasswordErrorMessage(err) {
 }
 
 export default function ForgotPasswordPage() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
 
   // ── Resend logic ──
   const [resendCount, setResendCount] = useState(0);
@@ -60,40 +61,44 @@ export default function ForgotPasswordPage() {
   };
 
   const handleSubmit = async () => {
-    if (!email.trim()) {
-      setError('Please enter your email address.');
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError('Please enter a valid email address.');
+    if (submitting) return;
+    if (!identifier.trim()) {
+      setError('Please enter your email or username.');
       return;
     }
     setError('');
+    setSubmitting(true);
 
     try {
-      await api.forgotPassword(email.trim());
+      await api.forgotPassword(identifier.trim());
     } catch (err) {
       setError(getForgotPasswordErrorMessage(err));
+      setSubmitting(false);
       return;
     }
 
     setSent(true);
     setResendCount(1);
     startCooldown();
+    setSubmitting(false);
   };
 
   const handleResend = async () => {
-    if (cooldown > 0 || resendCount >= MAX_RESENDS) return;
+    if (cooldown > 0 || resendCount >= MAX_RESENDS || resending) return;
+    setError('');
+    setResending(true);
 
     try {
-      await api.forgotPassword(email.trim());
+      await api.forgotPassword(identifier.trim());
     } catch (err) {
       setError(getForgotPasswordErrorMessage(err));
+      setResending(false);
       return;
     }
 
     setResendCount((prev) => prev + 1);
     startCooldown();
+    setResending(false);
   };
 
   const handleKeyDown = (e) => {
@@ -107,7 +112,7 @@ export default function ForgotPasswordPage() {
   const getResendLabel = () => {
     if (maxedOut) return 'Maximum resend attempts reached';
     if (cooldown > 0) return `Resend available in ${formatTime(cooldown)}`;
-    return 'Resend Link to This Email';
+    return 'Resend Link';
   };
 
   /* ── Success state ── */
@@ -136,23 +141,23 @@ export default function ForgotPasswordPage() {
         </div>
 
         <p className="text-sm text-slate-500 text-center mb-1">
-          A password reset link has been sent to:
+          If the account exists, a password reset link has been sent for:
         </p>
 
-        <p className="text-sm font-bold text-slate-800 text-center mb-3">{email}</p>
+        <p className="text-sm font-bold text-slate-800 text-center mb-3">{identifier}</p>
 
         <p className="text-xs text-slate-400 text-center mb-5">
-          If you don't see it, check your spam folder.
+          If you don't see it, check the linked inbox and spam folder.
         </p>
 
-        {/* Resend to SAME email — timer locked */}
+        {/* Resend to the same account — timer locked */}
         <button
           type="button"
           className="w-full py-3 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors mb-3 disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={cooldown > 0 || maxedOut}
+          disabled={cooldown > 0 || maxedOut || resending}
           onClick={handleResend}
         >
-          {getResendLabel()}
+          {resending ? 'Sending...' : getResendLabel()}
         </button>
 
         {/* Max attempts message — only shows after 5 resends */}
@@ -162,20 +167,20 @@ export default function ForgotPasswordPage() {
           </p>
         )}
 
-        {/* Try a different email */}
+        {/* Try a different account */}
         <button
           type="button"
           className="w-full py-3 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors mb-3"
           onClick={() => {
             clearInterval(timerRef.current);
             setSent(false);
-            setEmail('');
+            setIdentifier('');
             setError('');
             setCooldown(0);
             setResendCount(0);
           }}
         >
-          Try a Different Email
+          Try a Different Email or Username
         </button>
 
         {/* Back to login */}
@@ -212,7 +217,7 @@ export default function ForgotPasswordPage() {
       <h2 className="text-2xl font-bold text-slate-800 text-center mb-2">Forgot Password?</h2>
 
       <p className="text-sm text-slate-500 text-center mb-6">
-        Enter your registered email to receive a password reset link.
+        Enter your email or username and we'll send a password reset link to the email connected to that account.
       </p>
 
       {/* Error */}
@@ -222,10 +227,10 @@ export default function ForgotPasswordPage() {
         </div>
       )}
 
-      {/* Email input */}
+      {/* Identifier input */}
       <div className="mb-5">
         <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">
-          Email Address
+          Email or Username
         </label>
         <div className="relative">
           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
@@ -237,18 +242,19 @@ export default function ForgotPasswordPage() {
               stroke="currentColor"
               strokeWidth={2}
             >
-              <rect x="2" y="4" width="20" height="16" rx="2" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M22 7l-8.97 5.7a1.94 1.94 0 01-2.06 0L2 7" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5.5 20a6.5 6.5 0 0113 0" />
             </svg>
           </span>
           <input
-            type="email"
+            type="text"
             className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
-            placeholder="you@example.com"
-            maxLength={254}
-            value={email}
-            onChange={(e) => setEmail(sanitizeEmail(e.target.value))}
+            placeholder="Enter your email or username"
+            maxLength={150}
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
             onKeyDown={handleKeyDown}
+            autoComplete="username"
           />
         </div>
       </div>
@@ -256,10 +262,11 @@ export default function ForgotPasswordPage() {
       {/* Submit */}
       <button
         type="button"
-        className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors text-sm"
+        className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors text-sm disabled:cursor-not-allowed disabled:opacity-70"
         onClick={handleSubmit}
+        disabled={submitting}
       >
-        Send Reset Link
+        {submitting ? 'Sending...' : 'Send Reset Link'}
       </button>
 
       {/* Back to login link */}

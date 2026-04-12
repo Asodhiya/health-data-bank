@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 /*
   ProfilePage — pure content, shared across all roles.
@@ -902,10 +903,17 @@ function DangerZoneSection({ role, onDeactivate }) {
 export default function ProfilePage({ role = 'participant' }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { logout } = useAuth();
   const [tab, setTab] = useState(location.hash === '#settings' ? 'settings' : 'profile');
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState({ ...EMPTY_PROFILE });
   const [intakeProfileFields, setIntakeProfileFields] = useState([]);
+
+  const handleSelfDeactivate = async () => {
+    await api.selfDeactivateAccount();
+    await logout();
+    navigate('/login', { replace: true });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1125,8 +1133,3 @@ export default function ProfilePage({ role = 'participant' }) {
     </div>
   );
 }
-  const handleSelfDeactivate = async () => {
-    await api.selfDeactivateAccount();
-    await api.logout();
-    navigate('/login');
-  };

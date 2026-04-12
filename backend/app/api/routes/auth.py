@@ -47,13 +47,13 @@ async def _login_identifier_key(request: Request) -> str:
     return identifier or "unknown-identifier"
 
 
-async def _email_key(request: Request) -> str:
+async def _forgot_password_identifier_key(request: Request) -> str:
     try:
         body = await request.json()
     except Exception:
         body = {}
-    email = str(body.get("email", "")).strip().lower()
-    return email or "unknown-email"
+    identifier = str(body.get("identifier", "")).strip().lower()
+    return identifier or "unknown-identifier"
 
 
 login_ip_rate_limit = rate_limit(
@@ -76,12 +76,12 @@ forgot_password_rate_limit = rate_limit(
     window_seconds=300,
     key_kind="ip",
 )
-forgot_password_email_rate_limit = rate_limit(
-    scope="auth:forgot-password:email",
+forgot_password_identifier_rate_limit = rate_limit(
+    scope="auth:forgot-password:identifier",
     limit=5,
     window_seconds=1800,
-    key_func=_email_key,
-    key_kind="email",
+    key_func=_forgot_password_identifier_key,
+    key_kind="identifier",
 )
 reset_password_rate_limit = rate_limit(scope="auth:reset-password", limit=10, window_seconds=300)
 invite_rate_limit = rate_limit(scope="auth:signup_invite", limit=20, window_seconds=3600)
@@ -446,7 +446,7 @@ async def get_current_user(
 
 @router.post(
     "/forgot-password",
-    dependencies=[Depends(forgot_password_rate_limit), Depends(forgot_password_email_rate_limit)],
+    dependencies=[Depends(forgot_password_rate_limit), Depends(forgot_password_identifier_rate_limit)],
 )
 async def forgot_password(
     payload: ForgotPasswordIn,
@@ -465,10 +465,10 @@ async def forgot_password(
         ip_address=ip,
         actor_user_id=None,
         entity_type="user",
-        details={"email_attempted": payload.email},
+        details={"identifier_attempted": payload.identifier},
     )
 
-    return {"message": "If the email exists, a reset link has been sent."}
+    return {"message": "If the account exists, a reset link has been sent."}
 
 
 @router.post("/reset-password", dependencies=[Depends(reset_password_rate_limit)])
@@ -561,7 +561,7 @@ async def signup_invite(
             notification_type="invite",
             title="New invite sent",
             message=f"{Payload.email} was invited as {target_role}.",
-            link="/admin/users",
+            link="/users",
             role_target="admin",
             source_type="invite_sent",
             source_id=None,

@@ -21,6 +21,7 @@ const ACT = {
   PASSWORD_RESET_REQUESTED: { title: "Password Reset Request", type: "warning",  status: "Requested",  cat: "auth",   sev: "warning" },
   PASSWORD_RESET_SUCCESS:   { title: "Password Reset Done",    type: "success",  status: "Reset",      cat: "auth",   sev: "info" },
   INVITE_SENT:              { title: "Invite Sent",            type: "neutral",  status: "Sent",       cat: "auth",   sev: "info" },
+  ONBOARDING_COMPLETED:     { title: "Onboarding Completed",   type: "success",  status: "Completed",  cat: "auth",   sev: "info" },
   // Future event types — UI is ready, backend just needs to start writing these
   SURVEY_SUBMITTED:         { title: "Survey Submitted",       type: "success",  status: "Submitted",  cat: "data",   sev: "info" },
   DATA_EXPORTED:            { title: "Data Exported",          type: "neutral",  status: "Exported",   cat: "data",   sev: "warning" },
@@ -41,7 +42,7 @@ const STY = {
 };
 
 const DETAIL_LABELS = {
-  email_attempted: "Email Attempted", target_email: "Target Email", target_role: "Target Role",
+  email_attempted: "Email Attempted", identifier_attempted: "Identifier Attempted", target_email: "Target Email", target_role: "Target Role",
   target_group: "Target Group", invite_id: "Invite ID", invited_by: "Invited By",
   device: "Device", role: "Role", reason: "Reason",
   form_name: "Form Name", form_id: "Form ID", status: "Status", target_user: "Affected User",
@@ -123,6 +124,7 @@ function buildDesc(log) {
   if (log.action === "DATA_DELETED") return [d.target_user, d.form_name, d.reason && (d.reason.length > 35 ? d.reason.slice(0, 35) + "…" : d.reason)].filter(Boolean).join(" · ");
   const p = [];
   if (log.actor_label && log.actor_label !== "Unknown" && log.actor_label !== "System") p.push(log.actor_label);
+  else if (d.identifier_attempted) p.push(d.identifier_attempted);
   else if (d.email_attempted) p.push(d.email_attempted);
   else if (d.target_user) p.push(d.target_user);
   if (d.device) p.push(d.device);

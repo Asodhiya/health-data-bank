@@ -12,17 +12,21 @@ const normalizeType = (dt = "") => {
   if (d === "boolean" || d === "bool") return "boolean";
   if (d === "text" || d === "string") return "text";
   if (d === "date") return "date";
-  return "number";
+  if (d === "integer" || d === "int") return "integer";
+  if (["number", "float", "double", "decimal", "numeric"].includes(d)) return "float";
+  return "float";
 };
 
-const supportsUnit = (dt = "") => normalizeType(dt) === "number";
+const supportsUnit = (dt = "") => ["integer", "float"].includes(normalizeType(dt));
 
 const typeLabel = (dt) => {
   const t = normalizeType(dt);
+  if (t === "integer") return "Integer";
+  if (t === "float") return "Float";
   return t.charAt(0).toUpperCase() + t.slice(1);
 };
 
-const TYPE_FILTERS = ["All", "Number", "Boolean", "Text", "Date"];
+const TYPE_FILTERS = ["All", "Integer", "Float", "Boolean", "Text", "Date"];
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -41,8 +45,11 @@ const DataElementManager = () => {
 
   // Create modal
   const [showCreate, setShowCreate] = useState(false);
-  const [newEl, setNewEl]           = useState({ code: "", name: "", datatype: "number", unit: "", description: "" });
+  const [newEl, setNewEl]           = useState({ code: "", name: "", datatype: "float", unit: "", description: "" });
   const [creating, setCreating]     = useState(false);
+  const [showEdit, setShowEdit]     = useState(false);
+  const [editEl, setEditEl]         = useState({ id: "", name: "", datatype: "integer", unit: "", description: "" });
+  const [updating, setUpdating]     = useState(false);
 
   // Detail drawer
   const [selectedEl, setSelectedEl] = useState(null);
@@ -168,7 +175,7 @@ const DataElementManager = () => {
         unit: supportsUnit(newEl.datatype) ? newEl.unit.trim() || null : null,
         description: newEl.description.trim() || null,
       });
-      setNewEl({ code: "", name: "", datatype: "number", unit: "", description: "" });
+      setNewEl({ code: "", name: "", datatype: "float", unit: "", description: "" });
       setShowCreate(false);
       setPage(1);
       await loadData();
@@ -213,6 +220,44 @@ const DataElementManager = () => {
       alert(`Restore failed: ${getApiErrorMessage(err, "Unknown error")}`);
     } finally {
       setRestoringId(null);
+    }
+  };
+
+  const openEdit = (el) => {
+    setEditEl({
+      id: el.element_id || el.id,
+      name: el.label || el.name || "",
+      datatype: normalizeType(el.datatype),
+      unit: el.unit || "",
+      description: el.description || "",
+    });
+    setShowEdit(true);
+  };
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    if (!editEl.id) return;
+    setUpdating(true);
+    try {
+      const payload = {
+        label: editEl.name.trim(),
+        datatype: editEl.datatype,
+        unit: supportsUnit(editEl.datatype) ? editEl.unit.trim() || null : null,
+        description: editEl.description.trim() || null,
+      };
+      const updated = await api.updateElement(editEl.id, payload);
+      setElements((prev) => prev.map((item) => (
+        (item.element_id || item.id) === editEl.id ? updated : item
+      )));
+      if (selectedEl && (selectedEl.element_id || selectedEl.id) === editEl.id) {
+        setSelectedEl(updated);
+      }
+      setShowEdit(false);
+      await loadData();
+    } catch (err) {
+      alert(getApiErrorMessage(err, "Failed to update data element."));
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -683,13 +728,15 @@ const DataElementManager = () => {
                         }))
                       }
                     >
-                      <option value="number">Number</option>
+                      <option value="integer">Integer</option>
+                      <option value="float">Float</option>
                       <option value="string">Text</option>
                       <option value="boolean">Boolean</option>
                       <option value="date">Date</option>
                     </select>
                     <p className="text-xs text-slate-400 mt-1.5">
-                      {newEl.datatype === "number" && "Numeric values — use for measurements, counts, or scores."}
+                      {newEl.datatype === "integer" && "Whole numbers only — use for counts like steps, reps, or push-ups."}
+                      {newEl.datatype === "float" && "Decimal values allowed — use for measurements like weight, hours, or intake."}
                       {newEl.datatype === "string" && "Free-text values — use for open-ended responses."}
                       {newEl.datatype === "boolean" && "Yes/No values — use for binary questions."}
                       {newEl.datatype === "date" && "Date values — use for timestamps or date entries."}
@@ -761,6 +808,120 @@ const DataElementManager = () => {
         </div>
       )}
 
+      {showEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowEdit(false)}>
+          <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <form onSubmit={handleUpdate}>
+              <div className="border-b border-slate-100 px-7 py-6 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Edit Data Element</h2>
+                  <p className="text-sm text-slate-500 mt-1">Safely migrate older numeric elements to integer or float.</p>
+                </div>
+                <button type="button" onClick={() => setShowEdit(false)} className="text-slate-300 hover:text-slate-500 transition-colors">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="px-7 py-6 space-y-5">
+                <div>
+                  <label className="text-sm font-medium text-slate-700 flex items-center gap-1.5 mb-1.5">
+                    Label <span className="text-red-400 text-xs font-semibold">required</span>
+                  </label>
+                  <input
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition"
+                    value={editEl.name}
+                    onChange={(e) => setEditEl({ ...editEl, name: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-slate-700 flex items-center gap-1.5 mb-1.5">
+                      Data type <span className="text-red-400 text-xs font-semibold">required</span>
+                    </label>
+                    <select
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition bg-white"
+                      value={editEl.datatype}
+                      onChange={(e) =>
+                        setEditEl((prev) => ({
+                          ...prev,
+                          datatype: e.target.value,
+                          unit: supportsUnit(e.target.value) ? prev.unit : "",
+                        }))
+                      }
+                    >
+                      <option value="integer">Integer</option>
+                      <option value="float">Float</option>
+                      <option value="string">Text</option>
+                      <option value="boolean">Boolean</option>
+                      <option value="date">Date</option>
+                    </select>
+                    <p className="text-xs text-slate-400 mt-1.5">
+                      {editEl.datatype === "integer" && "Whole numbers only — best for counts like reps, steps, and pills."}
+                      {editEl.datatype === "float" && "Decimal values allowed — best for measurements like water, hours, or weight."}
+                      {editEl.datatype === "string" && "Free-text values — use for open-ended responses."}
+                      {editEl.datatype === "boolean" && "Yes/No values — use for binary questions."}
+                      {editEl.datatype === "date" && "Date values — use for timestamps or date entries."}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-slate-700 flex items-center gap-1.5 mb-1.5">
+                      Unit <span className="text-slate-400 text-xs font-normal">(optional)</span>
+                    </label>
+                    <input
+                      disabled={!supportsUnit(editEl.datatype)}
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition"
+                      value={editEl.unit}
+                      onChange={(e) => setEditEl({ ...editEl, unit: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700 flex items-center gap-1.5 mb-1.5">
+                    Description <span className="text-slate-400 text-xs font-normal">(optional)</span>
+                  </label>
+                  <textarea
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none resize-none h-24 focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition"
+                    value={editEl.description}
+                    onChange={(e) => setEditEl({ ...editEl, description: e.target.value })}
+                  />
+                </div>
+
+                <div className="flex gap-2.5 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+                  <svg className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86l-7.4 12.82A1 1 0 003.76 18h16.48a1 1 0 00.87-1.5l-7.4-12.82a1 1 0 00-1.74 0z" />
+                  </svg>
+                  <p className="text-xs text-amber-800 leading-relaxed">
+                    For elements already in use, only numeric-to-numeric migrations are allowed. This keeps existing survey mappings, goals, and health data safe.
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 px-7 py-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowEdit(false)}
+                  className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updating}
+                  className="flex-1 py-2.5 border border-slate-900 bg-white rounded-xl text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50 transition"
+                >
+                  {updating ? "Saving..." : "Save changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ── Element detail drawer ── */}
       {selectedEl && (
         <div className="fixed inset-0 z-50 flex">
@@ -802,12 +963,20 @@ const DataElementManager = () => {
                     {restoringId === (selectedEl.element_id || selectedEl.id) ? "Restoring..." : "Restore"}
                   </button>
                 ) : (
-                  <button
-                    onClick={() => handleDelete(selectedEl)}
-                    className="text-xs text-red-400 hover:text-red-600 font-semibold px-2 py-1 hover:bg-red-50 rounded transition"
-                  >
-                    Delete
-                  </button>
+                  <>
+                    <button
+                      onClick={() => openEdit(selectedEl)}
+                      className="text-xs text-blue-500 hover:text-blue-700 font-semibold px-2 py-1 hover:bg-blue-50 rounded transition"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(selectedEl)}
+                      className="text-xs text-red-400 hover:text-red-600 font-semibold px-2 py-1 hover:bg-red-50 rounded transition"
+                    >
+                      Delete
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={() => setSelectedEl(null)}

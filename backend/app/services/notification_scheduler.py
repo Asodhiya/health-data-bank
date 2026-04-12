@@ -179,7 +179,7 @@ async def _notify_admins_of_scheduled_backup(db, *, success: bool, message: str)
             notification_type=notification_type,
             title=title,
             message=message,
-            link="/admin/backup",
+            link="/backup",
             role_target="admin",
             source_type=source_type,
         )

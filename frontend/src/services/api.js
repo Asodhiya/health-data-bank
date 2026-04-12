@@ -31,8 +31,8 @@ function formatRateLimitMessage(detail, retryAfter) {
     return `Too many login attempts from this network.${waitSuffix}`;
   }
 
-  if (detail.includes("auth:forgot-password:email")) {
-    return `Too many password reset requests for this email.${waitSuffix}`;
+  if (detail.includes("auth:forgot-password:identifier")) {
+    return `Too many password reset requests for this account.${waitSuffix}`;
   }
 
   if (detail.includes("auth:forgot-password:ip")) {
@@ -141,10 +141,10 @@ export const api = {
 
   me: () => request("/auth/me"),
 
-  forgotPassword: (email) =>
+  forgotPassword: (identifier) =>
     request("/auth/forgot-password", {
       method: "POST",
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ identifier }),
     }),
 
   resetPassword: (token, new_password) =>
@@ -628,6 +628,12 @@ export const api = {
   createDataElement: (payload) =>
     request("/data-elements/data_element", {
       method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateElement: (element_id, payload) =>
+    request(`/data-elements/${element_id}`, {
+      method: "PATCH",
       body: JSON.stringify(payload),
     }),
 

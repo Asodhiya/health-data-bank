@@ -129,7 +129,7 @@ def _format_rate_limit_detail(scope: str) -> str:
     messages = {
         "auth:login:identifier": "Too many login attempts for this account. Please try again later.",
         "auth:login:ip": "Too many login attempts from this network. Please try again later.",
-        "auth:forgot-password:email": "Too many password reset requests for this email. Please try again later.",
+        "auth:forgot-password:identifier": "Too many password reset requests for this account. Please try again later.",
         "auth:forgot-password:ip": "Too many password reset requests from this network. Please try again later.",
         "auth:register": "Too many registration attempts. Please try again later.",
         "auth:reset-password": "Too many password reset attempts. Please try again later.",

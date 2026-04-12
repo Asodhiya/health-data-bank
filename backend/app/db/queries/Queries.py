@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 import uuid
 from sqlalchemy.exc import IntegrityError
 from app.schemas.schemas import HealthGoalUpdate, GoalTemplateCreate, GoalTemplateUpdate, GoalProgressLog
-from app.schemas.data_element_schema import DataElementCreate
+from app.schemas.data_element_schema import DataElementCreate, DataElementUpdate
 from app.services.participant_survey_service import _get_deployed_forms
 from datetime import date, datetime, timezone, timedelta, time
 from app.db.models import FormField
@@ -139,9 +139,13 @@ class ParticipantQuery:
             return "text"
         if normalized == "bool":
             return "boolean"
-        if normalized in {"int", "integer", "float", "double", "decimal", "numeric"}:
+        if normalized in {"int", "integer"}:
+            return "integer"
+        if normalized in {"float", "double", "decimal", "numeric"}:
+            return "float"
+        if normalized == "number":
             return "number"
-        if normalized not in {"text", "number", "boolean"}:
+        if normalized not in {"text", "number", "boolean", "integer", "float", "date"}:
             return "number"
         return normalized
 
@@ -184,7 +188,21 @@ class ParticipantQuery:
 
     @staticmethod
     def _is_numeric_datatype(datatype: str | None) -> bool:
-        return ParticipantQuery._normalize_datatype(datatype) != "text"
+        return ParticipantQuery._normalize_datatype(datatype) in {"number", "integer", "float"}
+
+    @staticmethod
+    def _is_integer_datatype(datatype: str | None) -> bool:
+        return ParticipantQuery._normalize_datatype(datatype) == "integer"
+
+    @staticmethod
+    def _validate_integer_target_value(datatype: str | None, value: float | None):
+        if value is None:
+            return
+        if ParticipantQuery._is_integer_datatype(datatype) and not float(value).is_integer():
+            raise HTTPException(
+                status_code=422,
+                detail="This goal only accepts whole numbers.",
+            )
 
     @staticmethod
     def _goal_completed(goal: HealthGoal, current_value) -> bool:
@@ -324,6 +342,8 @@ class ParticipantQuery:
         template = await self.db.get(GoalTemplate, template_id)
         if not template or not template.is_active:
             raise HTTPException(status_code=404, detail="Goal template not found")
+        element = await self.db.get(DataElement, template.element_id) if template.element_id else None
+        self._validate_integer_target_value(getattr(element, "datatype", None), target_value)
         existing_goal_for_element = await self.db.execute(
             select(HealthGoal.goal_id)
             .where(HealthGoal.participant_id == participant_id)
@@ -364,7 +384,11 @@ class ParticipantQuery:
         if not goal:
             raise HTTPException(status_code=404, detail="Goal not found")
 
-        for field, value in update_data.model_dump(exclude_none=True).items():
+        element = await self.db.get(DataElement, goal.element_id) if goal.element_id else None
+        payload = update_data.model_dump(exclude_none=True)
+        self._validate_integer_target_value(getattr(element, "datatype", None), payload.get("target_value"))
+
+        for field, value in payload.items():
             setattr(goal, field, value)
 
         await self.db.flush()
@@ -475,6 +499,11 @@ class ParticipantQuery:
                 raise HTTPException(
                     status_code=422,
                     detail="Numeric/boolean goals require a numeric value.",
+                )
+            if bool_value is None and self._is_integer_datatype(datatype) and not float(delta).is_integer():
+                raise HTTPException(
+                    status_code=422,
+                    detail="This goal only accepts whole numbers.",
                 )
             value_number = delta
             # For absolute goals, each log is the new measured value.
@@ -926,7 +955,14 @@ class DataElementQuery:
                 )
             )
         if type_value and type_value != "all":
-            stmt = stmt.where(func.lower(DataElement.datatype) == type_value)
+            if type_value == "float":
+                stmt = stmt.where(func.lower(DataElement.datatype).in_(["number", "float", "double", "decimal", "numeric"]))
+            elif type_value == "integer":
+                stmt = stmt.where(func.lower(DataElement.datatype).in_(["int", "integer"]))
+            elif type_value == "number":
+                stmt = stmt.where(func.lower(DataElement.datatype).in_(["number", "int", "integer", "float", "double", "decimal", "numeric"]))
+            else:
+                stmt = stmt.where(func.lower(DataElement.datatype) == type_value)
         if mapping_value == "mapped":
             stmt = stmt.where(is_mapped_expr)
         elif mapping_value == "unmapped":
@@ -972,6 +1008,42 @@ class DataElementQuery:
             raise HTTPException(status_code=409, detail="A data element with this code already exists")
         await self.db.refresh(data_element)
         return data_element
+
+    async def update_data_element(self, element_id: uuid.UUID, payload: DataElementUpdate):
+        element = await self.db.get(DataElement, element_id)
+        if not element:
+            raise HTTPException(status_code=404, detail="Data element not found")
+
+        updates = payload.model_dump(exclude_unset=True)
+        next_datatype = updates.get("datatype", element.datatype)
+        current_datatype = (element.datatype or "number").strip().lower()
+        next_datatype_normalized = (next_datatype or "number").strip().lower()
+        numeric_types = {"number", "integer", "float"}
+
+        if next_datatype_normalized != current_datatype:
+            has_references = any([
+                await self.db.scalar(select(GoalTemplate.element_id).where(GoalTemplate.element_id == element_id).limit(1)),
+                await self.db.scalar(select(HealthGoal.element_id).where(HealthGoal.element_id == element_id).limit(1)),
+                await self.db.scalar(select(HealthDataPoint.element_id).where(HealthDataPoint.element_id == element_id).limit(1)),
+                await self.db.scalar(select(FieldElementMap.element_id).where(FieldElementMap.element_id == element_id).limit(1)),
+            ])
+            if has_references and not (
+                current_datatype in numeric_types and next_datatype_normalized in numeric_types
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Used data elements can only switch between numeric types (number, integer, float).",
+                )
+
+        for field, value in updates.items():
+            setattr(element, field, value)
+
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            raise HTTPException(status_code=409, detail="Failed to update data element")
+        await self.db.refresh(element)
+        return element
 
     async def delete_data_element(self, element_id: uuid.UUID):
         result = await self.db.execute(

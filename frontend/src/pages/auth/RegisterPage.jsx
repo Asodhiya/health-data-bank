@@ -53,6 +53,7 @@ export default function RegisterPage() {
   const [showConfirm,  setShowConfirm]  = useState(false);
   const [error,        setError]        = useState('');
   const [fieldError,   setFieldError]   = useState(''); // 'username' | 'email' | ''
+  const [fieldErrorMessage, setFieldErrorMessage] = useState('');
   const [loading,      setLoading]      = useState(false);
 
   // ── Validate token on mount ──
@@ -75,17 +76,23 @@ export default function RegisterPage() {
       });
   }, [token]);
 
-  const set = (field) => (e) => setForm({ ...form, [field]: e.target.value });
+  const set = (field) => (e) =>
+    setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
   const handlePhoneChange = (e) => {
     const digits = digitsOnly(e.target.value).slice(0, 10);
-    setForm({ ...form, phone: digits, phoneDisplay: formatPhone(digits) });
+    setForm((prev) => ({
+      ...prev,
+      phone: digits,
+      phoneDisplay: formatPhone(digits),
+    }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setFieldError('');
+    setFieldErrorMessage('');
 
     const failedRules = PASSWORD_RULES.filter((r) => !r.test(form.password));
     if (failedRules.length > 0) {
@@ -122,8 +129,21 @@ export default function RegisterPage() {
     } catch (err) {
       const msg = err.message || 'Registration failed';
       setError(msg);
-      if (msg.toLowerCase().includes('username')) setFieldError('username');
-      else if (msg.toLowerCase().includes('email')) setFieldError('email');
+      const normalizedMsg = msg.toLowerCase();
+
+      if (normalizedMsg.includes('username')) {
+        setFieldError('username');
+        if (normalizedMsg.includes('already taken')) {
+          setFieldErrorMessage('This username is already taken. Please choose a different one.');
+        } else if (normalizedMsg.includes('alphanumeric characters and underscores')) {
+          setFieldErrorMessage('Username can only contain letters, numbers, and underscores.');
+        } else {
+          setFieldErrorMessage(msg);
+        }
+      } else if (normalizedMsg.includes('email')) {
+        setFieldError('email');
+        setFieldErrorMessage(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -299,13 +319,13 @@ export default function RegisterPage() {
             className={`w-full pl-12 pr-4 py-3 bg-slate-50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-shadow ${fieldError === 'username' ? 'border-2 border-rose-400 focus:ring-rose-300' : 'border border-slate-200 focus:ring-blue-500'}`}
             placeholder="Username"
             value={form.username}
-            onChange={(e) => { setFieldError(''); set('username')(e); }}
+            onChange={(e) => { setFieldError(''); setFieldErrorMessage(''); set('username')(e); }}
             required
             autoComplete="username"
           />
         </div>
         {fieldError === 'username' && (
-          <p className="text-xs text-rose-500 mt-1 ml-1">This username is already taken. Please choose a different one.</p>
+          <p className="text-xs text-rose-500 mt-1 ml-1">{fieldErrorMessage || 'Please check your username and try again.'}</p>
         )}
 
         {/* Password */}

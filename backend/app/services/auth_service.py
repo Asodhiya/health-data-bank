@@ -266,11 +266,16 @@ async def get_user_by_id(user_id: str, db: AsyncSession):
 
 
 async def reset_forgot_password( payload: ForgotPasswordIn, background: BackgroundTasks,db: AsyncSession ):
-    result = await db.execute(select(User).where(User.email == payload.email))
+    identifier = payload.identifier.strip()
+    result = await db.execute(
+        select(User).where(
+            (User.email == identifier) | (User.username == identifier)
+        )
+    )
     user = result.scalar_one_or_none()
 
     if not user:
-        return {"message": "If the email exists, a reset link has been sent."}
+        return {"message": "If the account exists, a reset link has been sent."}
 
     raw_token = generate_reset_token()
     user.reset_token_hash = hash_reset_token(raw_token)
@@ -282,7 +287,7 @@ async def reset_forgot_password( payload: ForgotPasswordIn, background: Backgrou
     send_reset_email(user.email, reset_link)
     # background.add_task(send_reset_email, user.email, reset_link)
 
-    return {"message": "If the email exists, a reset link has been sent."}
+    return {"message": "If the account exists, a reset link has been sent."}
 
 async def reset_password(payload, db: AsyncSession):
     """Validates reset token and updates the user's password."""

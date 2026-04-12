@@ -35,8 +35,9 @@ const normalizeDatatype = (raw) => {
   const n = String(raw || "number").trim().toLowerCase();
   if (n === "string") return "text";
   if (n === "bool") return "boolean";
-  if (["int","integer","float","double","decimal","numeric"].includes(n)) return "number";
-  if (!["text","number","boolean"].includes(n)) return "number";
+  if (["int", "integer"].includes(n)) return "integer";
+  if (["float", "double", "decimal", "numeric"].includes(n)) return "float";
+  if (!["text", "number", "boolean", "integer", "float"].includes(n)) return "number";
   return n;
 };
 
@@ -67,6 +68,26 @@ function isSameDay(d1, d2) {
 
 function usesBooleanLogging(datatype) {
   return normalizeDatatype(datatype) === "boolean";
+}
+
+function usesIntegerLogging(datatype) {
+  return normalizeDatatype(datatype) === "integer";
+}
+
+function isNumericDatatype(datatype) {
+  return ["number", "integer", "float"].includes(normalizeDatatype(datatype));
+}
+
+function getGoalUsagePercent(current, target, direction) {
+  const numericCurrent = Number.isFinite(Number(current)) ? Number(current) : 0;
+  const numericTarget = Number.isFinite(Number(target)) ? Number(target) : 0;
+  if (numericTarget <= 0) return 0;
+
+  if (direction === "at_most") {
+    return Math.min(100, Math.max(0, Math.round((numericCurrent / numericTarget) * 100)));
+  }
+
+  return Math.min(100, Math.max(0, Math.round((numericCurrent / numericTarget) * 100)));
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────
@@ -616,7 +637,7 @@ export default function HealthGoals() {
                     <p className="text-xs text-blue-600 font-semibold">
                       Default target: {target}{unit ? ` ${unit}` : ""}
                     </p>
-                    {datatype === "number" && (
+                    {isNumericDatatype(datatype) && (
                       <div>
                         <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
                           Your Target
@@ -624,7 +645,7 @@ export default function HealthGoals() {
                         <input
                           type="number"
                           min="0.01"
-                          step="any"
+                          step={usesIntegerLogging(datatype) ? "1" : "any"}
                           value={customTarget}
                           onChange={(e) =>
                             setCustomTargets((p) => ({ ...p, [tId]: e.target.value }))
@@ -635,6 +656,11 @@ export default function HealthGoals() {
                         <p className="mt-1 text-[10px] text-slate-400">
                           Leave blank to use the default target.
                         </p>
+                        {usesIntegerLogging(datatype) && (
+                          <p className="mt-1 text-[10px] text-slate-400">
+                            Whole numbers only.
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -694,11 +720,7 @@ function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actio
   const windowType   = ctx.window       || goal.window       || "daily";
   const isConfirming = confirmDeleteId === goal.goal_id;
 
-  const pct = Math.min(100, Math.max(0, target > 0
-    ? direction === "at_most"
-      ? current <= target ? 100 : Math.round((target / current) * 100)
-      : Math.round((current / target) * 100)
-    : 0));
+  const pct = getGoalUsagePercent(current, target, direction);
 
   // Last 7 days bar chart
   const days = getLastNDays(7);
@@ -821,7 +843,9 @@ function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actio
               </p>
               {unit && <p className="text-sm font-semibold text-slate-400 mb-1">{unit}</p>}
             </div>
-            <p className="text-xs text-slate-400 mt-1">of {Number(target).toLocaleString()} {unit} target</p>
+            <p className="text-xs text-slate-400 mt-1">
+              {direction === "at_most" ? "out of" : "of"} {Number(target).toLocaleString()} {unit} {direction === "at_most" ? "max" : "target"}
+            </p>
           </div>
           <div className="shrink-0 relative w-16 h-16">
             <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
@@ -837,7 +861,7 @@ function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actio
         {/* Progress bar */}
         <div>
           <div className="flex justify-between text-xs text-slate-400 mb-1.5">
-            <span>{pct}% complete</span>
+            <span>{direction === "at_most" ? `${pct}% of limit used` : `${pct}% complete`}</span>
             <span>target: {Number(target).toLocaleString()} {unit}</span>
           </div>
           <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
@@ -861,7 +885,7 @@ function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actio
           <div className="flex items-end gap-1.5" style={{ height: "88px" }}>
             {barData.map(({ day, total, isToday }, idx) => {
               const barPct  = barMax > 0 ? (total / barMax) * 100 : 0;
-              const metTarget = total >= target;
+              const metTarget = direction === "at_most" ? total <= target : total >= target;
               const isHovered  = hoveredBar === idx;
               const isSelected = selectedDay === idx;
               const animPct    = mounted ? Math.max(barPct, total > 0 ? 6 : 0) : 0;
@@ -949,7 +973,8 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
   const done     = goal.is_completed;
   const isLogging = actionLoading === `log_${goalId}`;
   const isBooleanGoal = usesBooleanLogging(datatype);
-  const isNumericGoal = datatype === "number";
+  const isNumericGoal = isNumericDatatype(datatype);
+  const isIntegerGoal = usesIntegerLogging(datatype);
 
   const inputVal = logInputs[goalId] || "";
   const setVal = (v) => {
@@ -1011,6 +1036,7 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
                   type="number"
                   autoFocus
                   min="0"
+                  step={isIntegerGoal ? "1" : "any"}
                   placeholder={progressMode === "absolute" ? `Current value${unit ? ` (${unit})` : ""}` : `Add amount${unit ? ` (${unit})` : ""}`}
                   value={inputVal}
                   onChange={(e) => setVal(e.target.value)}
@@ -1018,6 +1044,11 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
                   className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
                 />
               </div>
+            )}
+            {isIntegerGoal && (
+              <p className="text-xs text-slate-400">
+                Whole numbers only for this goal.
+              </p>
             )}
             {isBooleanGoal && (
               <p className="text-sm text-slate-500 text-center py-2">

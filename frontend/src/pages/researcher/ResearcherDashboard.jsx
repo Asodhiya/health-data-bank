@@ -253,6 +253,7 @@ export default function ResearcherDashboard() {
   const [showElementMenu, setShowElementMenu] = useState(false);
   const [shouldLoadSurveys, setShouldLoadSurveys] = useState(true);
   const [shouldLoadGroups, setShouldLoadGroups] = useState(false);
+  const [surveySearch, setSurveySearch] = useState("");
   const [elementSearch, setElementSearch] = useState("");
   const [elementDraft, setElementDraft] = useState(createElementFilterDraft);
   const [editingElementId, setEditingElementId] = useState(null);
@@ -288,7 +289,9 @@ export default function ResearcherDashboard() {
       const element = (availableElements || []).find(
         (candidate) => String(candidate.element_id) === String(elementId),
       );
-      return !element || String(element.datatype || "number").toLowerCase() === "number";
+      return !element || ["number", "int", "integer", "float", "double", "decimal", "numeric"].includes(
+        String(element.datatype || "number").toLowerCase(),
+      );
     },
     [availableElements],
   );
@@ -304,11 +307,6 @@ export default function ResearcherDashboard() {
     }
     return markers;
   }, [queryData.data]);
-
-  const surveyOptions = useMemo(
-    () => normalizeAvailableSurveys(availableSurveys),
-    [availableSurveys],
-  );
 
   const getSurveyOwnershipLabel = useCallback(
     (survey) =>
@@ -336,6 +334,24 @@ export default function ResearcherDashboard() {
     }
     return "border-slate-200 bg-slate-50 text-slate-600";
   }, []);
+
+  const surveyOptions = useMemo(
+    () => normalizeAvailableSurveys(availableSurveys),
+    [availableSurveys],
+  );
+
+  const filteredSurveyOptions = useMemo(() => {
+    const term = surveySearch.trim().toLowerCase();
+    if (!term) return surveyOptions;
+
+    return surveyOptions.filter((survey) => {
+      const searchableText = [survey.title || "", survey.version ? `v${survey.version}` : ""]
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(term);
+    });
+  }, [surveyOptions, surveySearch]);
 
   const getSurveyOwnershipClasses = useCallback(
     (survey) =>
@@ -1712,6 +1728,7 @@ export default function ResearcherDashboard() {
               type="button"
               onClick={() => {
                 setShouldLoadSurveys(true);
+                if (!showSurveyMenu) setSurveySearch("");
                 setShowSurveyMenu((prev) => !prev);
               }}
               className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white p-2.5 text-left text-sm text-slate-700 shadow-sm transition hover:border-slate-300 focus:border-blue-500 focus:outline-none"
@@ -1725,10 +1742,18 @@ export default function ResearcherDashboard() {
             </button>
             {showSurveyMenu && (
               <div className="absolute left-0 right-0 top-full z-20 mt-2 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                <input
+                  type="text"
+                  value={surveySearch}
+                  onChange={(event) => setSurveySearch(event.target.value)}
+                  placeholder="Search surveys"
+                  className="mb-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500"
+                />
                 <button
                   type="button"
                   onClick={() => {
                     setDraftFilters((prev) => ({ ...prev, survey_id: "" }));
+                    setSurveySearch("");
                     setShowSurveyMenu(false);
                   }}
                   className={`mb-2 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
@@ -1740,7 +1765,10 @@ export default function ResearcherDashboard() {
                 {shouldLoadSurveys && surveyOptions.length === 0 ? (
                   <p className="px-3 py-2 text-sm text-slate-500">Loading surveys...</p>
                 ) : null}
-                {surveyOptions.map((survey) => {
+                {filteredSurveyOptions.length === 0 && shouldLoadSurveys && surveyOptions.length > 0 ? (
+                  <p className="px-3 py-2 text-sm text-slate-500">No surveys match your search.</p>
+                ) : null}
+                {filteredSurveyOptions.map((survey) => {
                   const surveyId = survey.form_id || survey.id;
                   const isSelected = String(draftFilters.survey_id || "") === String(surveyId);
                   return (
@@ -1749,6 +1777,7 @@ export default function ResearcherDashboard() {
                       type="button"
                       onClick={() => {
                         setDraftFilters((prev) => ({ ...prev, survey_id: surveyId }));
+                        setSurveySearch("");
                         setShowSurveyMenu(false);
                       }}
                       className={`mb-1 flex w-full flex-col rounded-lg border px-3 py-2 text-left transition last:mb-0 ${

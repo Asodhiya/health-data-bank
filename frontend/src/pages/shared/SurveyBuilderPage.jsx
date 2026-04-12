@@ -54,9 +54,6 @@ function StatusBadge({ status }) {
 }
 
 
-const toTitleCase = (str = '') =>
-  str.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-
 /* ── HELPERS: Data Transformation ── */
 const transformForSave = (form) => {
   return {
@@ -679,7 +676,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
 
                 <div className="flex-1 min-w-0">
                   <div className="mb-1 flex flex-wrap items-center gap-2">
-                    <h3 className="min-w-0 text-sm font-bold text-slate-900 transition-colors group-hover:text-blue-600 sm:truncate">{toTitleCase(form.title)}</h3>
+                    <h3 className="min-w-0 text-sm font-bold text-slate-900 transition-colors group-hover:text-blue-600 sm:truncate">{form.title}</h3>
                     <StatusBadge status={form.status} />
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 shrink-0">
                       v{form.version || 1}
@@ -849,7 +846,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
                           <div className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer" onClick={() => onEdit(v, { locked: true })}>
                             <span className="font-bold text-violet-700 bg-violet-50 border border-violet-100 px-1.5 py-0.5 rounded text-[10px] shrink-0">v{v.version || 1}</span>
                             <StatusBadge status={v.status} />
-                            <span className="flex-1 truncate font-medium">{toTitleCase(v.title)}</span>
+                            <span className="flex-1 truncate font-medium">{v.title}</span>
                             <span className="text-slate-400 shrink-0">{new Date(v.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                             {v.submission_count > 0 && <span className="text-slate-400 shrink-0">{v.submission_count} responses</span>}
                           </div>
@@ -927,7 +924,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
               </h3>
               <p className="text-sm text-slate-500 mb-4">
                 {modal.formTitle
-                  ? `You are about to delete "${toTitleCase(modal.formTitle)}". This cannot be undone.`
+                  ? `You are about to delete "${modal.formTitle}". This cannot be undone.`
                   : `You are about to delete ${modal.ids.length} form${modal.ids.length > 1 ? 's' : ''}. This cannot be undone.`}
               </p>
               {modal.isPublished && (
@@ -989,8 +986,8 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
 
       {/* ── PUBLISH MODAL (multi-group) ── */}
       {modal?.type === 'publish' && (
-        <ConfirmModal title={modal.formTitle ? `Publish "${toTitleCase(modal.formTitle)}"` : 'Publish Forms'}
-          message={modal.formTitle ? `Assign "${toTitleCase(modal.formTitle)}" to one or more groups.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select groups to assign.`}
+        <ConfirmModal title={modal.formTitle ? `Publish "${modal.formTitle}"` : 'Publish Forms'}
+          message={modal.formTitle ? `Assign "${modal.formTitle}" to one or more groups.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select groups to assign.`}
           confirmLabel={publishGroups.size > 1 ? `Publish to ${publishGroups.size} Groups` : 'Publish'}
           confirmClass="bg-emerald-600 hover:bg-emerald-700" onConfirm={handleConfirmPublish}
           onClose={() => { setModal(null); setPublishGroups(new Set()); setPublishGroupSearch(''); setPublishCadence('once'); }} disabled={publishGroups.size === 0}>
@@ -1060,8 +1057,8 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
 
       {/* ── UNPUBLISH MODAL ── */}
       {modal?.type === 'unpublish' && (
-        <ConfirmModal title={modal.formTitle ? `Unpublish "${toTitleCase(modal.formTitle)}"` : 'Unpublish Form'}
-          message={modal.formTitle ? `Choose which deployed groups to remove from "${toTitleCase(modal.formTitle)}".` : 'Choose deployed groups to unpublish from.'}
+        <ConfirmModal title={modal.formTitle ? `Unpublish "${modal.formTitle}"` : 'Unpublish Form'}
+          message={modal.formTitle ? `Choose which deployed groups to remove from "${modal.formTitle}".` : 'Choose deployed groups to unpublish from.'}
           confirmLabel={unpublishGroups.size > 1 ? `Unpublish ${unpublishGroups.size} Groups` : 'Unpublish'}
           confirmClass="bg-amber-600 hover:bg-amber-700" onConfirm={handleConfirmUnpublish}
           onClose={() => { setModal(null); setUnpublishGroups(new Set()); }} disabled={unpublishGroups.size === 0}>
@@ -1106,7 +1103,7 @@ function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDe
 
       {/* ── ARCHIVE MODAL ── */}
       {modal?.type === 'archive' && (
-        <ConfirmModal title={`Archive "${toTitleCase(modal.formTitle)}"`}
+        <ConfirmModal title={`Archive "${modal.formTitle}"`}
           message={null}
           confirmLabel="Archive" confirmClass="bg-slate-600 hover:bg-slate-700"
           onConfirm={() => { onArchive(modal.ids[0]); setModal(null); }}
@@ -1382,7 +1379,6 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   const [expanded, setExpanded] = useState(null);
   const [showAdd, setShowAdd]   = useState(false);
   const [mode, setMode]         = useState('edit');
-  const [showPublish, setShowPublish] = useState(false);
   const [showDelete, setShowDelete]   = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [validationErrors, setValidationErrors] = useState([]);
@@ -1395,6 +1391,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
 
   const isLocked = !!form?._locked;
   const isDraft = !isLocked && (!form?.status || form.status === 'DRAFT');
+  const canEditFields = isDraft;
   const autoSaveTimer = useRef(null);
   const isDirtyRef = useRef(false);
 
@@ -1420,7 +1417,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
     }, 5000);
   }, [title, desc, fields, form]);
 
-  const handleTitleChange = (v) => { setTitle(v.toLowerCase()); triggerAutoSave(); };
+  const handleTitleChange = (v) => { setTitle(v); triggerAutoSave(); };
   const handleDescChange = (v) => { setDesc(v); triggerAutoSave(); };
 
   /* #1 — Unsaved changes warning */
@@ -1467,6 +1464,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   const MAX_FIELDS = 30;
 
   const addField = (type) => {
+    if (!canEditFields) return;
     if (fields.length >= MAX_FIELDS) return;
     const f = newField(type);
     f.display_order = fields.length;
@@ -1476,17 +1474,20 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   };
 
   const updateField = (id, data) => {
+    if (!canEditFields) return;
     setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...data } : f)));
     triggerAutoSave();
   };
 
   const removeField = (id) => {
+    if (!canEditFields) return;
     setFields((prev) => prev.filter((f) => f.id !== id));
     if (expanded === id) setExpanded(null);
     triggerAutoSave();
   };
 
   const duplicateField = (id) => {
+    if (!canEditFields) return;
     const src = fields.find((f) => f.id === id);
     if (!src) return;
     const dup = { ...src, id: uid(), label: src.label + ' (copy)', options: src.options.map((o) => ({ ...o, id: uid() })) };
@@ -1499,6 +1500,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   };
 
   const moveField = (index, dir) => {
+    if (!canEditFields) return;
     const target = index + dir;
     if (target < 0 || target >= fields.length) return;
     const next = [...fields];
@@ -1511,6 +1513,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   const dragIdx = useRef(null);
   const onDragStart = (i) => { dragIdx.current = i; };
   const onDrop = (i) => {
+    if (!canEditFields) return;
     if (dragIdx.current === null || dragIdx.current === i) return;
     const n = [...fields];
     const [item] = n.splice(dragIdx.current, 1);
@@ -1521,13 +1524,16 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   };
 
   const toggleSelect = (id) => {
+    if (!canEditFields) return;
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
   const selectAll = () => {
+    if (!canEditFields) return;
     if (selected.size === fields.length) setSelected(new Set());
     else setSelected(new Set(fields.map((f) => f.id)));
   };
   const deleteSelected = () => {
+    if (!canEditFields) return;
     setFields((prev) => prev.filter((f) => !selected.has(f.id)).map((f, i) => ({ ...f, display_order: i })));
     setSelected(new Set());
     setExpanded(null);
@@ -1538,11 +1544,6 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
     if (!validate()) return;
     onSave({ ...form, title, description: desc, fields });
     isDirtyRef.current = false;
-  };
-
-  const handlePublishClick = () => {
-    if (!validate({ requireElementLinks: true })) return;
-    setShowPublish(true);
   };
 
   return (
@@ -1611,9 +1612,6 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                   Delete
                 </button>
               )}
-              <button onClick={handlePublishClick} className={`px-4 py-2 text-sm font-semibold text-white rounded-xl transition shadow-sm ${isDraft ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                {isDraft ? 'Publish' : 'Manage Groups'}
-              </button>
             </>
           )}
         </div>
@@ -1646,6 +1644,9 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
           )}
         </div>
       )}
+      <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
+        Survey publishing now happens from <span className="font-semibold">Groups / Cohorts</span>, where you pick the cohort first and then assign one of your surveys with its cadence.
+      </div>
 
       {mode === 'edit' ? (
         <div className="flex-1 overflow-y-auto pr-1">
@@ -1659,7 +1660,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
           </div>
 
           {/* Multi-select toolbar for questions */}
-          {fields.length > 0 && (
+          {canEditFields && fields.length > 0 && (
             <div className={`flex flex-col gap-3 bg-white border rounded-xl px-4 py-2.5 mb-3 transition-all sm:flex-row sm:items-center sm:justify-between ${
               selected.size > 0 ? 'border-rose-200 bg-rose-50/50' : 'border-slate-200'
             }`}>
@@ -1692,7 +1693,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                 isExpanded={expanded === f.id}
                 isSelected={selected.has(f.id)}
                 hasError={validationErrorIds.has(f.id)}
-                readOnly={!isDraft || isLocked}
+                readOnly={!canEditFields}
                 onToggle={() => setExpanded(expanded === f.id ? null : f.id)}
                 onSelect={() => toggleSelect(f.id)}
                 onUpdate={(data) => updateField(f.id, data)}
@@ -1706,7 +1707,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                 onDataElementCreated={onDataElementCreated} />
             ))}
           </div>
-          {!isLocked && (fields.length < MAX_FIELDS ? (
+          {canEditFields && (fields.length < MAX_FIELDS ? (
             <button onClick={() => setShowAdd(true)} className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm font-semibold text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-all flex items-center justify-center gap-2">
               <PlusIco /> Add Question <span className="text-xs font-normal opacity-60">{fields.length} / {MAX_FIELDS}</span>
             </button>
@@ -1719,21 +1720,6 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto"><PreviewView title={title} description={desc} fields={fields} /></div>
-      )}
-
-      {showPublish && (
-        <PublishModal
-          title={title}
-          formId={form?.form_id}
-          groups={groups}
-          initialCadence={form?.cadence || 'once'}
-          cadenceLocked={false}
-          onClose={() => setShowPublish(false)}
-          deployedGroupIds={form?.deployed_group_ids || []}
-          onConfirm={(groupIds, prevDeployed, cadence) =>
-            onPublish({ ...form, title, description: desc, fields }, groupIds, prevDeployed, cadence)
-          }
-        />
       )}
 
       {showDelete && (

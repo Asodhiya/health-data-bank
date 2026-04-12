@@ -26,7 +26,7 @@ from app.db.session import get_db
 from app.core.dependency import require_permissions
 from app.core.permissions import ELEMENT_VIEW, ELEMENT_CREATE, ELEMENT_DELETE, ELEMENT_MAP
 from app.db.queries.Queries import DataElementQuery
-from app.schemas.data_element_schema import DataElementCreate, FieldMapPayload, DataElementListPage
+from app.schemas.data_element_schema import DataElementCreate, DataElementUpdate, FieldMapPayload, DataElementListPage
 
 router = APIRouter()
 
@@ -99,6 +99,13 @@ async def create_data_element(payload: DataElementCreate, db: AsyncSession = Dep
     """
     data_element_queries = DataElementQuery(db)
     return await data_element_queries.add_data_element(payload)
+
+
+@router.patch("/{element_id}", dependencies=[Depends(require_permissions(ELEMENT_CREATE))])
+async def update_data_element(element_id: UUID, payload: DataElementUpdate, db: AsyncSession = Depends(get_db)):
+    """Update an existing data element."""
+    data_element_queries = DataElementQuery(db)
+    return await data_element_queries.update_data_element(element_id, payload)
 
 
 @router.get("/all-mappings", dependencies=[Depends(require_permissions(ELEMENT_VIEW))])

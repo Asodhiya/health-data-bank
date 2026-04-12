@@ -113,7 +113,15 @@ class UpdatePersonalInfoPayload(BaseModel):
     new_password:Optional[str] = None
 
 class ForgotPasswordIn(BaseModel):
-    email: EmailStr
+    identifier: str
+
+    @field_validator("identifier")
+    @classmethod
+    def validate_identifier(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Username or email is required.")
+        return cleaned
 
 class ResetPasswordIn(BaseModel):
     token: str

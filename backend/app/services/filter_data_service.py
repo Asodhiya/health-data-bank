@@ -472,6 +472,11 @@ def _is_categorical_element_datatype(datatype: Optional[str]) -> bool:
     return normalized in {"text", "string", "boolean", "bool", "choice", "select", "option", "categorical"}
 
 
+def _is_numeric_element_datatype(datatype: Optional[str]) -> bool:
+    normalized = str(datatype or "number").strip().lower()
+    return normalized in {"number", "int", "integer", "float", "double", "decimal", "numeric"}
+
+
 def _resolve_group_value(group_by: dict, row) -> str:
     if group_by and group_by.get("type") == "demographic" and group_by.get("field") == "age_bucket":
         return _format_age_bucket(getattr(row, "group_dob", None))
@@ -680,7 +685,7 @@ async def resolve_participant_ids(
                 detail=f"Element '{element_filter.element_id}' was not found.",
             )
 
-        if element_filter.operator not in {"has_value", "is_empty"} and (element.datatype or "").lower() != "number":
+        if element_filter.operator not in {"has_value", "is_empty"} and not _is_numeric_element_datatype(element.datatype):
             raise HTTPException(
                 status_code=400,
                 detail=f"Element '{element.label}' is not numeric and cannot be used in element_filters.",
@@ -715,49 +720,20 @@ async def resolve_participant_ids(
 
 async def get_available_surveys(db: AsyncSession, current_user_id: UUID):
     """Fetch surveys available to researchers for dashboard filtering."""
-    submitted_stmt = (
+    submitted_result = await db.execute(
         select(SurveyForm)
-        .where(SurveyForm.status.in_(['PUBLISHED', 'ARCHIVED', 'DELETED']))
-        .where(SurveyForm.title != "Intake Form")
-        .where(
-            exists(
-                select(1).where(
-                    FormSubmission.form_id == SurveyForm.form_id,
-                    FormSubmission.submitted_at.is_not(None),
-                )
-            )
-        )
-    )
-    submitted_result = await db.execute(submitted_stmt)
-    submitted_forms = submitted_result.scalars().all()
-
-    if not submitted_forms:
-        return []
-
-    family_root_ids = list({form.parent_form_id or form.form_id for form in submitted_forms})
-
-    latest_result = await db.execute(
-        select(SurveyForm)
-        .where(func.coalesce(SurveyForm.parent_form_id, SurveyForm.form_id).in_(family_root_ids))
         .where(SurveyForm.status.in_(["PUBLISHED", "ARCHIVED", "DELETED"]))
         .where(SurveyForm.title != "Intake Form")
         .order_by(
             SurveyForm.title.asc(),
-            func.coalesce(SurveyForm.parent_form_id, SurveyForm.form_id),
-            SurveyForm.version.desc(),
+            SurveyForm.version.asc(),
             SurveyForm.created_at.desc(),
         )
     )
-    latest_candidates = latest_result.scalars().all()
+    forms = submitted_result.scalars().all()
 
-    forms = []
-    seen_roots = set()
-    for form in latest_candidates:
-        root_key = str(form.parent_form_id or form.form_id)
-        if root_key in seen_roots:
-            continue
-        seen_roots.add(root_key)
-        forms.append(form)
+    if not forms:
+        return []
 
     if forms:
         form_ids = [f.form_id for f in forms]

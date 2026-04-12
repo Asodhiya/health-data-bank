@@ -54,7 +54,7 @@ async def submit_system_feedback(
             role_target="admin",
             source_type="system_feedback",
             source_id=feedback.feedback_id,
-            link="/admin/feedback",
+            link="/admin/messages",
         )
 
     await write_audit_log(
