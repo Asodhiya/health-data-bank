@@ -28,7 +28,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from app.schemas.filter_data_schema import ParticipantFilter
+from app.schemas.filter_data_schema import ParticipantFilter, ElementValueFilter
 from app.services import filter_data_service
 
 
@@ -539,41 +539,102 @@ class TestAdvancedFiltersOnlyApplyWhenSent:
 
 class TestAllowNullToggle:
     """
-    The end-to-end "missing participants are/aren't included" behaviour is
-    already covered by the existing tests in test_filter_data_researcher.py.
-    Here we verify the API contract: the toggle's value reaches the resolver
-    unchanged. If anyone hard-codes allow_null or drops it along the way,
-    these tests catch it.
+    BEHAVIOURAL test for the 'Include missing element data' toggle.
+
+    The previous version of these tests only verified that the allow_null
+    value was passed through to resolve_participant_ids. That's a weak
+    assertion: it would still pass even if the resolver hard-coded the
+    value and ignored the parameter.
+
+    The real contract is: with the SAME input data and the SAME element
+    filter, allow_null=True must include participants who have no
+    observation for the filtered element, while allow_null=False must
+    exclude them. The test below exercises both branches of the toggle
+    against the same scenario and asserts the results actually differ.
+
+    This corresponds to the production code path at
+    filter_data_service.py:701, where allow_null=True triggers a union
+    with `base_id_set - present_ids` (the participants missing from the
+    'present' query).
     """
 
     @pytest.mark.anyio
-    async def test_allow_null_true_reaches_resolver(self, monkeypatch):
-        monkeypatch.setattr(
-            filter_data_service,
-            "resolve_participant_ids",
-            _capturing_resolve(),
-        )
+    async def test_toggle_actually_changes_result_for_same_input(self):
+        """
+        Scenario:
+            Two participants in scope: A and B.
+            One element filter: 'value >= 120'.
+            Participant A has an observation for the element with value 130
+                → matches the filter.
+            Participant B has NO observation for the element at all.
 
-        with pytest.raises(_CapturedFilters) as exc_info:
-            await filter_data_service.get_survey_results_pivoted(
-                AsyncMock(),
-                filters=ParticipantFilter(allow_null=True),
+        Expected:
+            allow_null=True  → result contains both A and B
+                (B is unioned in because they have no observation to fail on)
+            allow_null=False → result contains only A
+                (B is dropped because they have no matching observation)
+        """
+        participant_a = uuid4()
+        participant_b = uuid4()
+        element_id = uuid4()
+
+        async def call_resolver(allow_null_value):
+            """
+            Build a fresh AsyncMock for each call so the side_effect chain
+            restarts cleanly. resolve_participant_ids issues:
+              1) base participants query  → [A, B]
+              2) matched participants query → [A] (only A passes value >= 120)
+              3) (only when allow_null=True) present participants query → [A]
+                 — used to compute "B is missing, so include them"
+            """
+            db = AsyncMock()
+            calls = [
+                _FakeResult(rows=[participant_a, participant_b]),  # base
+                _FakeResult(rows=[participant_a]),                  # matched
+            ]
+            if allow_null_value:
+                calls.append(_FakeResult(rows=[participant_a]))     # present
+            db.execute.side_effect = calls
+            db.get = AsyncMock(
+                return_value=SimpleNamespace(
+                    element_id=element_id, label="BP Systolic", datatype="number",
+                )
             )
 
-        assert exc_info.value.filters.allow_null is True
-
-    @pytest.mark.anyio
-    async def test_allow_null_false_reaches_resolver(self, monkeypatch):
-        monkeypatch.setattr(
-            filter_data_service,
-            "resolve_participant_ids",
-            _capturing_resolve(),
-        )
-
-        with pytest.raises(_CapturedFilters) as exc_info:
-            await filter_data_service.get_survey_results_pivoted(
-                AsyncMock(),
-                filters=ParticipantFilter(allow_null=False),
+            return await filter_data_service.resolve_participant_ids(
+                ParticipantFilter(
+                    allow_null=allow_null_value,
+                    element_filters=[
+                        ElementValueFilter(
+                            element_id=element_id,
+                            operator="gte",
+                            value=120,
+                        )
+                    ],
+                ),
+                db,
             )
 
-        assert exc_info.value.filters.allow_null is False
+        result_with_true = await call_resolver(True)
+        result_with_false = await call_resolver(False)
+
+        # The behavioural assertion: same inputs, different toggle, different results.
+        assert participant_b in result_with_true, (
+            "allow_null=True must include participants with no observation "
+            "for the filtered element"
+        )
+        assert participant_b not in result_with_false, (
+            "allow_null=False must exclude participants with no observation "
+            "for the filtered element"
+        )
+
+        # Sanity: participant A (who has a matching observation) must be in
+        # BOTH results regardless of the toggle.
+        assert participant_a in result_with_true
+        assert participant_a in result_with_false
+
+        # And the results must genuinely differ, not just by membership.
+        assert set(result_with_true) != set(result_with_false), (
+            "the toggle had no effect — possible silent regression where "
+            "allow_null is ignored downstream"
+        )
