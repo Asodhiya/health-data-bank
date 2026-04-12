@@ -1,5 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
+import 'react-phone-number-input/style.css';
+
+// Legacy DB values may be raw 10-digit strings without a country code.
+// Upgrade them to E.164 so <PhoneInput> renders them correctly.
+function toE164(value) {
+  if (!value) return '';
+  if (value.startsWith('+')) return value;
+  try {
+    return parsePhoneNumber(value, 'CA')?.number || value;
+  } catch {
+    return value;
+  }
+}
 import { api } from '../../services/api';
 
 /*
@@ -183,6 +197,48 @@ function ChipSelect({ options, value, onChange, multi = false }) {
   );
 }
 
+function PhoneProfileField({ icon, label, value, editing, onChange }) {
+  const normalized = toE164(value);
+  const isEmpty = editing && !value;
+  const isInvalid = editing && !!normalized && !isValidPhoneNumber(normalized);
+  const hint = isEmpty
+    ? 'Phone number is required'
+    : isInvalid
+      ? 'Enter a valid phone number with country code'
+      : null;
+  return (
+    <div className="mb-3.5">
+      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">{label}</span>
+      {editing ? (
+        <>
+          <PhoneInput
+            international
+            defaultCountry="CA"
+            countryCallingCodeEditable={false}
+            value={normalized}
+            onChange={(v) => onChange(v || '')}
+            className="hdb-phone-input-compact"
+            numberInputProps={{
+              className: 'w-full bg-transparent focus:outline-none',
+              placeholder: 'phone number',
+            }}
+          />
+          {hint && (
+            <p className="text-xs text-rose-500 mt-1 ml-1">{hint}</p>
+          )}
+        </>
+      ) : (
+        <div className="relative">
+          {icon && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{icon}</span>}
+          <span className={`block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg overflow-hidden text-ellipsis whitespace-nowrap ${icon ? 'pl-10 pr-3' : 'px-3'}`}>
+            {value || '—'}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfileField({ icon, label, value, editing, onChange, type = 'text', placeholder = '', maxLength }) {
   return (
     <div className="mb-3.5">
@@ -294,50 +350,27 @@ function ParticipantFields({ form, set, editing, profile, intakeProfileFields = 
           value={editing ? form.language : profile.language} editing={editing} onChange={set('language')} />
       </div>
 
-      <div className="mb-3.5">
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">COUNTRY OF ORIGIN</span>
-        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
-          {profile.country_of_origin || '—'}
-        </span>
-      </div>
+      {/* Dynamic demographic fields (mapped to profile columns via intake questions) */}
+      {intakeProfileFields.filter(f => f.is_demographic).map((field, i) => (
+        <div key={`demo-${i}`} className="mb-3.5">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            {field.label.toUpperCase()}
+          </span>
+          <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
+            {field.value || '—'}
+          </span>
+        </div>
+      ))}
 
-      <div className="mb-3.5">
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">LIVING ARRANGEMENT</span>
-        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
-          {profile.living_arrangement || '—'}
-        </span>
-      </div>
-
-      <div className="mb-3.5">
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">NUMBER OF DEPENDENTS</span>
-        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
-          {profile.dependents != null ? profile.dependents : '—'}
-        </span>
-      </div>
-
-      <div className="mb-3.5">
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">EMPLOYMENT STATUS</span>
-        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
-          {profile.occupation_status || '—'}
-        </span>
-      </div>
-
-      <div className="mb-3.5">
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">MARITAL STATUS</span>
-        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
-          {profile.marital_status || '—'}
-        </span>
-      </div>
-
-      <div className="mb-3.5">
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">HIGHEST EDUCATION LEVEL</span>
-        <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">
-          {profile.highest_education_level || '—'}
-        </span>
-      </div>
-
-      {intakeProfileFields.map((field, i) => (
-        <div key={i} className="mb-3.5">
+      {/* Additional information fields (custom intake fields not mapped to profile columns) */}
+      {intakeProfileFields.filter(f => !f.is_demographic).length > 0 && (
+        <>
+          <hr className="border-slate-100 my-5" />
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Additional Information</p>
+        </>
+      )}
+      {intakeProfileFields.filter(f => !f.is_demographic).map((field, i) => (
+        <div key={`add-${i}`} className="mb-3.5">
           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
             {field.label.toUpperCase()}
           </span>
@@ -524,9 +557,14 @@ function PersonalInfoSection({ profile, onSave, role, intakeProfileFields = [] }
 
   const set = (field) => (val) => setForm((prev) => ({ ...prev, [field]: val }));
 
+  const normalizedPhone = toE164(form.phone);
+  const phoneInvalid = !form.phone || !isValidPhoneNumber(normalizedPhone);
+
   const handleSave = async () => {
+    if (phoneInvalid) return;
     const cleaned = { ...form };
     if (cleaned.pronouns !== 'Other') cleaned.pronounsCustom = '';
+    if (cleaned.phone) cleaned.phone = normalizedPhone;
     try {
       await api.updateUser({
         username: cleaned.username || undefined,
@@ -620,8 +658,12 @@ function PersonalInfoSection({ profile, onSave, role, intakeProfileFields = [] }
           <div className="flex gap-2">
             <button className="px-3.5 py-1.5 text-xs font-medium text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
               onClick={handleCancel}>Cancel</button>
-            <button className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-              onClick={handleSave}><CheckIcon /> Save</button>
+            <button
+              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+              onClick={handleSave}
+              disabled={phoneInvalid}
+              title={phoneInvalid ? 'Fix phone number before saving' : ''}
+            ><CheckIcon /> Save</button>
           </div>
         )}
       </div>
@@ -649,8 +691,8 @@ function PersonalInfoSection({ profile, onSave, role, intakeProfileFields = [] }
       <ProfileField icon={<MailIcon />} label="EMAIL ADDRESS"
         value={editing ? form.email : profile.email} editing={editing} onChange={set('email')} type="email" />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
-        <ProfileField icon={<PhoneIcon />} label="PHONE NUMBER"
-          value={editing ? form.phone : profile.phone} editing={editing} onChange={set('phone')} type="tel" />
+        <PhoneProfileField icon={<PhoneIcon />} label="PHONE NUMBER"
+          value={editing ? form.phone : profile.phone} editing={editing} onChange={set('phone')} />
         <ProfileField icon={<MapPinIcon />} label="ADDRESS"
           value={editing ? form.address : profile.address} editing={editing} onChange={set('address')} />
       </div>

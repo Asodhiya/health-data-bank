@@ -905,12 +905,12 @@ async def get_system_stats():
 
 
 @router.get("/rbac-audit", dependencies=[Depends(require_permissions(ROLE_READ_ALL))])
-async def get_rbac_audit(request: Request):
+async def get_rbac_audit(request: Request, db: AsyncSession = Depends(get_db)):
     """Introspect all routes and report their permission requirements."""
     from app.core.rbac_audit import build_rbac_audit_report
 
     app = request.app
-    flat_endpoints = build_rbac_audit_report(app)
+    flat_endpoints = await build_rbac_audit_report(app, db)
 
     # Group by module prefix
     modules: dict[str, list] = {}
