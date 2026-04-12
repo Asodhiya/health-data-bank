@@ -227,6 +227,7 @@ function uniqueIds(values) {
 
 export default function ResearcherDashboard() {
   const { user } = useOutletContext() || {};
+  const todayDateString = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   const [draftFilters, setDraftFilters] = useState(createDefaultFilters);
   const [appliedFilters, setAppliedFilters] = useState(createDefaultFilters);
@@ -247,6 +248,7 @@ export default function ResearcherDashboard() {
   const [exportConfig, setExportConfig] = useState(createDefaultExportConfig);
   const [hiddenColumns, setHiddenColumns] = useState([]);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showSurveyMenu, setShowSurveyMenu] = useState(false);
   const [showGroupMenu, setShowGroupMenu] = useState(false);
   const [showElementMenu, setShowElementMenu] = useState(false);
   const [shouldLoadSurveys, setShouldLoadSurveys] = useState(true);
@@ -260,6 +262,7 @@ export default function ResearcherDashboard() {
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
   const [hasRunQuery, setHasRunQuery] = useState(false);
 
+  const surveyMenuRef = useRef(null);
   const groupMenuRef = useRef(null);
   const elementMenuRef = useRef(null);
   const loadResultsRef = useRef(null);
@@ -305,6 +308,41 @@ export default function ResearcherDashboard() {
   const surveyOptions = useMemo(
     () => normalizeAvailableSurveys(availableSurveys),
     [availableSurveys],
+  );
+
+  const getSurveyOwnershipLabel = useCallback(
+    (survey) =>
+      String(survey?.created_by || "") === String(user?.user_id || "")
+        ? "Mine"
+        : "Other",
+    [user?.user_id],
+  );
+
+  const getSurveyStatusLabel = useCallback(
+    (survey) => String(survey?.status || "").replaceAll("_", " ") || "Unknown",
+    [],
+  );
+
+  const getSurveyStatusClasses = useCallback((survey) => {
+    const status = String(survey?.status || "").toUpperCase();
+    if (status === "PUBLISHED") {
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    }
+    if (status === "ARCHIVED") {
+      return "border-slate-200 bg-slate-100 text-slate-600";
+    }
+    if (status === "DELETED") {
+      return "border-rose-200 bg-rose-50 text-rose-700";
+    }
+    return "border-slate-200 bg-slate-50 text-slate-600";
+  }, []);
+
+  const getSurveyOwnershipClasses = useCallback(
+    (survey) =>
+      String(survey?.created_by || "") === String(user?.user_id || "")
+        ? "border-blue-200 bg-blue-50 text-blue-700"
+        : "border-amber-200 bg-amber-50 text-amber-700",
+    [user?.user_id],
   );
 
   const appliedSurvey = useMemo(
@@ -767,6 +805,9 @@ export default function ResearcherDashboard() {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
+      if (surveyMenuRef.current && !surveyMenuRef.current.contains(event.target)) {
+        setShowSurveyMenu(false);
+      }
       if (groupMenuRef.current && !groupMenuRef.current.contains(event.target)) {
         setShowGroupMenu(false);
       }
@@ -1662,39 +1703,82 @@ export default function ResearcherDashboard() {
 
       <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5 xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
         <div className="flex flex-col gap-4">
-          <div>
+          <div className="relative" ref={surveyMenuRef}>
             <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
               <label className="block text-xs font-semibold text-slate-500">Survey</label>
               <span className="text-xs text-slate-400">(optional - adds health data columns)</span>
             </div>
-            <select
-              value={draftFilters.survey_id}
-              onFocus={() => setShouldLoadSurveys(true)}
-              onClick={() => setShouldLoadSurveys(true)}
-              onChange={(event) => {
-                const nextSurveyId = event.target.value;
-                const nextFilters = {
-                  ...draftFilters,
-                  survey_id: nextSurveyId,
-                };
-                setDraftFilters(nextFilters);
+            <button
+              type="button"
+              onClick={() => {
+                setShouldLoadSurveys(true);
+                setShowSurveyMenu((prev) => !prev);
               }}
-              className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
+              className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white p-2.5 text-left text-sm text-slate-700 shadow-sm transition hover:border-slate-300 focus:border-blue-500 focus:outline-none"
             >
-              <option value="">No survey selected</option>
-              {shouldLoadSurveys && surveyOptions.length === 0 ? (
-                <option value="" disabled>
-                  Loading surveys...
-                </option>
-              ) : null}
-              {surveyOptions.map((survey) => (
-                <option key={survey.form_id || survey.id} value={survey.form_id || survey.id}>
-                  {survey.title}
-                  {survey.version ? ` (v${survey.version})` : ""}
-                  {survey.status ? ` - ${String(survey.status).replaceAll("_", " ")}` : ""}
-                </option>
-              ))}
-            </select>
+              <span className="min-w-0 truncate">
+                {selectedSurvey
+                  ? `${selectedSurvey.title}${selectedSurvey.version ? ` (v${selectedSurvey.version})` : ""}`
+                  : "No survey selected"}
+              </span>
+              <span className="ml-3 shrink-0 text-slate-400">{showSurveyMenu ? "˄" : "˅"}</span>
+            </button>
+            {showSurveyMenu && (
+              <div className="absolute left-0 right-0 top-full z-20 mt-2 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraftFilters((prev) => ({ ...prev, survey_id: "" }));
+                    setShowSurveyMenu(false);
+                  }}
+                  className={`mb-2 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
+                    !draftFilters.survey_id ? "bg-blue-50 text-blue-700" : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  <span className="font-medium">No survey selected</span>
+                </button>
+                {shouldLoadSurveys && surveyOptions.length === 0 ? (
+                  <p className="px-3 py-2 text-sm text-slate-500">Loading surveys...</p>
+                ) : null}
+                {surveyOptions.map((survey) => {
+                  const surveyId = survey.form_id || survey.id;
+                  const isSelected = String(draftFilters.survey_id || "") === String(surveyId);
+                  return (
+                    <button
+                      key={surveyId}
+                      type="button"
+                      onClick={() => {
+                        setDraftFilters((prev) => ({ ...prev, survey_id: surveyId }));
+                        setShowSurveyMenu(false);
+                      }}
+                      className={`mb-1 flex w-full flex-col rounded-lg border px-3 py-2 text-left transition last:mb-0 ${
+                        isSelected
+                          ? "border-blue-200 bg-blue-50"
+                          : "border-transparent hover:border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">
+                            {survey.title}
+                            {survey.version ? ` (v${survey.version})` : ""}
+                          </p>
+                        </div>
+                        {isSelected ? <span className="shrink-0 text-xs font-bold text-blue-600">Selected</span> : null}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getSurveyStatusClasses(survey)}`}>
+                          {getSurveyStatusLabel(survey)}
+                        </span>
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getSurveyOwnershipClasses(survey)}`}>
+                          {getSurveyOwnershipLabel(survey)}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="relative" ref={groupMenuRef}>
@@ -1864,6 +1948,7 @@ export default function ResearcherDashboard() {
               <input
                 type="date"
                 value={draftFilters.date_from}
+                max={todayDateString}
                 onChange={(event) =>
                   setDraftFilters((prev) => ({ ...prev, date_from: event.target.value }))
                 }
@@ -1875,6 +1960,7 @@ export default function ResearcherDashboard() {
               <input
                 type="date"
                 value={draftFilters.date_to}
+                max={todayDateString}
                 onChange={(event) =>
                   setDraftFilters((prev) => ({ ...prev, date_to: event.target.value }))
                 }

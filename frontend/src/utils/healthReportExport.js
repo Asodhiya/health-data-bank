@@ -61,7 +61,38 @@ function goalWindow(goal) {
 
 // ── PDF (print-based) ──────────────────────────────────────────────────────
 
-export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }) {
+function filterReportData({ elements, timeseries, goals, selectedElementIds }) {
+  const allowed = new Set((selectedElementIds || []).map(String));
+  if (allowed.size === 0) {
+    return {
+      elements: elements || [],
+      timeseries: timeseries || [],
+      goals: goals || [],
+    };
+  }
+
+  const filteredElements = (elements || []).filter((element) =>
+    allowed.has(String(element.element_id)),
+  );
+  const filteredTimeseries = (timeseries || []).filter((series) =>
+    allowed.has(String(series.element_id)),
+  );
+  const filteredGoals = (goals || []).filter((goal) =>
+    allowed.has(String(goal.element_id || goal.element?.element_id || "")),
+  );
+
+  return {
+    elements: filteredElements,
+    timeseries: filteredTimeseries,
+    goals: filteredGoals,
+  };
+}
+
+export function generatePDFReport({ user, elements, timeseries, goals, vsGroup, selectedElementIds }) {
+  const filtered = filterReportData({ elements, timeseries, goals, selectedElementIds });
+  elements = filtered.elements;
+  timeseries = filtered.timeseries;
+  goals = filtered.goals;
   const name = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.username || "Participant";
   const generatedAt = new Date().toLocaleString("en-US", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
@@ -490,7 +521,11 @@ export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }
 
 // ── CSV ────────────────────────────────────────────────────────────────────
 
-export function generateCSVReport({ user, elements, timeseries, goals }) {
+export function generateCSVReport({ user, elements, timeseries, goals, selectedElementIds }) {
+  const filtered = filterReportData({ elements, timeseries, goals, selectedElementIds });
+  elements = filtered.elements;
+  timeseries = filtered.timeseries;
+  goals = filtered.goals;
   const name = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.username || "Participant";
   const generatedAt = new Date().toISOString();
 

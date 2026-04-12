@@ -167,7 +167,7 @@ async def _ensure_survey_access(
         select(SurveyForm.form_id).where(
             SurveyForm.form_id == survey_id,
             or_(
-                SurveyForm.status.in_(["PUBLISHED", "ARCHIVED"]),
+                SurveyForm.status.in_(["PUBLISHED", "ARCHIVED", "DELETED"]),
                 SurveyForm.title == "Intake Form",
             ),
         )
@@ -195,7 +195,7 @@ async def _get_survey_family_form_ids(
         select(SurveyForm.form_id)
         .where(
             func.coalesce(SurveyForm.parent_form_id, SurveyForm.form_id) == root_id,
-            SurveyForm.status.in_(["PUBLISHED", "ARCHIVED"]),
+            SurveyForm.status.in_(["PUBLISHED", "ARCHIVED", "DELETED"]),
         )
     )
     return list(result.scalars().all())
@@ -717,7 +717,7 @@ async def get_available_surveys(db: AsyncSession, current_user_id: UUID):
     """Fetch surveys available to researchers for dashboard filtering."""
     submitted_stmt = (
         select(SurveyForm)
-        .where(SurveyForm.status.in_(['PUBLISHED', 'ARCHIVED']))
+        .where(SurveyForm.status.in_(['PUBLISHED', 'ARCHIVED', 'DELETED']))
         .where(SurveyForm.title != "Intake Form")
         .where(
             exists(
@@ -739,7 +739,7 @@ async def get_available_surveys(db: AsyncSession, current_user_id: UUID):
     latest_result = await db.execute(
         select(SurveyForm)
         .where(func.coalesce(SurveyForm.parent_form_id, SurveyForm.form_id).in_(family_root_ids))
-        .where(SurveyForm.status.in_(["PUBLISHED", "ARCHIVED"]))
+        .where(SurveyForm.status.in_(["PUBLISHED", "ARCHIVED", "DELETED"]))
         .where(SurveyForm.title != "Intake Form")
         .order_by(
             SurveyForm.title.asc(),
@@ -986,10 +986,11 @@ async def get_survey_results_pivoted(
         }
 
     if survey_id:
+        survey_family_form_ids = await _get_survey_family_form_ids(db, survey_id)
         element_scope = (
             select(FieldElementMap.element_id)
             .join(FormField, FormField.field_id == FieldElementMap.field_id)
-            .where(FormField.form_id == survey_id)
+            .where(FormField.form_id.in_(survey_family_form_ids or [survey_id]))
         )
     else:
         scoped_element_ids = []
@@ -1427,10 +1428,11 @@ async def get_survey_results_grouped(
 
     survey_submission_ids = None
     if survey_id and "survey" in source_types:
+        survey_family_form_ids = await _get_survey_family_form_ids(db, survey_id)
         survey_submission_ids = (
             select(FormSubmission.submission_id)
             .where(
-                FormSubmission.form_id == survey_id,
+                FormSubmission.form_id.in_(survey_family_form_ids or [survey_id]),
                 FormSubmission.submitted_at.is_not(None),
             )
         )

@@ -93,13 +93,22 @@ export default function ParticipantHealthSummary() {
   const [tab, setTab] = useState("overview");
   const [elements, setElements] = useState([]);
   const [timeseries, setTimeseries] = useState([]);
+  const [goals, setGoals] = useState([]);
   const [vsGroup, setVsGroup] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedElement, setSelectedElement] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [selectedExportElementIds, setSelectedExportElementIds] = useState([]);
 
-  const exportArgs = { user, elements, timeseries, goals: [], vsGroup };
+  const exportArgs = {
+    user,
+    elements,
+    timeseries,
+    goals,
+    vsGroup,
+    selectedElementIds: selectedExportElementIds,
+  };
 
   const handlePDF = () => {
     generatePDFReport(exportArgs);
@@ -111,15 +120,27 @@ export default function ParticipantHealthSummary() {
     setExportOpen(false);
   };
 
+  useEffect(() => {
+    setSelectedExportElementIds((prev) => {
+      const availableIds = (elements || []).map((element) => String(element.element_id));
+      if (availableIds.length === 0) return [];
+      const prevSet = new Set((prev || []).map(String));
+      const kept = availableIds.filter((id) => prevSet.has(id));
+      return kept.length > 0 ? kept : availableIds;
+    });
+  }, [elements]);
+
   const load = useCallback(async ({ background = false } = {}) => {
     try {
       if (!background) setLoading(true);
-      const [elementsData, vsGroupData, timeseriesData] = await Promise.all([
+      const [elementsData, goalsData, vsGroupData, timeseriesData] = await Promise.all([
         api.getMyElementsData(),
+        api.listParticipantGoals().catch(() => []),
         api.getMyVsGroupStats().catch(() => null),
         api.getMyHealthTimeseries().catch(() => []),
       ]);
       setElements(elementsData || []);
+      setGoals(Array.isArray(goalsData) ? goalsData : []);
       setVsGroup(vsGroupData);
       setTimeseries(timeseriesData || []);
       if (vsGroupData?.elements?.length) {
@@ -139,6 +160,8 @@ export default function ParticipantHealthSummary() {
   const activeSelected = vsElements.find(
     (e) => e.element_id === selectedElement,
   );
+  const exportSelectionCount = selectedExportElementIds.length;
+  const allExportSelected = elements.length > 0 && exportSelectionCount === elements.length;
 
   const summaryLine = () => {
     const parts = [];
@@ -184,11 +207,66 @@ export default function ParticipantHealthSummary() {
                 {/* backdrop */}
                 <div className="fixed inset-0 z-10" onClick={() => setExportOpen(false)} />
                 <div className="absolute right-0 top-full mt-2 w-52 bg-white border border-slate-200 rounded-2xl shadow-xl z-20 overflow-hidden">
+                <div className="max-h-[26rem] overflow-y-auto">
                   <div className="px-4 py-3 border-b border-slate-100">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Download report</p>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Choose which metrics to include in your report.
+                    </p>
+                  </div>
+                  <div className="px-4 py-3 border-b border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedExportElementIds(
+                          allExportSelected ? [] : elements.map((element) => String(element.element_id)),
+                        )
+                      }
+                      className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700"
+                    >
+                      <span>{allExportSelected ? "Clear all metrics" : "Select all metrics"}</span>
+                      <span>{exportSelectionCount}/{elements.length}</span>
+                    </button>
+                    <div className="mt-3 max-h-40 space-y-2 overflow-y-auto pr-1">
+                      {elements.map((element) => {
+                        const checked = selectedExportElementIds.some(
+                          (id) => String(id) === String(element.element_id),
+                        );
+                        return (
+                          <label
+                            key={element.element_id}
+                            className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-100 px-3 py-2 hover:bg-slate-50"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setSelectedExportElementIds((prev) => {
+                                  const current = new Set((prev || []).map(String));
+                                  const id = String(element.element_id);
+                                  if (current.has(id)) current.delete(id);
+                                  else current.add(id);
+                                  return elements
+                                    .map((item) => String(item.element_id))
+                                    .filter((idValue) => current.has(idValue));
+                                });
+                              }}
+                              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-700">{element.label}</p>
+                              <p className="text-[10px] text-slate-400">
+                                {element.unit || "No unit"} · {element.count ?? 0} reading{element.count === 1 ? "" : "s"}
+                              </p>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                   <button
                     onClick={handlePDF}
+                    disabled={exportSelectionCount === 0}
                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 transition-colors text-left"
                   >
                     <span className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 text-base">📄</span>
@@ -199,7 +277,8 @@ export default function ParticipantHealthSummary() {
                   </button>
                   <button
                     onClick={handleCSV}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 transition-colors text-left border-t border-slate-100"
+                    disabled={exportSelectionCount === 0}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 transition-colors text-left border-t border-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <span className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0 text-base">📊</span>
                     <div>
@@ -207,6 +286,7 @@ export default function ParticipantHealthSummary() {
                       <p className="text-[10px] text-slate-400">Raw data spreadsheet</p>
                     </div>
                   </button>
+                </div>
                 </div>
               </>
             )}

@@ -11,6 +11,7 @@ class AvailableSurvey(BaseModel):
     status: str
     version: Optional[int] = 1
     parent_form_id: Optional[UUID] = None
+    created_by: Optional[UUID] = None
     deployed_groups: list[str] = []
     deployed_group_ids: list[UUID] = []
 
@@ -144,6 +145,17 @@ class ParticipantFilter(BaseModel):
             if isinstance(v, list) and any(isinstance(i, str) and "\x00" in i for i in v):
                 raise ValueError(f"Field '{k}' contains an invalid null byte character.")
         return values
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        today = date.today()
+        if self.date_from and self.date_from > today:
+            raise ValueError("date_from cannot be in the future")
+        if self.date_to and self.date_to > today:
+            raise ValueError("date_to cannot be in the future")
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("date_from cannot be after date_to")
+        return self
 
 class ParticipantResponse(BaseModel):
     id: int

@@ -1159,6 +1159,20 @@ class StatsQuery:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    def _current_survey_element_ids_subquery(self, participant_id: uuid.UUID):
+        return (
+            select(FieldElementMap.element_id)
+            .distinct()
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
+            .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
+            .join(GroupMember, GroupMember.group_id == FormDeployment.group_id)
+            .where(GroupMember.participant_id == participant_id)
+            .where(GroupMember.left_at == None)
+            .where(FormDeployment.revoked_at == None)
+            .where(FormField.profile_field.is_(None))
+        )
+
     async def get_participant_summary(self, participant_id: uuid.UUID) -> dict:
         # Active forms: deployments for groups the participant belongs to, not revoked
         deployed = await _get_deployed_forms(participant_id, self.db)
@@ -1230,6 +1244,7 @@ class StatsQuery:
     
 
     async def get_available_elements(self, participant_id: uuid.UUID) -> list:
+        visible_element_ids = self._current_survey_element_ids_subquery(participant_id)
         result = await self.db.execute(
             select(
                 DataElement.element_id,
@@ -1239,14 +1254,7 @@ class StatsQuery:
                 DataElement.datatype,
             )
             .distinct()
-            .join(FieldElementMap, FieldElementMap.element_id == DataElement.element_id)
-            .join(FormField, FormField.field_id == FieldElementMap.field_id)
-            .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
-            .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
-            .join(GroupMember, GroupMember.group_id == FormDeployment.group_id)
-            .where(GroupMember.participant_id == participant_id)
-            .where(GroupMember.left_at == None)
-            .where(FormDeployment.revoked_at == None)
+            .where(DataElement.element_id.in_(visible_element_ids))
         )
         return result.all()
 
@@ -1257,6 +1265,7 @@ class StatsQuery:
         date_from: date | None = None,
         date_to: date | None = None,
     ) -> list:
+        visible_element_ids = self._current_survey_element_ids_subquery(participant_id)
         stmt = (
             select(
                 DataElement.element_id,
@@ -1270,6 +1279,7 @@ class StatsQuery:
             )
             .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
             .where(HealthDataPoint.participant_id == participant_id)
+            .where(HealthDataPoint.element_id.in_(visible_element_ids))
             .group_by(DataElement.element_id, DataElement.code, DataElement.label, DataElement.unit)
         )
         if element_ids:
@@ -1301,6 +1311,7 @@ class StatsQuery:
         date_from: date | None = None,
         date_to: date | None = None,
     ) -> list[dict]:
+        visible_element_ids = self._current_survey_element_ids_subquery(participant_id)
         stmt = (
             select(
                 DataElement.element_id,
@@ -1321,6 +1332,7 @@ class StatsQuery:
             )
             .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
             .where(HealthDataPoint.participant_id == participant_id)
+            .where(HealthDataPoint.element_id.in_(visible_element_ids))
             .order_by(
                 DataElement.element_id,
                 HealthDataPoint.observed_at,
