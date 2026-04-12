@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
+import { api } from '../../services/api';
+import { PRONOUNS } from '../../utils/formOptions';
 
 // Legacy DB values may be raw 10-digit strings without a country code.
 // Upgrade them to E.164 so <PhoneInput> renders them correctly.
@@ -14,7 +16,6 @@ function toE164(value) {
     return value;
   }
 }
-import { api } from '../../services/api';
 
 /*
   ProfilePage — pure content, shared across all roles.
@@ -82,7 +83,7 @@ const DEV_PROFILES = {
     first_name: 'Josh', last_name: 'Thompson',
     email: 'josh.thompson@upei.ca', phone: '902-555-0147',
     address: '42 University Ave, Charlottetown, PE',
-    dob: '1998-03-15', sex: 'Male', pronouns: 'He/Him', pronounsCustom: '',
+    dob: '1998-03-15', sex: 'Male', pronouns: 'He/Him',
     language: 'English', country_of_origin: 'Canada',
     living_arrangement: 'Alone', dependents: 0, occupation_status: 'Student',
     marital_status: 'Single', highest_education_level: 'Some college/university',
@@ -97,7 +98,7 @@ const DEV_PROFILES = {
     first_name: 'William', last_name: 'Montelpare',
     email: 'w.montelpare@upei.ca', phone: '902-566-0001',
     address: '550 University Ave, Charlottetown, PE C1A 4P3',
-    dob: '', sex: '', pronouns: '', pronounsCustom: '',
+    dob: '', sex: '', pronouns: '',
     language: '',
     living_arrangement: '', dependents: 0, occupation_status: '',
     marital_status: '', highest_education_level: '',
@@ -119,7 +120,7 @@ const DEV_PROFILES = {
   researcher: {
     first_name: 'Sarah', last_name: 'Chen',
     email: 's.chen@upei.ca', phone: '902-566-0042',
-    address: '', dob: '', sex: '', pronouns: '', pronounsCustom: '',
+    address: '', dob: '', sex: '', pronouns: '',
     language: '',
     living_arrangement: '', dependents: 0, occupation_status: '',
     marital_status: '', highest_education_level: '',
@@ -134,7 +135,7 @@ const DEV_PROFILES = {
   admin: {
     first_name: 'Admin', last_name: 'User',
     email: 'admin@upei.ca', phone: '902-566-0000',
-    address: '', dob: '', sex: '', pronouns: '', pronounsCustom: '',
+    address: '', dob: '', sex: '', pronouns: '',
     language: '',
     living_arrangement: '', dependents: 0, occupation_status: '',
     marital_status: '', highest_education_level: '',
@@ -151,7 +152,7 @@ const DEV_PROFILES = {
 /* ── Empty profile template ── */
 const EMPTY_PROFILE = {
   first_name: '', last_name: '', email: '', phone: '', address: '',
-  dob: '', sex: '', pronouns: '', pronounsCustom: '',
+  dob: '', sex: '', pronouns: '',
   language: '', country_of_origin: '',
   living_arrangement: '', dependents: 0, occupation_status: '',
   marital_status: '', highest_education_level: '',
@@ -293,8 +294,7 @@ function PasswordField({ label, placeholder, value, show, onToggle, onChange }) 
    ══════════════════════════════════════════════ */
 
 function ParticipantFields({ form, set, editing, profile, intakeProfileFields = [] }) {
-  const pronounsDisplay = profile.pronouns === 'Other' && profile.pronounsCustom
-    ? profile.pronounsCustom : (profile.pronouns || '—');
+  const pronounsDisplay = profile.pronouns || '—';
 
   return (
     <>
@@ -331,17 +331,9 @@ function ParticipantFields({ form, set, editing, profile, intakeProfileFields = 
         </div>
         <div className="mb-3.5">
           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">PRONOUNS</span>
-          {editing ? (
-            <>
-              <ChipSelect options={['He/Him', 'She/Her', 'They/Them', 'Ze/Zir', 'Other']}
-                value={form.pronouns} onChange={set('pronouns')} />
-              <div className={`overflow-hidden transition-all ${form.pronouns === 'Other' ? 'max-h-20 opacity-100 mt-2.5' : 'max-h-0 opacity-0'}`}>
-                <input className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Enter your pronouns..." maxLength={50}
-                  value={form.pronounsCustom || ''} onChange={(e) => set('pronounsCustom')(e.target.value)} />
-              </div>
-            </>
-          ) : <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{pronounsDisplay}</span>}
+          {editing
+            ? <ChipSelect options={PRONOUNS} value={form.pronouns} onChange={set('pronouns')} />
+            : <span className="block py-2.5 text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3">{pronounsDisplay}</span>}
         </div>
       </div>
 
@@ -563,7 +555,6 @@ function PersonalInfoSection({ profile, onSave, role, intakeProfileFields = [] }
   const handleSave = async () => {
     if (phoneInvalid) return;
     const cleaned = { ...form };
-    if (cleaned.pronouns !== 'Other') cleaned.pronounsCustom = '';
     if (cleaned.phone) cleaned.phone = normalizedPhone;
     try {
       await api.updateUser({
@@ -578,7 +569,7 @@ function PersonalInfoSection({ profile, onSave, role, intakeProfileFields = [] }
         await api.participantUpdateProfile({
           dob: cleaned.dob || undefined,
           gender: cleaned.sex || undefined,
-          pronouns: cleaned.pronouns === 'Other' ? (cleaned.pronounsCustom || 'Other') : (cleaned.pronouns || undefined),
+          pronouns: cleaned.pronouns || undefined,
           primary_language: cleaned.language || undefined,
           country_of_origin: cleaned.country_of_origin || undefined,
           living_arrangement: cleaned.living_arrangement || undefined,
@@ -987,7 +978,7 @@ export default function ProfilePage({ role = 'participant' }) {
                 ...prev,
                 dob: p.dob || '',
                 sex: p.gender || '',
-                pronouns: p.pronouns || '',
+                pronouns: PRONOUNS.includes(p.pronouns) ? p.pronouns : '',
                 language: p.primary_language || '',
                 country_of_origin: p.country_of_origin || '',
                 living_arrangement: p.living_arrangement || '',

@@ -121,7 +121,7 @@ def _serialize_intake_field(field: FormField) -> dict[str, Any]:
 
 
 _VALID_CONFIG_KEYS = {"searchable", "creatable", "predefined_list", "conditional", "min", "max", "max_date_rule"}
-_VALID_PREDEFINED_LISTS = {"languages", "countries"}
+_VALID_PREDEFINED_LISTS = {"languages", "countries", "pronouns"}
 _VALID_DATE_RULES = {"adult_18"}
 
 _FIELD_TYPE_CONFIG_KEYS: dict[str, set[str]] = {

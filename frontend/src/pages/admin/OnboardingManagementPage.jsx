@@ -721,6 +721,7 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                                   <option value="">None (use manual options)</option>
                                   <option value="languages">Languages</option>
                                   <option value="countries">Countries</option>
+                                  <option value="pronouns">Pronouns</option>
                                 </select>
                               </label>
                               {field.field_type === "multi_select" && (
