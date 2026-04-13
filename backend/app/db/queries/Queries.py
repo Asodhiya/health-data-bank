@@ -36,7 +36,11 @@ def _caretaker_message_element_expr(code_col, label_col, description_col):
         )
     )
     return and_(
-        haystack.like("%caretaker%"),
+        or_(
+            haystack.like("%caretaker%"),
+            haystack.like("%care team%"),
+            haystack.like("%careteam%"),
+        ),
         or_(
             haystack.like("%note%"),
             haystack.like("%notes%"),

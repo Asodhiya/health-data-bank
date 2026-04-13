@@ -12,7 +12,9 @@ function isCaretakerMessageElement(item) {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
-  if (!haystack.includes("caretaker")) return false;
+  if (!["caretaker", "care team", "careteam"].some((token) => haystack.includes(token))) {
+    return false;
+  }
   return ["note", "notes", "message", "messages"].some((token) => haystack.includes(token));
 }
 

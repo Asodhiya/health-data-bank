@@ -392,7 +392,8 @@ def _is_caretaker_message_element(element: DataElement | None) -> bool:
     haystack = " ".join(
         str(value or "") for value in (element.code, element.label, element.description)
     ).lower()
-    if "caretaker" not in haystack:
+    audience_tokens = {"caretaker", "care team", "careteam"}
+    if not any(token in haystack for token in audience_tokens):
         return False
     return any(token in haystack for token in {"note", "notes", "message", "messages"})
 
