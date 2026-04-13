@@ -62,7 +62,7 @@ const DataElementManager = () => {
   const [loadError, setLoadError] = useState(false);
 
   // Mapping load error
-  const [mappingError, setMappingError] = useState(false);
+  const [mappingError, setMappingError] = useState("");
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -111,6 +111,7 @@ const DataElementManager = () => {
   const buildSurveyCounts = async () => {
     setElementLinksMap({});
     setGoalLinksMap({});
+    setMappingError("");
     try {
       const [mappingsResult, templatesResult] = await Promise.allSettled([
         api.getAllMappings(),
@@ -145,11 +146,18 @@ const DataElementManager = () => {
         setGoalLinksMap(gLinksMap);
       }
 
-      const hadError = mappingsResult.status === "rejected" || templatesResult.status === "rejected";
-      setMappingError(hadError);
+      const failedSources = [];
+      if (mappingsResult.status === "rejected") failedSources.push("survey mappings");
+      if (templatesResult.status === "rejected") failedSources.push("goal template links");
+
+      setMappingError(
+        failedSources.length
+          ? `Could not load ${failedSources.join(" and ")}. Mapped/Unmapped counts may be inaccurate.`
+          : ""
+      );
     } catch (err) {
       console.error("Survey count error:", err);
-      setMappingError(true);
+      setMappingError("Could not load data element linkage counts. Mapped/Unmapped counts may be inaccurate.");
     }
   };
 
@@ -386,7 +394,7 @@ const DataElementManager = () => {
             <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             </svg>
-            <span>Could not load survey mappings. Mapped/Unmapped counts may be inaccurate.</span>
+            <span>{mappingError}</span>
             <button onClick={buildSurveyCounts} className="ml-auto text-xs font-semibold text-amber-700 hover:underline shrink-0">Retry</button>
           </div>
         )}

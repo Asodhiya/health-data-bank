@@ -33,6 +33,10 @@ ROLE_PERMISSION_MAP = {
         permission_constants.GOAL_TEMPLATE_VIEW,
         permission_constants.GOAL_TEMPLATE_CREATE,
         permission_constants.GOAL_TEMPLATE_EDIT,
+        permission_constants.ELEMENT_VIEW,
+        permission_constants.ELEMENT_CREATE,
+        permission_constants.ELEMENT_DELETE,
+        permission_constants.ELEMENT_MAP,
         permission_constants.STATS_VIEW,
     },
     "caretaker": {
