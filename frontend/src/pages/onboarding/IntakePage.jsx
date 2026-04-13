@@ -303,15 +303,21 @@ function ConditionalField({ field, value, onChange }) {
 function QuestionCard({ index, field, value, onChange, error, maxDob }) {
   const config = field.config || {};
   const options = field.options || [];
-
-  // Determine rendering mode using config with profile_field fallbacks (backward compat)
-  const isSearchable = config.searchable || field.profile_field === "country_of_origin";
-  const predefinedList = config.predefined_list
-    ? PREDEFINED_LISTS[config.predefined_list]
-    : field.profile_field === "country_of_origin"
+  const isCountryOfOrigin = field.profile_field === "country_of_origin";
+  const isPrimaryLanguage = field.profile_field === "primary_language";
+  const usesForcedSelector = isCountryOfOrigin || isPrimaryLanguage;
+  const forcedPredefinedList = isPrimaryLanguage
+    ? PREDEFINED_LISTS.languages
+    : isCountryOfOrigin
       ? COUNTRIES
       : null;
-  const isCreatable = config.creatable || false;
+
+  // Determine rendering mode using config with profile_field fallbacks (backward compat)
+  const isSearchable = config.searchable || !!forcedPredefinedList;
+  const predefinedList = forcedPredefinedList || (config.predefined_list
+    ? PREDEFINED_LISTS[config.predefined_list]
+    : null);
+  const isCreatable = isPrimaryLanguage ? true : (config.creatable || false);
   const isConditional = !!config.conditional;
   const dateMax =
     config.max_date_rule === "adult_18" || field.profile_field === "dob" ? maxDob : undefined;
@@ -339,28 +345,28 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
       )}
 
       {/* Searchable multi-select with predefined list (e.g. Languages) */}
-      {field.field_type === "multi_select" && predefinedList && isSearchable && (
+      {(isPrimaryLanguage || (field.field_type === "multi_select" && predefinedList && isSearchable)) && (
         <SearchableMultiSelect
           value={value}
           onChange={(next) => onChange(field, next)}
-          options={predefinedList}
+          options={isPrimaryLanguage ? PREDEFINED_LISTS.languages : predefinedList}
           creatable={isCreatable}
-          placeholder={`Start typing to search ${config.predefined_list || "options"}...`}
+          placeholder={isPrimaryLanguage ? "Start typing to search languages..." : `Start typing to search ${config.predefined_list || "options"}...`}
         />
       )}
 
       {/* Searchable single-select dropdown with predefined list (e.g. Country) */}
-      {field.field_type === "dropdown" && predefinedList && isSearchable && (
+      {(isCountryOfOrigin || (field.field_type === "dropdown" && predefinedList && isSearchable)) && (
         <SearchableSelect
           value={value}
           onChange={(next) => onChange(field, next)}
-          options={predefinedList}
-          placeholder={`Start typing to search ${config.predefined_list || "options"}...`}
+          options={isCountryOfOrigin ? COUNTRIES : predefinedList}
+          placeholder={isCountryOfOrigin ? "Start typing to search countries..." : `Start typing to search ${config.predefined_list || "options"}...`}
         />
       )}
 
       {/* Regular dropdown (no predefined list, not searchable) */}
-      {field.field_type === "dropdown" && !(predefinedList && isSearchable) && (
+      {field.field_type === "dropdown" && !(predefinedList && isSearchable) && !usesForcedSelector && (
         <select
           value={value}
           onChange={(event) => onChange(field, event.target.value)}
@@ -376,7 +382,7 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
       )}
 
       {/* Single select chips (non-conditional) */}
-      {field.field_type === "single_select" && !isConditional && (
+      {field.field_type === "single_select" && !isConditional && !usesForcedSelector && (
         <div className="flex flex-wrap gap-2">
           {options.map((option, optionIndex) => {
             const optionValue = option.label || option.value || "";
@@ -396,7 +402,7 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
       )}
 
       {/* Multi-select chips (no predefined list) */}
-      {field.field_type === "multi_select" && !(predefinedList && isSearchable) && (
+      {field.field_type === "multi_select" && !(predefinedList && isSearchable) && !isPrimaryLanguage && (
         <div className="flex flex-wrap gap-2">
           {options.map((option, optionIndex) => {
             const optionValue = option.label || option.value || "";
@@ -422,7 +428,7 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
       )}
 
       {/* Textarea */}
-      {field.field_type === "textarea" && (
+      {field.field_type === "textarea" && !usesForcedSelector && (
         <textarea
           value={value}
           onChange={(event) => onChange(field, sanitizeText(event.target.value, 1000))}
@@ -431,7 +437,7 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
       )}
 
       {/* Text */}
-      {field.field_type === "text" && (
+      {field.field_type === "text" && !usesForcedSelector && (
         <input
           type="text"
           value={value}
@@ -441,7 +447,7 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
       )}
 
       {/* Number */}
-      {field.field_type === "number" && (
+      {field.field_type === "number" && !usesForcedSelector && (
         <input
           type="number"
           min={numberMin}
@@ -454,7 +460,7 @@ function QuestionCard({ index, field, value, onChange, error, maxDob }) {
       )}
 
       {/* Date */}
-      {field.field_type === "date" && (
+      {field.field_type === "date" && !usesForcedSelector && (
         <input
           type="date"
           max={dateMax}

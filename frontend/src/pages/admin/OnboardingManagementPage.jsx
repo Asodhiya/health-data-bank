@@ -542,8 +542,7 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                     <select
                       value={field.field_type}
                       onChange={(e) => updateField(idx, "field_type", e.target.value)}
-                      disabled={isHardcoded}
-                      className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                      className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
                     >
                       {FIELD_TYPES.map((ft) => (
                         <option key={ft.value} value={ft.value}>{ft.label}</option>
@@ -575,7 +574,7 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                       <svg className="h-3.5 w-3.5 mt-px shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m0-10a4 4 0 00-4 4v2h8v-2a4 4 0 00-4-4z" />
                       </svg>
-                      <span>Core profile field — always required and cannot be removed from the participant profile page.</span>
+                      <span>Core profile field — always required and cannot be removed from the participant profile page, but you can still configure its input type/options.</span>
                     </div>
                   )}
                   {field.show_on_profile && !isHardcoded && (
@@ -642,33 +641,28 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                             type="text"
                             value={opt.label}
                             onChange={(e) => updateOption(idx, oi, "label", e.target.value)}
-                            disabled={isHardcoded}
-                            className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                            className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
                             placeholder={`Option ${oi + 1}`}
                           />
-                          {!isHardcoded && (
-                            <button
-                              onClick={() => removeOption(idx, oi)}
-                              className="p-1 rounded hover:bg-rose-100 text-slate-400 hover:text-rose-500 transition-colors"
-                            >
-                              <IconTrash />
-                            </button>
-                          )}
+                          <button
+                            onClick={() => removeOption(idx, oi)}
+                            className="p-1 rounded hover:bg-rose-100 text-slate-400 hover:text-rose-500 transition-colors"
+                          >
+                            <IconTrash />
+                          </button>
                         </div>
                       ))}
-                      {!isHardcoded && (
-                        <button
-                          onClick={() => addOption(idx)}
-                          className="text-xs text-violet-600 hover:text-violet-700 font-medium"
-                        >
-                          + Add option
-                        </button>
-                      )}
+                      <button
+                        onClick={() => addOption(idx)}
+                        className="text-xs text-violet-600 hover:text-violet-700 font-medium"
+                      >
+                        + Add option
+                      </button>
                     </div>
                   )}
 
                   {/* ── Field config panel ── */}
-                  {!isHardcoded && (field.field_type === "number" || field.field_type === "date" || field.field_type === "dropdown" || field.field_type === "multi_select" || field.field_type === "single_select") && (
+                  {(field.field_type === "number" || field.field_type === "date" || field.field_type === "dropdown" || field.field_type === "multi_select" || field.field_type === "single_select") && (
                     <div className="pl-2 border-l-2 border-blue-200 space-y-2.5 mt-1">
                       <span className="text-xs font-medium text-blue-600">Field configuration</span>
 
