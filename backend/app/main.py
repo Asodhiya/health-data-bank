@@ -21,6 +21,7 @@ from app.services.session_service import get_active_session
 from app.seeds.onboarding_seed import seed_onboarding_data
 from app.seeds.rbac_seed import seed_rbac
 from app.seeds.data_element_seed import seed_profile_data_elements
+from app.seeds.admin_seed import seed_first_admin
 from app.services.notification_scheduler import (
     start_notification_scheduler,
     stop_notification_scheduler,
@@ -97,6 +98,7 @@ async def lifespan(app: FastAPI):
             try:
                 await set_rls_context(db, role="admin")
                 await seed_rbac(db)
+                await seed_first_admin(db)
                 await seed_onboarding_data(db)
                 await seed_profile_data_elements(db)
             except Exception as exc:

@@ -1112,9 +1112,18 @@ class DataElementQuery:
         await self.db.refresh(element)
         return element
 
+    _FIELD_DATATYPE_COMPAT: dict[str, set[str]] = {
+        "number":        {"integer", "float", "numeric", "number"},
+        "likert":        {"integer", "float", "numeric", "number"},
+        "single_select": {"text"},
+        "dropdown":      {"text"},
+        "multi_select":  {"text"},
+        "date":          {"date"},
+        # "text" is intentionally absent — unrestricted
+    }
+
     async def map_field(self, field_id: uuid.UUID, element_id: uuid.UUID, transform_rule: dict | None = None):
         # Verify the field exists
-        
         field = await self.db.get(FormField, field_id)
         if not field:
             raise HTTPException(status_code=404, detail="Form field not found")
@@ -1125,6 +1134,14 @@ class DataElementQuery:
             raise HTTPException(status_code=404, detail="Data element not found")
         if not element.is_active:
             raise HTTPException(status_code=400, detail="Data element is inactive and cannot be mapped")
+
+        # Enforce field-type / datatype compatibility
+        allowed = self._FIELD_DATATYPE_COMPAT.get(field.field_type)
+        if allowed and element.datatype and element.datatype.lower() not in allowed:
+            raise HTTPException(
+                status_code=422,
+                detail=f"A '{field.field_type}' field cannot be mapped to a '{element.datatype}' element. Allowed: {sorted(allowed)}."
+            )
 
         existing = await self.db.execute(
             select(FieldElementMap).where(FieldElementMap.field_id == field_id)

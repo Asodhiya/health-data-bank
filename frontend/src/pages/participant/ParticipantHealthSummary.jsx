@@ -554,6 +554,47 @@ function LineChart({ points, color = "#3b82f6", unit = "" }) {
   );
 }
 
+// ── CategoryChart ──────────────────────────────────────────────────────────
+
+function CategoryChart({ points, color = "#3b82f6" }) {
+  const textPoints = (points || []).filter((p) => p.value_text != null && p.observed_at);
+  if (textPoints.length === 0) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <span className="text-xs text-slate-300">Not enough data to display</span>
+      </div>
+    );
+  }
+
+  // Count frequency of each label
+  const freq = {};
+  textPoints.forEach((p) => {
+    freq[p.value_text] = (freq[p.value_text] || 0) + 1;
+  });
+  const entries = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+  const maxCount = entries[0][1];
+
+  return (
+    <div className="w-full h-full flex flex-col justify-center gap-2 py-1 overflow-y-auto">
+      {entries.map(([label, count]) => {
+        const pct = (count / maxCount) * 100;
+        return (
+          <div key={label} className="flex items-center gap-2 min-w-0">
+            <span className="text-[11px] font-semibold text-slate-500 w-24 shrink-0 truncate text-right">{label}</span>
+            <div className="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{ width: `${pct}%`, backgroundColor: color + "cc" }}
+              />
+            </div>
+            <span className="text-[11px] font-bold text-slate-600 w-6 shrink-0">{count}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Overview tab ───────────────────────────────────────────────────────────
 
 const RANGES = [
@@ -629,8 +670,14 @@ function OverviewTab({ elements, timeseries, loading }) {
   const allPoints = tsMap[activeEl.element_id] || [];
   const points = filterPointsByDays(allPoints, rangeDays);
   const vals = points.map((p) => p.value_number).filter((v) => v != null && Number.isFinite(v));
+  const textPoints = points.filter((p) => p.value_text != null && p.observed_at);
+  const isCategorical = vals.length === 0 && textPoints.length > 0;
+  const readingCount = isCategorical ? textPoints.length : vals.length;
 
   const latest = vals.length ? vals[vals.length - 1] : null;
+  const latestText = isCategorical
+    ? [...textPoints].sort((a, b) => new Date(b.observed_at) - new Date(a.observed_at))[0]?.value_text
+    : null;
   const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : activeEl.avg;
   const min = vals.length ? Math.min(...vals) : activeEl.min;
   const max = vals.length ? Math.max(...vals) : activeEl.max;
@@ -708,10 +755,12 @@ function OverviewTab({ elements, timeseries, loading }) {
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">{activeEl.label}</p>
               <div className="flex items-end gap-2.5">
                 <p className="text-4xl font-black text-slate-800 leading-none tracking-tight">
-                  {latest != null ? Number(latest).toFixed(1) : avg != null ? Number(avg).toFixed(1) : "—"}
+                  {isCategorical
+                    ? (latestText || "—")
+                    : latest != null ? Number(latest).toFixed(1) : avg != null ? Number(avg).toFixed(1) : "—"}
                 </p>
-                <p className="text-sm font-semibold text-slate-400 mb-0.5">{activeEl.unit || ""}</p>
-                {pct != null && (
+                {!isCategorical && <p className="text-sm font-semibold text-slate-400 mb-0.5">{activeEl.unit || ""}</p>}
+                {!isCategorical && pct != null && (
                   <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full mb-0.5 ${trendBg}`}>
                     {trendLabel}
                   </span>
@@ -733,30 +782,34 @@ function OverviewTab({ elements, timeseries, loading }) {
 
           {/* Chart */}
           <div className="w-full h-52">
-            <LineChart points={points} color={trendColor} unit={activeEl.unit || ""} />
+            {isCategorical
+              ? <CategoryChart points={points} color={trendColor} />
+              : <LineChart points={points} color={trendColor} unit={activeEl.unit || ""} />}
           </div>
 
           {/* Stats row */}
-          <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-4 gap-2">
-            {[
-              { label: "Latest", val: latest, color: "text-blue-600" },
-              { label: "Average", val: avg, color: "text-slate-700" },
-              { label: "Low", val: min, color: "text-amber-500" },
-              { label: "High", val: max, color: "text-emerald-600" },
-            ].map(({ label, val, color }) => (
-              <div key={label} className="flex flex-col items-center gap-0.5 py-2.5 rounded-xl bg-slate-50 border border-slate-100 shadow-sm">
-                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">{label}</span>
-                <span className={`text-sm font-black ${color}`}>
-                  {val != null ? Number(val).toFixed(1) : "—"}
-                </span>
-                {activeEl.unit && <span className="text-[9px] text-slate-400">{activeEl.unit}</span>}
-              </div>
-            ))}
-          </div>
+          {!isCategorical && (
+            <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-4 gap-2">
+              {[
+                { label: "Latest", val: latest, color: "text-blue-600" },
+                { label: "Average", val: avg, color: "text-slate-700" },
+                { label: "Low", val: min, color: "text-amber-500" },
+                { label: "High", val: max, color: "text-emerald-600" },
+              ].map(({ label, val, color }) => (
+                <div key={label} className="flex flex-col items-center gap-0.5 py-2.5 rounded-xl bg-slate-50 border border-slate-100 shadow-sm">
+                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">{label}</span>
+                  <span className={`text-sm font-black ${color}`}>
+                    {val != null ? Number(val).toFixed(1) : "—"}
+                  </span>
+                  {activeEl.unit && <span className="text-[9px] text-slate-400">{activeEl.unit}</span>}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Entry count */}
           <p className="text-[11px] text-slate-400 text-center mt-3">
-            {vals.length} {vals.length === 1 ? "reading" : "readings"} in the selected period
+            {readingCount} {readingCount === 1 ? "reading" : "readings"} in the selected period
           </p>
         </div>
       </div>
