@@ -24,8 +24,8 @@ const Spinner = () => (
 
 // ── Top-level tabs ──────────────────────────────────────────────────────────
 const TABS = [
-  { key: "consent", label: "Consent form" },
   { key: "background", label: "Background info" },
+  { key: "consent", label: "Consent form" },
   { key: "intake", label: "Intake form" },
   { key: "preview", label: "Preview" },
 ];
@@ -522,7 +522,9 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
         )}
 
         <div className="space-y-4">
-          {intakeFields.map((field, idx) => (
+          {intakeFields.map((field, idx) => {
+            const isHardcoded = !!field.profile_field && HARDCODED_PROFILE_COLUMNS.has(field.profile_field);
+            return (
             <div key={idx} className="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
               <div className="flex gap-3">
                 <span className="flex-shrink-0 w-7 h-7 rounded-lg bg-violet-100 text-violet-600 text-xs font-bold flex items-center justify-center mt-0.5">
@@ -540,32 +542,43 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                     <select
                       value={field.field_type}
                       onChange={(e) => updateField(idx, "field_type", e.target.value)}
-                      className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                      disabled={isHardcoded}
+                      className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
                     >
                       {FIELD_TYPES.map((ft) => (
                         <option key={ft.value} value={ft.value}>{ft.label}</option>
                       ))}
                     </select>
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className={`flex items-center gap-2 ${isHardcoded ? "cursor-not-allowed" : "cursor-pointer"}`}>
                       <input
                         type="checkbox"
-                        checked={field.is_required}
+                        checked={isHardcoded ? true : field.is_required}
+                        disabled={isHardcoded}
                         onChange={(e) => updateField(idx, "is_required", e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-60"
                       />
                       <span className="text-xs font-medium text-slate-500">Required</span>
                     </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className={`flex items-center gap-2 ${isHardcoded ? "cursor-not-allowed" : "cursor-pointer"}`}>
                       <input
                         type="checkbox"
-                        checked={field.show_on_profile || false}
+                        checked={isHardcoded ? true : (field.show_on_profile || false)}
+                        disabled={isHardcoded}
                         onChange={(e) => updateField(idx, "show_on_profile", e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-60"
                       />
                       <span className="text-xs font-medium text-slate-500">Show on profile</span>
                     </label>
                   </div>
-                  {field.show_on_profile && (!field.profile_field || !HARDCODED_PROFILE_COLUMNS.has(field.profile_field)) && (
+                  {isHardcoded && (
+                    <div className="flex items-start gap-1.5 text-[11px] text-violet-600 bg-violet-50 border border-violet-100 rounded-lg px-2.5 py-1.5">
+                      <svg className="h-3.5 w-3.5 mt-px shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m0-10a4 4 0 00-4 4v2h8v-2a4 4 0 00-4-4z" />
+                      </svg>
+                      <span>Core profile field — always required and cannot be removed from the participant profile page.</span>
+                    </div>
+                  )}
+                  {field.show_on_profile && !isHardcoded && (
                     <p className="text-[11px] text-emerald-600 mt-0.5">
                       Appears under <span className="font-semibold">Additional Information</span> on participant profile
                     </p>
@@ -576,11 +589,13 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                     </label>
                     <div className="flex items-center gap-2">
                       <div
-                        onClick={() => setProfileModalIdx(idx)}
-                        className={`flex-1 flex items-center justify-between px-3 py-2 text-sm border rounded-lg cursor-pointer transition ${
-                          field.profile_field
-                            ? "border-blue-300 bg-blue-50 text-blue-800"
-                            : "border-slate-200 bg-white text-slate-400 hover:border-slate-300"
+                        onClick={() => { if (!isHardcoded) setProfileModalIdx(idx); }}
+                        className={`flex-1 flex items-center justify-between px-3 py-2 text-sm border rounded-lg transition ${
+                          isHardcoded
+                            ? "border-blue-200 bg-blue-50/70 text-blue-700 cursor-not-allowed opacity-80"
+                            : field.profile_field
+                            ? "border-blue-300 bg-blue-50 text-blue-800 cursor-pointer"
+                            : "border-slate-200 bg-white text-slate-400 hover:border-slate-300 cursor-pointer"
                         }`}
                       >
                         <span className="truncate">
@@ -592,7 +607,7 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 9l6 6 6-6" />
                         </svg>
                       </div>
-                      {field.profile_field && (
+                      {field.profile_field && !isHardcoded && (
                         <button
                           onClick={() => updateField(idx, "profile_field", "")}
                           title="Remove mapping"
@@ -627,28 +642,33 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                             type="text"
                             value={opt.label}
                             onChange={(e) => updateOption(idx, oi, "label", e.target.value)}
-                            className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                            disabled={isHardcoded}
+                            className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                             placeholder={`Option ${oi + 1}`}
                           />
-                          <button
-                            onClick={() => removeOption(idx, oi)}
-                            className="p-1 rounded hover:bg-rose-100 text-slate-400 hover:text-rose-500 transition-colors"
-                          >
-                            <IconTrash />
-                          </button>
+                          {!isHardcoded && (
+                            <button
+                              onClick={() => removeOption(idx, oi)}
+                              className="p-1 rounded hover:bg-rose-100 text-slate-400 hover:text-rose-500 transition-colors"
+                            >
+                              <IconTrash />
+                            </button>
+                          )}
                         </div>
                       ))}
-                      <button
-                        onClick={() => addOption(idx)}
-                        className="text-xs text-violet-600 hover:text-violet-700 font-medium"
-                      >
-                        + Add option
-                      </button>
+                      {!isHardcoded && (
+                        <button
+                          onClick={() => addOption(idx)}
+                          className="text-xs text-violet-600 hover:text-violet-700 font-medium"
+                        >
+                          + Add option
+                        </button>
+                      )}
                     </div>
                   )}
 
                   {/* ── Field config panel ── */}
-                  {(field.field_type === "number" || field.field_type === "date" || field.field_type === "dropdown" || field.field_type === "multi_select" || field.field_type === "single_select") && (
+                  {!isHardcoded && (field.field_type === "number" || field.field_type === "date" || field.field_type === "dropdown" || field.field_type === "multi_select" || field.field_type === "single_select") && (
                     <div className="pl-2 border-l-2 border-blue-200 space-y-2.5 mt-1">
                       <span className="text-xs font-medium text-blue-600">Field configuration</span>
 
@@ -822,16 +842,18 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                     <IconDown />
                   </button>
                   <button
-                    onClick={() => removeField(idx)}
-                    className="p-1.5 rounded-lg hover:bg-rose-100 text-slate-400 hover:text-rose-500 transition-colors"
-                    title="Remove"
+                    onClick={() => { if (!isHardcoded) removeField(idx); }}
+                    disabled={isHardcoded}
+                    className="p-1.5 rounded-lg hover:bg-rose-100 text-slate-400 hover:text-rose-500 transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400 disabled:cursor-not-allowed"
+                    title={isHardcoded ? "Core profile field — cannot be removed" : "Remove"}
                   >
                     <IconTrash />
                   </button>
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
 
         <button
@@ -849,7 +871,7 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
 //  PREVIEW (participant view)
 // ═════════════════════════════════════════════════════════════════════════════
 function Preview({ consent, background, intakeFields, profileFieldOptions }) {
-  const [previewTab, setPreviewTab] = useState("consent");
+  const [previewTab, setPreviewTab] = useState("background");
 
   return (
     <div className="space-y-6">
@@ -862,8 +884,8 @@ function Preview({ consent, background, intakeFields, profileFieldOptions }) {
         {/* Preview sub-tabs */}
         <div className="flex gap-2 mb-6">
           {[
-            { key: "consent", label: "Consent form" },
             { key: "background", label: "Background info" },
+            { key: "consent", label: "Consent form" },
             { key: "intake", label: "Intake form" },
           ].map((t) => (
             <button
@@ -999,7 +1021,7 @@ function IntakePreview({ intakeFields }) {
 //  MAIN PAGE
 // ═════════════════════════════════════════════════════════════════════════════
 export default function OnboardingManagementPage() {
-  const [activeTab, setActiveTab] = useState("consent");
+  const [activeTab, setActiveTab] = useState("background");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1085,25 +1107,29 @@ export default function OnboardingManagementPage() {
     setError("");
     setSaving(true);
     try {
-      const [,, intakeResult] = await Promise.all([
-        api.updateConsentTemplate({
-          title: consent.title,
-          subtitle: consent.subtitle || null,
-          items: consent.items,
-        }),
-        api.updateBackgroundTemplate({
-          title: background.title,
-          subtitle: background.subtitle || null,
-          sections: background.sections,
-        }),
-        api.updateIntakeForm({
-          fields: intakeFields.map((f, i) => ({ ...f, display_order: i + 1 })),
-        }),
-      ]);
-      const resetCount = intakeResult?.participants_reset || 0;
+      // Keep publish order deterministic so reset-target precedence remains
+      // stable across consent/background/intake updates.
+      const consentResult = await api.updateConsentTemplate({
+        title: consent.title,
+        subtitle: consent.subtitle || null,
+        items: consent.items,
+      });
+      const backgroundResult = await api.updateBackgroundTemplate({
+        title: background.title,
+        subtitle: background.subtitle || null,
+        sections: background.sections,
+      });
+      const intakeResult = await api.updateIntakeForm({
+        fields: intakeFields.map((f, i) => ({ ...f, display_order: i + 1 })),
+      });
+      const resetCount = Math.max(
+        consentResult?.participants_reset || 0,
+        backgroundResult?.participants_reset || 0,
+        intakeResult?.participants_reset || 0,
+      );
       setSuccess(
         resetCount > 0
-          ? `Published. ${resetCount} participant${resetCount === 1 ? "" : "s"} will need to redo the intake form.`
+          ? `Published. ${resetCount} participant${resetCount === 1 ? "" : "s"} will need to redo onboarding on next login.`
           : "Onboarding templates published successfully."
       );
       setDirty(false);
@@ -1171,7 +1197,7 @@ export default function OnboardingManagementPage() {
             <p className="text-sm text-slate-600 mb-5">
               Publishing changes will require{" "}
               <span className="font-semibold text-amber-700">{confirmModal.count} participant{confirmModal.count === 1 ? "" : "s"}</span>{" "}
-              to redo the intake form. Are you sure?
+              to redo onboarding pages on next login. Are you sure?
             </p>
             <div className="flex justify-end gap-3">
               <button

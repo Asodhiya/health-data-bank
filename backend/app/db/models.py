@@ -238,6 +238,7 @@ class ParticipantProfile(Base):
     country_of_origin: Mapped[str | None] = mapped_column(Text)
     program_enrolled_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
     onboarding_status: Mapped[str | None] = mapped_column(Text, server_default=text("'PENDING'"))
+    onboarding_reset_to: Mapped[str | None] = mapped_column(Text, nullable=True)
     user = relationship("User", back_populates="participant_profile")
     consents: Mapped[list["ParticipantConsent"]] = relationship(
         "ParticipantConsent", back_populates="participant", cascade="all, delete-orphan"

@@ -246,6 +246,42 @@ async def login(
         token,
         max_age_seconds=get_session_token_expiry_minutes() * 60,
     )
+
+    user_role_rows = await db.execute(
+        select(Role.role_name)
+        .join(UserRole, UserRole.role_id == Role.role_id)
+        .where(UserRole.user_id == user.user_id)
+    )
+    user_role_names = {str(r[0]).lower() for r in user_role_rows.all()}
+
+    if "participant" in user_role_names:
+        from app.services.onboarding_service import process_pending_onboarding_reset
+
+        await set_rls_context(db, user_id=user.user_id, role="participant")
+        reset_target = await process_pending_onboarding_reset(user.user_id, db)
+        if reset_target:
+            reset_link = (
+                "/onboarding/background"
+                if reset_target == "PENDING"
+                else "/onboarding/consent"
+                if reset_target == "BACKGROUND_READ"
+                else "/onboarding/intake"
+            )
+            await create_notification(
+                db=db,
+                user_id=user.user_id,
+                notification_type="info",
+                title="Onboarding pages updated",
+                message=(
+                    "An admin updated the onboarding pages while you were "
+                    "away. Please complete them again to continue."
+                ),
+                link=reset_link,
+                role_target="participant",
+                source_type="onboarding_reset",
+            )
+        await db.commit()
+
     return {"detail": "Login successful"}
 
 

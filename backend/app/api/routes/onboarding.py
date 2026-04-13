@@ -30,6 +30,7 @@ from app.services.onboarding_service import (
     mark_background_read,
     submit_consent,
     complete_onboarding,
+    queue_onboarding_reset_for_completed_participants,
     update_consent_template,
     update_background_template,
 )
@@ -46,6 +47,17 @@ from app.services.audit_service import write_audit_log
 router = APIRouter()
 
 INTAKE_FORM_TITLE = "Intake Form"
+
+# Profile columns that always live on the participant profile page. When an
+# intake field maps to one of these, the show_on_profile flag is forced True
+# on save so the field can never be accidentally hidden from the profile.
+_HARDCODED_PROFILE_COLUMNS = {
+    "dob", "gender", "pronouns", "primary_language", "country_of_origin",
+    "living_arrangement", "dependents", "occupation_status",
+    "marital_status", "highest_education_level",
+}
+
+
 def _get_valid_profile_field_names() -> set[str]:
     """Return column names on ParticipantProfile that intake fields may write to."""
     return set(ParticipantProfile.__table__.columns.keys())
@@ -367,13 +379,22 @@ async def get_profile_intake_fields(
         "marital_status", "highest_education_level",
     }
 
-    # Get fields marked show_on_profile with their options
+    # Hardcoded profile columns always belong on the profile page regardless
+    # of the show_on_profile flag (the flag only governs custom intake fields).
+    _ALWAYS_ON_PROFILE = _PROFILE_TABLE_COLUMNS - _EDITABLE_PROFILE_COLUMNS
+
+    # Include: (a) any field explicitly marked show_on_profile, OR
+    #          (b) any field mapped to a non-editable hardcoded profile column.
+    # Always exclude fields mapped to the 4 editable columns (rendered directly
+    # by the frontend from the participant record).
     fields_result = await db.execute(
         select(FormField)
         .where(
             FormField.form_id == form.form_id,
-            FormField.show_on_profile.is_(True),
-            # Only exclude the fields with custom edit UIs
+            or_(
+                FormField.show_on_profile.is_(True),
+                FormField.profile_field.in_(_ALWAYS_ON_PROFILE),
+            ),
             or_(FormField.profile_field.notin_(_EDITABLE_PROFILE_COLUMNS), FormField.profile_field.is_(None)),
         )
         .options(selectinload(FormField.options))
@@ -708,15 +729,40 @@ async def update_consent_template_route(
     db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
-    """Create a new version of the consent form template (deactivates previous)."""
-    template = await update_consent_template(
-        items=payload.items,
-        title=payload.title,
-        subtitle=payload.subtitle,
-        admin_user_id=current_user.user_id,
-        db=db,
+    """
+    Create a new version of the consent form template and defer participant
+    onboarding reset to next login when content actually changed.
+    """
+    active = await get_active_consent_template(db)
+    changed = (
+        not active
+        or active.title != payload.title
+        or (active.subtitle or None) != (payload.subtitle or None)
+        or (active.items or []) != (payload.items or [])
     )
-    return {"message": "Consent template updated.", "version": template.version, "template_id": str(template.template_id)}
+
+    if changed:
+        template = await update_consent_template(
+            items=payload.items,
+            title=payload.title,
+            subtitle=payload.subtitle,
+            admin_user_id=current_user.user_id,
+            db=db,
+        )
+        participants_reset = await queue_onboarding_reset_for_completed_participants(
+            "BACKGROUND_READ",
+            db,
+        )
+    else:
+        template = active
+        participants_reset = 0
+
+    return {
+        "message": "Consent template updated." if changed else "Consent template unchanged.",
+        "version": template.version,
+        "template_id": str(template.template_id),
+        "participants_reset": participants_reset,
+    }
 
 
 @router.put("/admin/background-template", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
@@ -725,15 +771,40 @@ async def update_background_template_route(
     db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
-    """Create a new version of the background info template (deactivates previous)."""
-    template = await update_background_template(
-        sections=payload.sections,
-        title=payload.title,
-        subtitle=payload.subtitle,
-        admin_user_id=current_user.user_id,
-        db=db,
+    """
+    Create a new version of the background info template and defer participant
+    onboarding reset to next login when content actually changed.
+    """
+    active = await get_active_background_template(db)
+    changed = (
+        not active
+        or active.title != payload.title
+        or (active.subtitle or None) != (payload.subtitle or None)
+        or (active.sections or []) != (payload.sections or [])
     )
-    return {"message": "Background template updated.", "version": template.version, "template_id": str(template.template_id)}
+
+    if changed:
+        template = await update_background_template(
+            sections=payload.sections,
+            title=payload.title,
+            subtitle=payload.subtitle,
+            admin_user_id=current_user.user_id,
+            db=db,
+        )
+        participants_reset = await queue_onboarding_reset_for_completed_participants(
+            "PENDING",
+            db,
+        )
+    else:
+        template = active
+        participants_reset = 0
+
+    return {
+        "message": "Background template updated." if changed else "Background template unchanged.",
+        "version": template.version,
+        "template_id": str(template.template_id),
+        "participants_reset": participants_reset,
+    }
 
 
 @router.get("/admin/intake-form", dependencies=[Depends(require_permissions(ONBOARDING_EDIT))])
@@ -855,24 +926,26 @@ async def update_intake_form_route(
                         or opts_changed):
                     form_changed = True
 
+            is_hardcoded = profile_field in _HARDCODED_PROFILE_COLUMNS
             target_field.label = field_data["label"]
             target_field.field_type = field_data["field_type"]
             target_field.profile_field = profile_field
-            target_field.is_required = field_data.get("is_required", False)
+            target_field.is_required = True if is_hardcoded else field_data.get("is_required", False)
             target_field.display_order = field_data.get("display_order", i + 1)
             target_field.config = field_config
-            target_field.show_on_profile = field_data.get("show_on_profile", False)
+            target_field.show_on_profile = True if is_hardcoded else field_data.get("show_on_profile", False)
         else:
             form_changed = True  # New field = form changed
+            is_hardcoded = profile_field in _HARDCODED_PROFILE_COLUMNS
             target_field = FormField(
                 form_id=form.form_id,
                 label=field_data["label"],
                 field_type=field_data["field_type"],
                 profile_field=profile_field,
-                is_required=field_data.get("is_required", False),
+                is_required=True if is_hardcoded else field_data.get("is_required", False),
                 display_order=field_data.get("display_order", i + 1),
                 config=field_config,
-                show_on_profile=field_data.get("show_on_profile", False),
+                show_on_profile=True if is_hardcoded else field_data.get("show_on_profile", False),
             )
             db.add(target_field)
             await db.flush()
@@ -930,24 +1003,13 @@ async def update_intake_form_route(
 
     await db.flush()
 
-    # ── Reset participants if form actually changed ───────────────────────
+    # Flag completed participants so the reset fires the next time they
+    # log in, rather than kicking them out of their current session.
     participants_reset = 0
     if form_changed:
-        reset_result = await db.execute(
-            update(ParticipantProfile)
-            .where(ParticipantProfile.onboarding_status == "COMPLETED")
-            .values(onboarding_status="CONSENT_GIVEN")
-        )
-        participants_reset = reset_result.rowcount
-
-        # Null out submitted_at so participants can re-submit intake
-        await db.execute(
-            update(FormSubmission)
-            .where(
-                FormSubmission.form_id == form.form_id,
-                FormSubmission.submitted_at.isnot(None),
-            )
-            .values(submitted_at=None)
+        participants_reset = await queue_onboarding_reset_for_completed_participants(
+            "CONSENT_GIVEN",
+            db,
         )
 
     await db.commit()
