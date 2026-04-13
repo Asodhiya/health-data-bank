@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { PARTICIPANT_NAV } from "../config/navigation";
 import NotificationBell from "../components/NotificationBell";
 import HDBLogo from "../components/HDBLogo";
+import { GuideToggle } from "../components/GuideTooltip";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function NoSidebarDashboardLayout() {
@@ -90,6 +91,7 @@ export default function NoSidebarDashboardLayout() {
         </nav>
         {/* RIGHT: Notifications & Profile Settings */}
         <div className="flex items-center gap-4 relative">
+          <GuideToggle />
           <NotificationBell role="participant" />
 
           {/* Profile Dropdown Container */}

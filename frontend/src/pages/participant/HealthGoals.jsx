@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
+import GuideTooltip from "../../components/GuideTooltip";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 
@@ -303,18 +304,22 @@ export default function HealthGoals() {
           <p className="text-sm text-slate-500 mt-1">Track and log your daily wellness habits.</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="px-4 py-2 bg-white rounded-xl border border-slate-200 flex items-center gap-2 shadow-sm">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Active</span>
-            <span className={`text-sm font-bold ${isAtLimit ? "text-rose-500" : "text-slate-800"}`}>
-              {activeGoals.length} / {MAX_GOALS}
-            </span>
-          </div>
-          <button
-            onClick={() => setIsDrawerOpen(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5"
-          >
-            <PlusIco /> Browse Goals
-          </button>
+          <GuideTooltip tip="How many goals you currently have active. You can have up to 10 at a time." position="bottom">
+            <div className="px-4 py-2 bg-white rounded-xl border border-slate-200 flex items-center gap-2 shadow-sm">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Active</span>
+              <span className={`text-sm font-bold ${isAtLimit ? "text-rose-500" : "text-slate-800"}`}>
+                {activeGoals.length} / {MAX_GOALS}
+              </span>
+            </div>
+          </GuideTooltip>
+          <GuideTooltip tip="Browse the goal library to add new wellness habits recommended for your health plan." position="bottom">
+            <button
+              onClick={() => setIsDrawerOpen(true)}
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5"
+            >
+              <PlusIco /> Browse Goals
+            </button>
+          </GuideTooltip>
         </div>
       </div>
 
@@ -462,7 +467,9 @@ export default function HealthGoals() {
           {/* Sidebar — hidden on mobile, shown on lg+ */}
           <div className="hidden lg:flex w-48 shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex-col">
             <div className="px-4 py-3 border-b border-slate-100">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">My Goals</p>
+              <GuideTooltip tip="Click a goal to see its details. Drag the grip handle ⠿ to reorder your goals." position="right">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-default">My Goals</p>
+              </GuideTooltip>
             </div>
             <div className="flex-1 overflow-y-auto py-2">
               {sortedGoals.map((g) => {
@@ -804,12 +811,14 @@ function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actio
                 <TrashIco />
               </button>
             )}
-            <button
-              onClick={onLogEntry}
-              className="flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-xl hover:bg-blue-100 transition-all"
-            >
-              <PencilIco /> Log entry
-            </button>
+            <GuideTooltip tip="Record today's progress toward this goal — enter a value or mark it as done." position="bottom">
+              <button
+                onClick={onLogEntry}
+                className="flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-xl hover:bg-blue-100 transition-all"
+              >
+                <PencilIco /> Log entry
+              </button>
+            </GuideTooltip>
           </div>
         </div>
 

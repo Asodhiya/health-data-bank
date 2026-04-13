@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
 import NotificationsPanel from "../../components/NotificationsPanel";
+import GuideTooltip from "../../components/GuideTooltip";
 
 const BellIco = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -150,7 +151,7 @@ export default function ParticipantFeedback() {
           {!loading && !error && (
             <>
               {/* Filter tabs */}
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap items-center">
                 {FILTERS.map((f) => {
                   const count =
                     f === "All"
@@ -159,21 +160,28 @@ export default function ParticipantFeedback() {
                       ? feedback.filter((fb) => fb.submission_id).length
                       : feedback.filter((fb) => !fb.submission_id).length;
 
+                  const tipMap = {
+                    "All": "Show all feedback from your caretaker.",
+                    "On Submissions": "Feedback your caretaker left on a specific survey you submitted.",
+                    "General Notes": "General notes your caretaker wrote about your overall health progress — not tied to a specific survey.",
+                  };
+
                   return (
-                    <button
-                      key={f}
-                      onClick={() => setFilter(f)}
-                      className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-all ${
-                        filter === f
-                          ? "bg-blue-600 text-white border-blue-600"
-                          : "bg-white text-slate-500 border-slate-200 hover:border-blue-300 hover:text-blue-700"
-                      }`}
-                    >
-                      {f}
-                      <span className={`ml-1.5 text-xs font-bold ${filter === f ? "text-blue-200" : "text-slate-400"}`}>
-                        {count}
-                      </span>
-                    </button>
+                    <GuideTooltip key={f} tip={tipMap[f]} position="bottom">
+                      <button
+                        onClick={() => setFilter(f)}
+                        className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-all ${
+                          filter === f
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : "bg-white text-slate-500 border-slate-200 hover:border-blue-300 hover:text-blue-700"
+                        }`}
+                      >
+                        {f}
+                        <span className={`ml-1.5 text-xs font-bold ${filter === f ? "text-blue-200" : "text-slate-400"}`}>
+                          {count}
+                        </span>
+                      </button>
+                    </GuideTooltip>
                   );
                 })}
               </div>

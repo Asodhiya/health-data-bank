@@ -3,6 +3,7 @@ import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { generatePDFReport, generateCSVReport } from "../../utils/healthReportExport";
+import GuideTooltip from "../../components/GuideTooltip";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -302,22 +303,26 @@ export default function ParticipantHealthSummary() {
 
       {/* ── Tab bar ── */}
       <div className="flex gap-2">
-        <TabButton
-          id="overview"
-          activeTab={tab}
-          onClick={setTab}
-          icon={<IcoOverview />}
-          label="Overview"
-          badge={elements.length > 0 ? elements.length : null}
-        />
-        <TabButton
-          id="compare"
-          activeTab={tab}
-          onClick={setTab}
-          icon={<IcoCompare />}
-          label="Compare"
-          badge={null}
-        />
+        <GuideTooltip tip="See all your tracked health metrics as individual charts — one graph per metric over time." position="bottom">
+          <TabButton
+            id="overview"
+            activeTab={tab}
+            onClick={setTab}
+            icon={<IcoOverview />}
+            label="Overview"
+            badge={elements.length > 0 ? elements.length : null}
+          />
+        </GuideTooltip>
+        <GuideTooltip tip="Pick two health metrics and see them side by side on the same chart to spot patterns or relationships." position="bottom">
+          <TabButton
+            id="compare"
+            activeTab={tab}
+            onClick={setTab}
+            icon={<IcoCompare />}
+            label="Compare"
+            badge={null}
+          />
+        </GuideTooltip>
       </div>
 
       {/* ── Tab panels ── */}

@@ -69,13 +69,8 @@ export default function RegisterPage() {
   const set = (field) => (e) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
-  const handlePhoneChange = (e) => {
-    const digits = digitsOnly(e.target.value).slice(0, 10);
-    setForm((prev) => ({
-      ...prev,
-      phone: digits,
-      phoneDisplay: formatPhone(digits),
-    }));
+  const handlePhoneChange = (value) => {
+    setForm((prev) => ({ ...prev, phone: value || '' }));
   };
 
   const handleSubmit = async (e) => {
