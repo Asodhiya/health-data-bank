@@ -1,20 +1,8 @@
-"""
-Bootstrap the first admin account from environment variables.
-
-Add these to your .env before first startup:
-
-    FIRST_ADMIN_EMAIL=admin@example.com
-    FIRST_ADMIN_PASSWORD=changeme123
-    FIRST_ADMIN_USERNAME=admin
-    FIRST_ADMIN_FIRST_NAME=Admin
-    FIRST_ADMIN_LAST_NAME=User
-
-Runs on every startup but does nothing if:
-  - any admin already exists, OR
-  - FIRST_ADMIN_EMAIL / FIRST_ADMIN_PASSWORD are not set.
-"""
 import os
 import logging
+import secrets
+import string
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -24,12 +12,23 @@ from app.db.models import User, Role, UserRole
 logger = logging.getLogger(__name__)
 
 
+def generate_password(length: int = 20) -> str:
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
 async def seed_first_admin(db: AsyncSession) -> None:
     email = os.getenv("FIRST_ADMIN_EMAIL", "").strip()
     password = os.getenv("FIRST_ADMIN_PASSWORD", "").strip()
 
-    if not email or not password:
+    if not email:
+        logger.warning("Admin bootstrap skipped: FIRST_ADMIN_EMAIL is not set.")
         return
+
+    generated_password = False
+    if not password:
+        password = generate_password()
+        generated_password = True
 
     # Skip if any admin already exists
     existing = await db.scalar(
@@ -55,7 +54,8 @@ async def seed_first_admin(db: AsyncSession) -> None:
     if taken:
         logger.warning(
             "Admin bootstrap skipped: email or username already taken (%s / %s).",
-            email, username,
+            email,
+            username,
         )
         return
 
@@ -63,7 +63,9 @@ async def seed_first_admin(db: AsyncSession) -> None:
         select(Role).where(Role.role_name == "admin")
     )
     if not admin_role:
-        logger.warning("Admin bootstrap skipped: 'admin' role not found — rbac seed must run first.")
+        logger.warning(
+            "Admin bootstrap skipped: 'admin' role not found — rbac seed must run first."
+        )
         return
 
     user = User(
@@ -81,3 +83,11 @@ async def seed_first_admin(db: AsyncSession) -> None:
     await db.commit()
 
     logger.info("First admin account created: %s (%s %s)", email, first_name, last_name)
+
+    if generated_password:
+        logger.warning(
+            "Temporary first-admin password generated for %s: %s",
+            email,
+            password,
+        )
+        logger.warning("Change this password immediately after first login.")
