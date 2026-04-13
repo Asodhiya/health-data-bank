@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
-from app.seeds.rbac_seed import ROLE_PERMISSIONS
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.db.models import Role, RolePermission, Permission
 
 
 def _extract_perms_from_callable(call) -> list[str] | None:
@@ -24,7 +28,21 @@ def _is_check_current_user(call) -> bool:
     return getattr(call, "__name__", "") == "check_current_user"
 
 
-def build_rbac_audit_report(app: FastAPI) -> list[dict]:
+async def _load_role_permissions(db: AsyncSession) -> dict[str, list[str]]:
+    """Query the live DB for role -> permission code mappings."""
+    result = await db.execute(
+        select(Role.role_name, Permission.code)
+        .join(RolePermission, Role.role_id == RolePermission.role_id)
+        .join(Permission, RolePermission.permission_id == Permission.permission_id)
+    )
+    role_perms: dict[str, list[str]] = {}
+    for role_name, perm_code in result.all():
+        role_perms.setdefault(role_name, []).append(perm_code)
+    return role_perms
+
+
+async def build_rbac_audit_report(app: FastAPI, db: AsyncSession) -> list[dict]:
+    role_permissions = await _load_role_permissions(db)
     results = []
 
     for route in app.routes:
@@ -62,7 +80,7 @@ def build_rbac_audit_report(app: FastAPI) -> list[dict]:
             unique_perms = sorted(set(permissions_found))
             role_access = [
                 role
-                for role, role_perms in ROLE_PERMISSIONS.items()
+                for role, role_perms in role_permissions.items()
                 if all(p in role_perms for p in unique_perms)
             ]
             auth_level = "permission-required"
@@ -74,7 +92,7 @@ def build_rbac_audit_report(app: FastAPI) -> list[dict]:
             auth_level = "authenticated-only"
             detail = {
                 "permissions": [],
-                "roles_with_access": sorted(ROLE_PERMISSIONS.keys()),
+                "roles_with_access": sorted(role_permissions.keys()),
             }
         else:
             auth_level = "public"

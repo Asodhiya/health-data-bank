@@ -74,10 +74,11 @@ class UserSignup(BaseModel):
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, value: str) -> str:
-        digits_only = re.sub(r"\D", "", value)
-        if len(digits_only) != 10:
-            raise ValueError("phone number must contain exactly 10 digits")
-        return digits_only
+        cleaned = value.strip()
+        # ITU E.164: "+" followed by 8-15 digits, first digit 1-9
+        if not re.match(r"^\+[1-9]\d{7,14}$", cleaned):
+            raise ValueError("phone number must be in international E.164 format (e.g. +19025550147)")
+        return cleaned
 
     @model_validator(mode="after")
     def validate_passwords_match(self):

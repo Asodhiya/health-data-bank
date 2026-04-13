@@ -40,6 +40,12 @@ const FIELD_TYPES = [
   { value: "textarea", label: "Text area" },
 ];
 
+const HARDCODED_PROFILE_COLUMNS = new Set([
+  "dob", "gender", "pronouns", "primary_language", "country_of_origin",
+  "marital_status", "highest_education_level", "living_arrangement",
+  "dependents", "occupation_status",
+]);
+
 const PROFILE_FIELD_FALLBACK = [
   { value: "", label: "None" },
   { value: "dob", label: "Date of birth" },
@@ -431,8 +437,10 @@ function ProfileFieldModal({ value, dataElements, onSelect, onClose }) {
 function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, dataElements }) {
   const [profileModalIdx, setProfileModalIdx] = useState(null);
   const hasSelectOptions = (type) => ["single_select", "multi_select", "dropdown"].includes(type);
+  // Only count duplicates for hardcoded profile columns (last-wins conflict).
+  // Data element mappings are fine to duplicate — each creates its own HealthDataPoint.
   const mappedCounts = intakeFields.reduce((acc, field) => {
-    if (!field.profile_field) return acc;
+    if (!field.profile_field || !HARDCODED_PROFILE_COLUMNS.has(field.profile_field)) return acc;
     acc[field.profile_field] = (acc[field.profile_field] || 0) + 1;
     return acc;
   }, {});
@@ -557,6 +565,11 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                       <span className="text-xs font-medium text-slate-500">Show on profile</span>
                     </label>
                   </div>
+                  {field.show_on_profile && (!field.profile_field || !HARDCODED_PROFILE_COLUMNS.has(field.profile_field)) && (
+                    <p className="text-[11px] text-emerald-600 mt-0.5">
+                      Appears under <span className="font-semibold">Additional Information</span> on participant profile
+                    </p>
+                  )}
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                       Profile field mapping
@@ -708,6 +721,7 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                                   <option value="">None (use manual options)</option>
                                   <option value="languages">Languages</option>
                                   <option value="countries">Countries</option>
+                                  <option value="pronouns">Pronouns</option>
                                 </select>
                               </label>
                               {field.field_type === "multi_select" && (

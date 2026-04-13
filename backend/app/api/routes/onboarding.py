@@ -122,7 +122,7 @@ def _serialize_intake_field(field: FormField) -> dict[str, Any]:
 
 
 _VALID_CONFIG_KEYS = {"searchable", "creatable", "predefined_list", "conditional", "min", "max", "max_date_rule"}
-_VALID_PREDEFINED_LISTS = {"languages", "countries"}
+_VALID_PREDEFINED_LISTS = {"languages", "countries", "pronouns"}
 _VALID_DATE_RULES = {"adult_18"}
 
 _FIELD_TYPE_CONFIG_KEYS: dict[str, set[str]] = {
@@ -354,9 +354,14 @@ async def get_profile_intake_fields(
     if not submission:
         return {"fields": []}
 
-    # Profile columns already rendered by the hardcoded ParticipantFields component.
-    # Exclude these to avoid showing the same field twice.
-    _HARDCODED_PROFILE_COLUMNS = {
+    # Fields with custom edit UIs in the frontend — kept hardcoded there,
+    # so exclude them from the dynamic list to avoid duplication.
+    _EDITABLE_PROFILE_COLUMNS = {"dob", "gender", "pronouns", "primary_language"}
+
+    # Profile columns that map to ParticipantProfile table columns.
+    # For these, read the current value from the profile record (may have
+    # been edited after intake submission).
+    _PROFILE_TABLE_COLUMNS = {
         "dob", "gender", "pronouns", "primary_language", "country_of_origin",
         "living_arrangement", "dependents", "occupation_status",
         "marital_status", "highest_education_level",
@@ -368,7 +373,8 @@ async def get_profile_intake_fields(
         .where(
             FormField.form_id == form.form_id,
             FormField.show_on_profile.is_(True),
-            or_(FormField.profile_field.notin_(_HARDCODED_PROFILE_COLUMNS), FormField.profile_field.is_(None)),
+            # Only exclude the fields with custom edit UIs
+            or_(FormField.profile_field.notin_(_EDITABLE_PROFILE_COLUMNS), FormField.profile_field.is_(None)),
         )
         .options(selectinload(FormField.options))
         .order_by(FormField.display_order)
@@ -389,26 +395,33 @@ async def get_profile_intake_fields(
 
     result_fields = []
     for field in profile_fields:
-        answer = answers_by_field.get(field.field_id)
-        if not answer:
-            continue
+        # For fields mapped to profile table columns, read current value
+        # from the profile record (it may have been updated after submission).
+        if field.profile_field and field.profile_field in _PROFILE_TABLE_COLUMNS:
+            raw_value = getattr(participant, field.profile_field, None)
+            display_value = str(raw_value) if raw_value is not None else None
+        else:
+            answer = answers_by_field.get(field.field_id)
+            if not answer:
+                continue
+            raw = answer.value_json if answer.value_json is not None else (
+                answer.value_number if answer.value_number is not None else answer.value_text
+            )
+            display_value = _resolve_profile_field_raw_value(field, raw)
+            if isinstance(display_value, list):
+                display_value = ", ".join(str(v) for v in display_value)
+            elif display_value is not None:
+                display_value = str(display_value)
 
-        # Resolve display value
-        raw = answer.value_json if answer.value_json is not None else (
-            answer.value_number if answer.value_number is not None else answer.value_text
-        )
-        display_value = _resolve_profile_field_raw_value(field, raw)
-
-        # Format arrays as comma-separated strings for display
-        if isinstance(display_value, list):
-            display_value = ", ".join(str(v) for v in display_value)
-        elif display_value is not None:
-            display_value = str(display_value)
+        # Determine if this field belongs to the demographics section
+        # (mapped to a profile table column) or additional information
+        is_demographic = field.profile_field in _PROFILE_TABLE_COLUMNS if field.profile_field else False
 
         result_fields.append({
             "label": field.label,
             "value": display_value,
             "field_type": field.field_type,
+            "is_demographic": is_demographic,
         })
 
     return {"fields": result_fields}
