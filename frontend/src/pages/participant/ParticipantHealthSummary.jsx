@@ -7,6 +7,15 @@ import GuideTooltip from "../../components/GuideTooltip";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+function isCaretakerMessageElement(item) {
+  const haystack = [item?.code, item?.label, item?.description]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (!haystack.includes("caretaker")) return false;
+  return ["note", "notes", "message", "messages"].some((token) => haystack.includes(token));
+}
+
 
 
 // ── SVG icons ──────────────────────────────────────────────────────────────
@@ -140,12 +149,23 @@ export default function ParticipantHealthSummary() {
         api.getMyVsGroupStats().catch(() => null),
         api.getMyHealthTimeseries().catch(() => []),
       ]);
-      setElements(elementsData || []);
+      const filteredElements = (elementsData || []).filter((element) => !isCaretakerMessageElement(element));
+      const filteredTimeseries = (timeseriesData || []).filter((series) => !isCaretakerMessageElement(series));
+      const filteredVsGroup = vsGroupData
+        ? {
+            ...vsGroupData,
+            elements: Array.isArray(vsGroupData.elements)
+              ? vsGroupData.elements.filter((element) => !isCaretakerMessageElement(element))
+              : [],
+          }
+        : vsGroupData;
+
+      setElements(filteredElements);
       setGoals(Array.isArray(goalsData) ? goalsData : []);
-      setVsGroup(vsGroupData);
-      setTimeseries(timeseriesData || []);
-      if (vsGroupData?.elements?.length) {
-        setSelectedElement(vsGroupData.elements[0].element_id);
+      setVsGroup(filteredVsGroup);
+      setTimeseries(filteredTimeseries);
+      if (filteredVsGroup?.elements?.length) {
+        setSelectedElement(filteredVsGroup.elements[0].element_id);
       }
     } catch (err) {
       setError(err.message);

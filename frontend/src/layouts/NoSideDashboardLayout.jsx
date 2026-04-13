@@ -173,7 +173,7 @@ export default function NoSidebarDashboardLayout() {
       </header>
 
       {/* --- BODY --- */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 min-h-0 relative overflow-hidden">
         {/* Mobile Backdrop */}
         {isMobileMenuOpen && (
           <div
@@ -210,7 +210,7 @@ export default function NoSidebarDashboardLayout() {
         </aside>
 
         {/* Main Content Area */}
-        <main className="h-full overflow-y-auto p-6">
+        <main className="h-full min-h-0 overflow-y-auto p-6">
           <Outlet context={{ user }} />
         </main>
       </div>

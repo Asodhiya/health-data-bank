@@ -21,6 +21,7 @@ PROFILE_DATA_ELEMENTS = [
     {"code": "living_arrangement",      "label": "Living Arrangement",      "datatype": "text",    "description": "Current living arrangement"},
     {"code": "dependents",              "label": "Dependents",              "datatype": "integer", "description": "Number of dependents"},
     {"code": "occupation_status",       "label": "Occupation Status",       "datatype": "text",    "description": "Current occupation or employment status"},
+    {"code": "caretaker_notes",         "label": "Caretaker Notes",         "datatype": "text",    "description": "Participant-to-caretaker message field. Special handling routes responses to the assigned caretaker instead of health summaries."},
 ]
 
 # Each entry: label, field_type, profile_field code, is_required, display_order, options list

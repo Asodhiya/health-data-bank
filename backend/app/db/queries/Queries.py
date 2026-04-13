@@ -24,6 +24,27 @@ def _utc_day_bounds(target_date: date | None = None) -> tuple[datetime, datetime
     end = start + timedelta(days=1)
     return start, end
 
+
+def _caretaker_message_element_expr(code_col, label_col, description_col):
+    haystack = func.lower(
+        func.concat(
+            func.coalesce(code_col, ""),
+            " ",
+            func.coalesce(label_col, ""),
+            " ",
+            func.coalesce(description_col, ""),
+        )
+    )
+    return and_(
+        haystack.like("%caretaker%"),
+        or_(
+            haystack.like("%note%"),
+            haystack.like("%notes%"),
+            haystack.like("%message%"),
+            haystack.like("%messages%"),
+        ),
+    )
+
 def get_participant_id(current_user: User) -> uuid.UUID:
     """
     Extract participant_id from the authenticated user's loaded profile.
@@ -33,6 +54,21 @@ def get_participant_id(current_user: User) -> uuid.UUID:
     if not current_user.participant_profile:
         raise HTTPException(status_code=403, detail="Not a participant")
     return current_user.participant_profile.participant_id
+
+
+def _point_display_value(row) -> str | None:
+    if row.value_text:
+        return row.value_text
+    if row.value_number is not None:
+        numeric = float(row.value_number)
+        return str(int(numeric)) if numeric.is_integer() else str(numeric)
+    if row.value_date:
+        return row.value_date.isoformat()
+    if isinstance(row.value_json, list):
+        return ", ".join(str(item) for item in row.value_json)
+    if isinstance(row.value_json, dict):
+        return ", ".join(f"{key}: {value}" for key, value in row.value_json.items())
+    return None
 
 
 class UserQuery:
@@ -1253,6 +1289,7 @@ class StatsQuery:
             select(FieldElementMap.element_id)
             .distinct()
             .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .join(DataElement, DataElement.element_id == FieldElementMap.element_id)
             .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
             .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
             .join(GroupMember, GroupMember.group_id == FormDeployment.group_id)
@@ -1260,7 +1297,73 @@ class StatsQuery:
             .where(GroupMember.left_at == None)
             .where(FormDeployment.revoked_at == None)
             .where(FormField.profile_field.is_(None))
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
         )
+
+    def _current_survey_field_meta_subquery(self, participant_id: uuid.UUID):
+        return (
+            select(
+                FieldElementMap.element_id.label("element_id"),
+                FormField.field_id.label("field_id"),
+                FormField.field_type.label("field_type"),
+            )
+            .distinct()
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .join(DataElement, DataElement.element_id == FieldElementMap.element_id)
+            .join(SurveyForm, SurveyForm.form_id == FormField.form_id)
+            .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
+            .join(GroupMember, GroupMember.group_id == FormDeployment.group_id)
+            .where(GroupMember.participant_id == participant_id)
+            .where(GroupMember.left_at == None)
+            .where(FormDeployment.revoked_at == None)
+            .where(FormField.profile_field.is_(None))
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
+        )
+
+    async def _get_current_element_display_meta(
+        self,
+        participant_id: uuid.UUID,
+        element_ids: list[uuid.UUID] | None = None,
+    ) -> dict[str, dict]:
+        field_meta_sq = self._current_survey_field_meta_subquery(participant_id).subquery()
+        stmt = (
+            select(
+                field_meta_sq.c.element_id,
+                field_meta_sq.c.field_type,
+                FieldOption.value,
+                FieldOption.label,
+            )
+            .select_from(field_meta_sq)
+            .outerjoin(FieldOption, FieldOption.field_id == field_meta_sq.c.field_id)
+            .order_by(field_meta_sq.c.element_id, FieldOption.value, FieldOption.display_order)
+        )
+        if element_ids:
+            stmt = stmt.where(field_meta_sq.c.element_id.in_(element_ids))
+
+        rows = (await self.db.execute(stmt)).all()
+        meta_by_element: dict[str, dict] = {}
+        for row in rows:
+            element_key = str(row.element_id)
+            meta = meta_by_element.setdefault(
+                element_key,
+                {"field_types": set(), "display_labels": [], "_seen_values": set()},
+            )
+            if row.field_type:
+                meta["field_types"].add(str(row.field_type).lower())
+            if row.value is None or row.label is None:
+                continue
+            value_key = int(row.value)
+            if value_key in meta["_seen_values"]:
+                continue
+            meta["_seen_values"].add(value_key)
+            meta["display_labels"].append({"value": value_key, "label": str(row.label)})
+
+        for meta in meta_by_element.values():
+            meta["field_types"] = sorted(meta["field_types"])
+            meta["display_labels"] = sorted(meta["display_labels"], key=lambda item: item["value"])
+            meta.pop("_seen_values", None)
+
+        return meta_by_element
 
     async def get_participant_summary(self, participant_id: uuid.UUID) -> dict:
         # Active forms: deployments for groups the participant belongs to, not revoked
@@ -1369,6 +1472,7 @@ class StatsQuery:
             .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
             .where(HealthDataPoint.participant_id == participant_id)
             .where(HealthDataPoint.element_id.in_(visible_element_ids))
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
             .group_by(DataElement.element_id, DataElement.code, DataElement.label, DataElement.unit)
         )
         if element_ids:
@@ -1401,6 +1505,7 @@ class StatsQuery:
         date_to: date | None = None,
     ) -> list[dict]:
         visible_element_ids = self._current_survey_element_ids_subquery(participant_id)
+        display_meta_by_element = await self._get_current_element_display_meta(participant_id, element_ids)
         stmt = (
             select(
                 DataElement.element_id,
@@ -1422,6 +1527,7 @@ class StatsQuery:
             .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
             .where(HealthDataPoint.participant_id == participant_id)
             .where(HealthDataPoint.element_id.in_(visible_element_ids))
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
             .order_by(
                 DataElement.element_id,
                 HealthDataPoint.observed_at,
@@ -1445,6 +1551,7 @@ class StatsQuery:
         series_by_element: dict[str, dict] = {}
         for row in rows:
             element_key = str(row.element_id)
+            display_meta = display_meta_by_element.get(element_key) or {}
             if element_key not in series_by_element:
                 series_by_element[element_key] = {
                     "element_id": element_key,
@@ -1452,6 +1559,8 @@ class StatsQuery:
                     "label": row.label,
                     "unit": row.unit,
                     "datatype": row.datatype,
+                    "field_types": display_meta.get("field_types", []),
+                    "display_labels": display_meta.get("display_labels", []),
                     "points": [],
                 }
 
@@ -1473,6 +1582,7 @@ class StatsQuery:
                     "value_date": row.value_date.isoformat() if row.value_date else None,
                     "value_json": row.value_json,
                     "notes": row.notes,
+                    "display_value": _point_display_value(row),
                 }
             )
 
@@ -2236,6 +2346,7 @@ class CaretakersQuery:
             .join(FormDeployment, FormDeployment.form_id == SurveyForm.form_id)
             .where(FormDeployment.group_id == group_id)
             .where(FormDeployment.revoked_at == None)
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
             .group_by(DataElement.element_id)
         ).subquery()
 
@@ -2268,6 +2379,7 @@ class CaretakersQuery:
             .outerjoin(deployed_elements_sq, deployed_elements_sq.c.element_id == DataElement.element_id)
             .outerjoin(data_point_count_sq, data_point_count_sq.c.element_id == DataElement.element_id)
             .where(DataElement.element_id.in_(relevant_ids_stmt))
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
             .order_by(DataElement.label)
         )
         return result.all()
@@ -2307,6 +2419,7 @@ class CaretakersQuery:
                 ),
             )
             .where(FormDeployment.revoked_at == None)
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
             .group_by(DataElement.element_id)
         ).subquery()
 
@@ -2488,11 +2601,13 @@ class CaretakersQuery:
                 ).label("median"),
                 func.stddev(HealthDataPoint.value_number).label("stddev"),
             )
+                    .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
             .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
             .join(ParticipantProfile, ParticipantProfile.participant_id == HealthDataPoint.participant_id)
             .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
             .where(GroupMember.group_id == group_id)
             .where(GroupMember.left_at == None)
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
             .group_by(DataElement.element_id, DataElement.code, DataElement.label, DataElement.unit)
         )
 
@@ -2691,6 +2806,7 @@ class CaretakersQuery:
                     comparison_sq.c.element_id != None,
                 )
             )
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
         )
         if element_ids:
             stmt = stmt.where(DataElement.element_id.in_(element_ids))
@@ -2948,6 +3064,7 @@ class CaretakersQuery:
             )
             .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
             .where(HealthDataPoint.participant_id == participant_id)
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
             .order_by(DataElement.element_id, HealthDataPoint.observed_at)
         )
         if element_ids:

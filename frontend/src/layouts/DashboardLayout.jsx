@@ -143,7 +143,7 @@ export default function DashboardLayout({ role }) {
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden">
         {/* Sidebar Backdrop */}
         {isSidebarOpen && (
           <div
@@ -205,7 +205,7 @@ export default function DashboardLayout({ role }) {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-slate-50 p-6">
+        <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-slate-50 p-6">
           <Outlet context={{ user }} />
         </main>
       </div>

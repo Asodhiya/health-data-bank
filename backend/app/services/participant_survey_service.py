@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from app.db.models import (
     SurveyForm, FormDeployment, GroupMember, FormSubmission,
     SubmissionAnswer, FormField, ParticipantProfile,
-    FieldElementMap, HealthDataPoint, Group, CaretakerProfile, FieldOption
+    FieldElementMap, HealthDataPoint, Group, CaretakerProfile, FieldOption, DataElement
 )
 from app.services.notification_service import create_notification, notification_exists_recent
 from app.services.survey_cadence import as_utc, get_cycle_key, get_cycle_label, normalize_cadence
@@ -376,6 +376,7 @@ async def _load_field_meta(field_ids: List[UUID], db: AsyncSession) -> Dict[UUID
             field.field_id,
             {
                 "field_type": field.field_type,
+                "field_label": field.label,
                 "options": {},
             },
         )
@@ -383,6 +384,34 @@ async def _load_field_meta(field_ids: List[UUID], db: AsyncSession) -> Dict[UUID
             meta["options"][int(option.value)] = str(option.label)
 
     return field_meta
+
+
+def _is_caretaker_message_element(element: DataElement | None) -> bool:
+    if element is None:
+        return False
+    haystack = " ".join(
+        str(value or "") for value in (element.code, element.label, element.description)
+    ).lower()
+    if "caretaker" not in haystack:
+        return False
+    return any(token in haystack for token in {"note", "notes", "message", "messages"})
+
+
+def _format_message_value(
+    val_text: Optional[str],
+    val_num: Optional[float],
+    val_json: Optional[Any],
+) -> str:
+    if val_text is not None and str(val_text).strip():
+        return str(val_text).strip()
+    if val_num is not None:
+        numeric = float(val_num)
+        return str(int(numeric)) if numeric.is_integer() else str(numeric)
+    if isinstance(val_json, list):
+        return ", ".join(str(item) for item in val_json)
+    if isinstance(val_json, dict):
+        return ", ".join(f"{key}: {value}" for key, value in val_json.items())
+    return ""
 
 
 def _resolve_answer_value(
@@ -506,18 +535,38 @@ async def submit_survey_response(form_id: UUID, user_id: UUID, answers: List[Dic
 
     field_ids = [field_uuid for _, field_uuid, *_ in answer_records]
     field_meta = await _load_field_meta(field_ids, db)
-    map_stmt = select(FieldElementMap).where(FieldElementMap.field_id.in_(field_ids))
+    map_stmt = (
+        select(FieldElementMap, DataElement)
+        .join(DataElement, DataElement.element_id == FieldElementMap.element_id)
+        .where(FieldElementMap.field_id.in_(field_ids))
+    )
     map_result = await db.execute(map_stmt)
-    field_map: Dict[UUID, FieldElementMap] = {
-        row.field_id: row for row in map_result.scalars().all()
+    field_map: Dict[UUID, Dict[str, Any]] = {
+        mapping.field_id: {"mapping": mapping, "element": element}
+        for mapping, element in map_result.all()
     }
 
+    caretaker_messages: list[dict[str, str]] = []
+
     for _, field_uuid, val_text, val_num, val_json in answer_records:
-        mapping = field_map.get(field_uuid)
-        if not mapping:
+        mapping_meta = field_map.get(field_uuid)
+        if not mapping_meta:
             continue
+        mapping = mapping_meta["mapping"]
+        element = mapping_meta["element"]
         val_text, val_num, val_json = _resolve_answer_value(field_uuid, val_text, val_num, val_json, field_meta)
         val_text, val_num, val_json = _apply_transform(val_text, val_num, val_json, mapping.transform_rule)
+
+        if _is_caretaker_message_element(element):
+            message_text = _format_message_value(val_text, val_num, val_json)
+            if message_text:
+                field_label = str((field_meta.get(field_uuid) or {}).get("field_label") or element.label or "Message")
+                caretaker_messages.append({
+                    "field_label": field_label,
+                    "message": message_text,
+                })
+            continue
+
         dp = HealthDataPoint(
             participant_id=participant.participant_id,
             element_id=mapping.element_id,
@@ -561,6 +610,34 @@ async def submit_survey_response(form_id: UUID, user_id: UUID, answers: List[Dic
             .where(Group.group_id == submission.group_id)
         )
         if caretaker_user_id:
+            if caretaker_messages:
+                participant_name = " ".join(
+                    part for part in [getattr(participant, "first_name", None), getattr(participant, "last_name", None)] if part
+                ).strip() or "A participant"
+                combined_message = "\n".join(
+                    f"{entry['field_label']}: {entry['message']}" for entry in caretaker_messages
+                )
+                already_notified = await notification_exists_recent(
+                    db,
+                    user_id=caretaker_user_id,
+                    notification_type="message",
+                    source_type="participant_message",
+                    source_id=submission.submission_id,
+                    within_hours=24,
+                )
+                if not already_notified:
+                    await create_notification(
+                        db=db,
+                        user_id=caretaker_user_id,
+                        notification_type="message",
+                        title="Participant message received",
+                        message=f"{participant_name} sent a message from '{form.title if form else 'a survey'}'.\n{combined_message}",
+                        link="/caretaker/participants",
+                        role_target="caretaker",
+                        source_type="participant_message",
+                        source_id=submission.submission_id,
+                    )
+
             already_notified = await notification_exists_recent(
                 db,
                 user_id=caretaker_user_id,

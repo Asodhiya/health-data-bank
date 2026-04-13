@@ -23,6 +23,11 @@ from app.services.survey_cadence import normalize_cadence
 ONBOARDING_FORM_TITLES = {"Intake Form"}
 
 
+def _revoke_deployment(deployment: FormDeployment) -> None:
+    if deployment.revoked_at is None:
+        deployment.revoked_at = datetime.now(timezone.utc)
+
+
 async def _get_group_participant_user_ids(
     db: AsyncSession,
     group_ids: list[UUID],
@@ -650,7 +655,11 @@ async def publish_survey_form(
         raise HTTPException(status_code=404, detail="Group not found. Make sure the group exists before publishing.")
 
     existing_deployment_result = await db.execute(
-        select(FormDeployment).where(FormDeployment.form_id == form_id, FormDeployment.group_id == group_id)
+        select(FormDeployment).where(
+            FormDeployment.form_id == form_id,
+            FormDeployment.group_id == group_id,
+            FormDeployment.revoked_at == None,
+        )
     )
     existing_deployment = existing_deployment_result.scalar_one_or_none()
     if existing_deployment:
@@ -705,7 +714,10 @@ async def publish_survey_form(
         return {"msg": "cadence updated", "cadence": normalized_cadence}
 
     active_deployments_result = await db.execute(
-        select(FormDeployment).where(FormDeployment.form_id == form_id)
+        select(FormDeployment).where(
+            FormDeployment.form_id == form_id,
+            FormDeployment.revoked_at == None,
+        )
     )
     active_deployments = active_deployments_result.scalars().all()
 
@@ -723,11 +735,12 @@ async def publish_survey_form(
         sibling_ids = [s.form_id for s in siblings]
         old_deployments_result = await db.execute(
             select(FormDeployment).where(
-                FormDeployment.form_id.in_(sibling_ids)
+                FormDeployment.form_id.in_(sibling_ids),
+                FormDeployment.revoked_at == None,
             )
         )
         for old_dep in old_deployments_result.scalars().all():
-            await db.delete(old_dep)
+            _revoke_deployment(old_dep)
         for sibling in siblings:
             if sibling.status == "PUBLISHED":
                 sibling.status = "ARCHIVED"
@@ -805,7 +818,10 @@ async def unpublish_survey_form_all(form_id: UUID, user_id: UUID, db: AsyncSessi
         raise HTTPException(status_code=400, detail="This form is not currently published.")
 
     deployment_result = await db.execute(
-        select(FormDeployment).where(FormDeployment.form_id == form_id)
+        select(FormDeployment).where(
+            FormDeployment.form_id == form_id,
+            FormDeployment.revoked_at == None,
+        )
     )
     deployments = deployment_result.scalars().all()
 
@@ -814,7 +830,7 @@ async def unpublish_survey_form_all(form_id: UUID, user_id: UUID, db: AsyncSessi
     caretaker_user_ids = await _get_group_caretaker_user_ids(db, affected_group_ids)
 
     for deployment in deployments:
-        await db.delete(deployment)
+        _revoke_deployment(deployment)
 
     form.status = "ARCHIVED"
     form.modified_at = func.now()
@@ -856,7 +872,11 @@ async def unpublish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db
         raise HTTPException(status_code=404, detail="Form not found.")
 
     deployment_result = await db.execute(
-        select(FormDeployment).where(FormDeployment.form_id == form_id, FormDeployment.group_id == group_id)
+        select(FormDeployment).where(
+            FormDeployment.form_id == form_id,
+            FormDeployment.group_id == group_id,
+            FormDeployment.revoked_at == None,
+        )
     )
     deployment = deployment_result.scalar_one_or_none()
     if not deployment:
@@ -874,11 +894,14 @@ async def unpublish_survey_form(form_id: UUID, group_id: UUID, user_id: UUID, db
     )
     ct_row = ct_result.one_or_none()
 
-    await db.delete(deployment)
+    _revoke_deployment(deployment)
 
     # Check if any deployments remain — if none, archive the form
     remaining_result = await db.execute(
-        select(FormDeployment).where(FormDeployment.form_id == form_id)
+        select(FormDeployment).where(
+            FormDeployment.form_id == form_id,
+            FormDeployment.revoked_at == None,
+        )
     )
     remaining = remaining_result.scalars().all()
     if not remaining:
@@ -930,12 +953,15 @@ async def archive_survey_form(form_id: UUID, user_id: UUID, db: AsyncSession):
     affected_group_ids: list[UUID] = []
     if form.status == "PUBLISHED":
         deployments_result = await db.execute(
-            select(FormDeployment).where(FormDeployment.form_id == form_id)
+            select(FormDeployment).where(
+                FormDeployment.form_id == form_id,
+                FormDeployment.revoked_at == None,
+            )
         )
         deployments = deployments_result.scalars().all()
         affected_group_ids = [dep.group_id for dep in deployments if dep.group_id]
         for dep in deployments:
-            await db.delete(dep)
+            _revoke_deployment(dep)
     if form.status == "DELETED":
         raise HTTPException(status_code=400, detail="Deleted forms cannot be archived.")
     if form.status == "ARCHIVED":
