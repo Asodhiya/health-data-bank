@@ -139,25 +139,24 @@ function ConsentEditor({ consent, setConsent }) {
         <div className="space-y-3">
           {items.map((item, idx) => (
             <div key={item.id || idx} className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 group">
-              <div className="flex gap-3">
-                {/* Number badge */}
-                <span className="flex-shrink-0 w-7 h-7 rounded-lg bg-blue-100 text-blue-600 text-xs font-bold flex items-center justify-center mt-0.5">
-                  {idx + 1}
-                </span>
-
-                {/* Text area */}
-                <div className="flex-1 min-w-0">
-                  <textarea
-                    value={item.text}
-                    onChange={(e) => updateItem(idx, "text", e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all"
-                    rows={2}
-                    placeholder="Enter consent item text..."
-                  />
+              <div className="flex flex-col sm:flex-row gap-3">
+                {/* Badge + textarea row */}
+                <div className="flex gap-3 flex-1 min-w-0">
+                  <span className="flex-shrink-0 w-7 h-7 rounded-lg bg-blue-100 text-blue-600 text-xs font-bold flex items-center justify-center mt-0.5">
+                    {idx + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <textarea
+                      value={item.text}
+                      onChange={(e) => updateItem(idx, "text", e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all"
+                      rows={2}
+                      placeholder="Enter consent item text..."
+                    />
+                  </div>
                 </div>
-
-                {/* Action buttons */}
-                <div className="flex flex-col gap-1 shrink-0">
+                {/* Action buttons — horizontal on mobile, vertical on sm+ */}
+                <div className="flex sm:flex-col gap-1 shrink-0 justify-end">
                   <button
                     onClick={() => idx > 0 && setConsent({ ...consent, items: moveItem(items, idx, idx - 1) })}
                     disabled={idx === 0}
@@ -314,8 +313,8 @@ function BackgroundEditor({ background, setBackground }) {
                   style={{ minHeight: "180px" }}
                   placeholder="Section body (supports Markdown)"
                 />
-                <div className="flex items-center justify-between mt-2">
-                  <div className="flex items-center gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-2">
+                  <div className="flex flex-wrap items-center gap-3">
                     <span className="text-xs text-slate-400 flex items-center gap-1">
                       <IconEdit /> Supports <strong>**bold**</strong> and <em>*italic*</em> markdown
                     </span>
@@ -327,10 +326,10 @@ function BackgroundEditor({ background, setBackground }) {
                         className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                       />
                       <span className="text-xs font-medium text-slate-500">Card style</span>
-                      <span className="text-xs text-slate-300">— wraps in a bordered card for the participant</span>
+                      <span className="text-xs text-slate-300 hidden sm:inline">— wraps in a bordered card for the participant</span>
                     </label>
                   </div>
-                  <span className="text-xs text-slate-400">{(section.body || "").length} chars</span>
+                  <span className="text-xs text-slate-400 shrink-0">{(section.body || "").length} chars</span>
                 </div>
               </div>
             </div>
@@ -526,7 +525,8 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
             const isHardcoded = !!field.profile_field && HARDCODED_PROFILE_COLUMNS.has(field.profile_field);
             return (
             <div key={idx} className="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
-              <div className="flex gap-3">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex gap-3 flex-1 min-w-0">
                 <span className="flex-shrink-0 w-7 h-7 rounded-lg bg-violet-100 text-violet-600 text-xs font-bold flex items-center justify-center mt-0.5">
                   {idx + 1}
                 </span>
@@ -538,7 +538,7 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                     className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all"
                     placeholder="Field label (e.g. Undergraduate Program)"
                   />
-                  <div className="flex items-center gap-4">
+                  <div className="flex flex-wrap items-center gap-3">
                     <select
                       value={field.field_type}
                       onChange={(e) => updateField(idx, "field_type", e.target.value)}
@@ -773,7 +773,7 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                             <span className="text-xs text-slate-600">Conditional sub-field</span>
                           </label>
                           {field.config?.conditional && (
-                            <div className="ml-6 space-y-2 p-2.5 bg-white border border-slate-200 rounded-lg">
+                            <div className="ml-3 sm:ml-6 space-y-2 p-2.5 bg-white border border-slate-200 rounded-lg">
                               <label className="flex items-center gap-1.5 text-xs text-slate-500">
                                 Trigger value
                                 <input
@@ -785,7 +785,7 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                                 />
                               </label>
                               <p className="text-[11px] text-slate-400">Sub-field type: Number</p>
-                              <div className="flex items-center gap-3">
+                              <div className="flex flex-wrap items-center gap-3">
                                 <label className="flex items-center gap-1.5 text-xs text-slate-500">
                                   Min
                                   <input
@@ -795,7 +795,7 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                                       ...field.config.conditional,
                                       sub_config: { ...(field.config.conditional.sub_config || {}), min: e.target.value === "" ? undefined : Number(e.target.value) },
                                     })}
-                                    className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                    className="w-16 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
                                   />
                                 </label>
                                 <label className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -807,7 +807,7 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                                       ...field.config.conditional,
                                       sub_config: { ...(field.config.conditional.sub_config || {}), max: e.target.value === "" ? undefined : Number(e.target.value) },
                                     })}
-                                    className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                    className="w-16 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
                                   />
                                 </label>
                               </div>
@@ -818,7 +818,8 @@ function IntakeEditor({ intakeFields, setIntakeFields, profileFieldOptions, data
                     </div>
                   )}
                 </div>
-                <div className="flex flex-col gap-1 shrink-0">
+                </div>
+                <div className="flex sm:flex-col gap-1 shrink-0 justify-end">
                   <button
                     onClick={() => idx > 0 && setIntakeFields(moveItem(intakeFields, idx, idx - 1))}
                     disabled={idx === 0}
@@ -876,7 +877,7 @@ function Preview({ consent, background, intakeFields, profileFieldOptions }) {
         </p>
 
         {/* Preview sub-tabs */}
-        <div className="flex gap-2 mb-6">
+        <div className="flex flex-wrap gap-2 mb-6">
           {[
             { key: "background", label: "Background info" },
             { key: "consent", label: "Consent form" },
@@ -900,7 +901,7 @@ function Preview({ consent, background, intakeFields, profileFieldOptions }) {
         <div className="border border-slate-200 rounded-xl p-6 bg-slate-50/30 max-h-[600px] overflow-y-auto">
           {previewTab === "consent" && <ConsentPreview consent={consent} />}
           {previewTab === "background" && <BackgroundPreview background={background} />}
-          {previewTab === "intake" && <IntakePreview intakeFields={intakeFields} />}
+          {previewTab === "intake" && <IntakePreview intakeFields={intakeFields} profileFieldOptions={profileFieldOptions} />}
         </div>
       </div>
     </div>
@@ -964,7 +965,7 @@ function BackgroundPreview({ background }) {
   );
 }
 
-function IntakePreview({ intakeFields }) {
+function IntakePreview({ intakeFields, profileFieldOptions = [] }) {
   return (
     <div>
       <div className="text-center mb-5">
@@ -1212,7 +1213,7 @@ export default function OnboardingManagementPage() {
       )}
 
       {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Onboarding Templates</h1>
           <p className="text-sm text-slate-400 mt-1">
@@ -1222,7 +1223,7 @@ export default function OnboardingManagementPage() {
         <button
           onClick={handleSave}
           disabled={saving || !dirty}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors self-start sm:self-auto shrink-0 ${
             dirty && !saving
               ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
               : "bg-slate-100 text-slate-400 cursor-not-allowed"
@@ -1252,12 +1253,12 @@ export default function OnboardingManagementPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl mb-6 w-fit">
+      <div className="grid grid-cols-2 sm:flex gap-1 bg-slate-100 p-1 rounded-xl mb-6">
         {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setActiveTab(t.key)}
-            className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-3 sm:px-5 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === t.key
                 ? "bg-white text-slate-800 shadow-sm"
                 : "text-slate-500 hover:text-slate-700"

@@ -658,7 +658,7 @@ export default function AuditLogPage() {
                             <span className="text-[10px] font-mono text-slate-300 bg-slate-50 px-2 py-1 rounded">{log.audit_id}</span>
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                           {[["Action Code", log.action, true], ["Category", c.cat], ["Severity", c.sev], ["Entity Type", log.entity_type || "N/A"]].map(([label, value, mono]) => (
                             <div key={label} className="bg-slate-50 rounded-lg px-3 py-2">
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{label}</p>
@@ -678,7 +678,7 @@ export default function AuditLogPage() {
                               : log.actor_label === "System" ? "SY" : "?"
                             }
                           </div>
-                          <div className="flex-1 grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+                          <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
                             <div>
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Name</p>
                               {log.actor_user_id && log.actor_label && log.actor_label !== "Unknown" && log.actor_label !== "System"
@@ -725,7 +725,7 @@ export default function AuditLogPage() {
                       {/* Section 3: Request Context */}
                       <div className="pt-4 border-t border-slate-100">
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Request Context</p>
-                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                           {[["IP Address", log.ip_address || "N/A", true], ["Timestamp", fmtFull(log.created_at)]].map(([label, value, mono]) => (
                             <div key={label} className="bg-slate-50 rounded-lg px-3 py-2">
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{label}</p>
@@ -747,7 +747,7 @@ export default function AuditLogPage() {
                         <div className="pt-4 border-t border-slate-100">
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Additional Details</p>
                           <div className="bg-slate-50 rounded-lg border border-slate-100 p-4">
-                            <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
                               {Object.entries(log.details).filter(([k]) => k !== "device").map(([k, v]) => (
                                 <div key={k}>
                                   <p className="text-[10px] text-slate-400 font-medium">{DETAIL_LABELS[k] || k}</p>

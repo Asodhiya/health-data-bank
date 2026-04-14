@@ -164,6 +164,7 @@ class GoalTemplateCreate(BaseModel):
 class GoalTemplateUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    element_id: Optional[UUID] = None
     default_target: Optional[float] = None
     progress_mode: Optional[ProgressMode] = None
     direction: Optional[GoalDirection] = None
