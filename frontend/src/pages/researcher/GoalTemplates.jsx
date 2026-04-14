@@ -437,6 +437,7 @@ export default function GoalTemplates() {
     default_target: 0,
     progress_mode: "incremental",
     direction: "at_least",
+    _tracked: false, // UI-only flag: tracked = absolute + window none
   });
 
   const fetchAllData = useCallback(async () => {
@@ -478,7 +479,9 @@ export default function GoalTemplates() {
       element_id: "",
       default_target: 0,
       progress_mode: "incremental",
+      window: "daily",
       direction: "at_least",
+      _tracked: false,
     });
     setShowModal(true);
   };
@@ -494,13 +497,17 @@ export default function GoalTemplates() {
   const openEditModal = (template, e) => {
     e.stopPropagation();
     setEditingId(template.template_id);
+    const pm = template.progress_mode || "incremental";
+    const win = template.window || (pm === "absolute" ? "monthly" : "daily");
     setFormData({
       name: template.name || "",
       description: template.description || "",
       element_id: template.element_id || "",
       default_target: template.default_target || 0,
-      progress_mode: template.progress_mode || "incremental",
+      progress_mode: pm,
+      window: win,
       direction: template.direction || "at_least",
+      _tracked: pm === "absolute",
     });
     setShowModal(true);
   };
@@ -515,15 +522,18 @@ export default function GoalTemplates() {
       showToast("That data element already has an active goal template.");
       return;
     }
+    // Strip UI-only flag; for incremental goals default window to "daily"
+    const { _tracked, ...payload } = formData;
+    if (payload.progress_mode !== "absolute") payload.window = payload.window || "daily";
     try {
       if (editingId) {
-        await api.updateGoalTemplate(editingId, formData);
+        await api.updateGoalTemplate(editingId, payload);
         if (selectedTemplate?.template_id === editingId) {
-          setSelectedTemplate((prev) => prev ? ({ ...prev, ...formData }) : null);
+          setSelectedTemplate((prev) => prev ? ({ ...prev, ...payload }) : null);
         }
         showToast("Changes saved successfully");
       } else {
-        await api.createGoalTemplate(formData);
+        await api.createGoalTemplate(payload);
         showToast("Goal template created");
       }
       setShowModal(false);
@@ -1007,6 +1017,7 @@ export default function GoalTemplates() {
                   Behavior:{" "}
                   <span className="text-slate-600">
                     {formData.progress_mode || "incremental"} · {formData.direction || "at_least"}
+                    {formData.progress_mode === "absolute" ? ` · ${formData.window || "monthly"} window` : ""}
                   </span>
                 </p>
               </div>
@@ -1092,30 +1103,62 @@ export default function GoalTemplates() {
                   </div>
                 </div>
 
-                {/* Direction + Progress Mode */}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Direction</label>
-                    <select
-                      className="mt-1.5 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition"
-                      value={formData.direction}
-                      onChange={(e) => setFormData({ ...formData, direction: e.target.value })}
-                    >
-                      <option value="at_least">At least</option>
-                      <option value="at_most">At most</option>
-                    </select>
-                  </div>
+                {/* Goal type + window (grid when absolute so window selector appears) */}
+                <div className={`grid gap-3 ${formData.progress_mode === "absolute" ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
                   <div>
                     <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Progress mode</label>
                     <select
                       className="mt-1.5 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition"
                       value={formData.progress_mode}
-                      onChange={(e) => setFormData({ ...formData, progress_mode: e.target.value })}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setFormData((p) => ({
+                          ...p,
+                          progress_mode: v,
+                          _tracked: v === "absolute",
+                          // default to monthly window when switching to absolute
+                          ...(v === "absolute" && p.window === "daily" ? { window: "monthly" } : {}),
+                        }));
+                      }}
                     >
-                      <option value="incremental">Incremental</option>
-                      <option value="absolute">Absolute</option>
+                      <option value="incremental">Incremental — each log adds to total</option>
+                      <option value="absolute">Absolute — 1 reading/day, latest value counts</option>
                     </select>
+                    {formData.progress_mode === "absolute" && (
+                      <p className="mt-1.5 text-[11px] text-violet-600 font-medium">
+                        Participants log once per day. The goal completes when their reading meets the target.
+                      </p>
+                    )}
                   </div>
+
+                  {/* Window — only shown for absolute mode */}
+                  {formData.progress_mode === "absolute" && (
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Window</label>
+                      <select
+                        className="mt-1.5 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition"
+                        value={formData.window || "monthly"}
+                        onChange={(e) => setFormData((p) => ({ ...p, window: e.target.value }))}
+                      >
+                        <option value="weekly">Weekly — resets each week</option>
+                        <option value="monthly">Monthly — resets each month</option>
+                        <option value="none">No reset — track until permanently met</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Direction */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Direction</label>
+                  <select
+                    className="mt-1.5 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition"
+                    value={formData.direction}
+                    onChange={(e) => setFormData({ ...formData, direction: e.target.value })}
+                  >
+                    <option value="at_least">At least (reach the target)</option>
+                    <option value="at_most">At most (stay under the target)</option>
+                  </select>
                 </div>
 
                 {/* Description */}

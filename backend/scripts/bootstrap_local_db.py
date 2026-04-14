@@ -38,6 +38,7 @@ ROLE_PERMISSION_MAP = {
         permission_constants.CARETAKER_READ,
         permission_constants.GROUP_READ,
         permission_constants.STATS_VIEW,
+        permission_constants.SEND_INVITE,
     },
     "participant": {
         permission_constants.GOAL_VIEW_ALL,

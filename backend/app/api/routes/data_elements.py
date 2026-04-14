@@ -34,17 +34,23 @@ router = APIRouter()
 @router.get("/elements", dependencies=[Depends(require_permissions(ELEMENT_VIEW))])
 async def list_data_elements(
     include_inactive: bool = Query(default=False),
+    exclude_profile: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ):
     """Return all active data elements.
 
-    Returns 
+    Returns
     -------
     list[DataElement]
         Every data element where ``is_active`` is ``True``.
+        Pass ``exclude_profile=true`` to omit elements that are only linked
+        to demographic/profile intake fields (gender, dob, etc.).
     """
     data_element_queries = DataElementQuery(db)
-    return await data_element_queries.get_data_elements(include_inactive=include_inactive)
+    return await data_element_queries.get_data_elements(
+        include_inactive=include_inactive,
+        exclude_profile=exclude_profile,
+    )
 
 
 @router.get("/elements-paged", response_model=DataElementListPage, dependencies=[Depends(require_permissions(ELEMENT_VIEW))])

@@ -263,6 +263,13 @@ class ParticipantQuery:
             return current_value <= target
         return current_value >= target
 
+    @staticmethod
+    def _completed_goal_log_error(goal: HealthGoal) -> str:
+        window = (goal.window or "daily").lower()
+        if window == "none":
+            return "This goal is already completed and cannot accept more entries."
+        return f"This {window} goal is already completed for the current window."
+
     async def _compute_goal_current_value(
         self,
         goal: HealthGoal,
@@ -280,12 +287,14 @@ class ParticipantQuery:
             )
             .where(HealthDataPoint.participant_id == participant_id)
             .where(HealthDataPoint.element_id == goal.element_id)
-            .where(HealthDataPoint.source_type == "goal")
+            .where(HealthDataPoint.source_type.in_(["goal", "survey"]))
         )
         if start is not None:
             points_stmt = points_stmt.where(HealthDataPoint.observed_at >= start)
         if end is not None:
             points_stmt = points_stmt.where(HealthDataPoint.observed_at < end)
+        if as_of is not None:
+            points_stmt = points_stmt.where(HealthDataPoint.observed_at <= as_of)
         points_sq = points_stmt.subquery()
 
         progress_mode = (goal.progress_mode or "incremental").lower()
@@ -522,6 +531,37 @@ class ParticipantQuery:
 
         observed_at = payload.observed_at or datetime.now(timezone.utc)
         progress_mode = (goal.progress_mode or "incremental").lower()
+        current_value = await self._compute_goal_current_value(
+            goal,
+            datatype,
+            participant_id,
+            as_of=observed_at,
+        )
+        if self._goal_completed(goal, current_value):
+            raise HTTPException(
+                status_code=409,
+                detail=self._completed_goal_log_error(goal),
+            )
+
+        # Absolute goals: max 1 reading per calendar day (latest reading = current value).
+        # Survey submissions for the same element also count — block manual log if one exists today.
+        if progress_mode == "absolute":
+            today_start, today_end = _utc_day_bounds()
+            already_today = await self.db.scalar(
+                select(func.count(HealthDataPoint.data_id)).where(
+                    HealthDataPoint.participant_id == participant_id,
+                    HealthDataPoint.element_id == goal.element_id,
+                    HealthDataPoint.source_type.in_(["goal", "survey"]),
+                    HealthDataPoint.observed_at >= today_start,
+                    HealthDataPoint.observed_at < today_end,
+                )
+            )
+            if already_today:
+                raise HTTPException(
+                    status_code=409,
+                    detail="You've already recorded a reading for this goal today (via survey or manual log). Come back tomorrow.",
+                )
+
         if self._normalize_datatype(datatype) == "text":
             if text_value is None or str(text_value).strip() == "":
                 raise HTTPException(
@@ -952,10 +992,18 @@ class DataElementQuery:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_data_elements(self, include_inactive: bool = False):
+    async def get_data_elements(self, include_inactive: bool = False, exclude_profile: bool = False):
         stmt = select(DataElement)
         if not include_inactive:
             stmt = stmt.where(DataElement.is_active == True)
+        if exclude_profile:
+            # Exclude elements that are only linked to profile/demographic form fields
+            profile_element_ids = (
+                select(FieldElementMap.element_id)
+                .join(FormField, FormField.field_id == FieldElementMap.field_id)
+                .where(FormField.profile_field.isnot(None))
+            )
+            stmt = stmt.where(DataElement.element_id.not_in(profile_element_ids))
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
@@ -2424,6 +2472,13 @@ class CaretakersQuery:
         """
         await self._assert_participant_in_owned_group(participant_id, user_id)
 
+        # Elements linked only to profile/demographic intake fields — exclude everywhere.
+        profile_element_ids_sq = (
+            select(FieldElementMap.element_id)
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .where(FormField.profile_field.isnot(None))
+        )
+
         # (a) Currently-deployed elements for this participant's groups.
         deployed_elements_sq = (
             select(
@@ -2443,17 +2498,19 @@ class CaretakersQuery:
                 ),
             )
             .where(FormDeployment.revoked_at == None)
+            .where(FormField.profile_field.is_(None))
             .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
             .group_by(DataElement.element_id)
         ).subquery()
 
-        # (b) Per-participant data point counts.
+        # (b) Per-participant data point counts — exclude profile elements.
         dp_count_sq = (
             select(
                 HealthDataPoint.element_id.label("element_id"),
                 func.count(HealthDataPoint.data_id).label("dp_count"),
             )
             .where(HealthDataPoint.participant_id == participant_id)
+            .where(HealthDataPoint.element_id.not_in(profile_element_ids_sq))
             .group_by(HealthDataPoint.element_id)
         ).subquery()
 
@@ -2608,6 +2665,12 @@ class CaretakersQuery:
             .group_by(FormSubmission.participant_id)
         ).subquery()
 
+        profile_element_ids_sq = (
+            select(FieldElementMap.element_id)
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .where(FormField.profile_field.isnot(None))
+        )
+
         stmt = (
             select(
                 DataElement.element_id,
@@ -2632,6 +2695,7 @@ class CaretakersQuery:
             .where(GroupMember.group_id == group_id)
             .where(GroupMember.left_at == None)
             .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
+            .where(DataElement.element_id.not_in(profile_element_ids_sq))
             .group_by(DataElement.element_id, DataElement.code, DataElement.label, DataElement.unit)
         )
 
@@ -2764,6 +2828,12 @@ class CaretakersQuery:
                 detail=f"Invalid compare_with value: {compare_with!r}",
             )
 
+        profile_element_ids_sq = (
+            select(FieldElementMap.element_id)
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .where(FormField.profile_field.isnot(None))
+        )
+
         def _build_stats_sq(participant_filter):
             stmt = (
                 select(
@@ -2774,6 +2844,7 @@ class CaretakersQuery:
                     func.count(HealthDataPoint.data_id).label("count"),
                 )
                 .where(participant_filter)
+                .where(HealthDataPoint.element_id.not_in(profile_element_ids_sq))
                 .group_by(HealthDataPoint.element_id)
             )
             if element_ids:
@@ -3078,6 +3149,11 @@ class CaretakersQuery:
         if user_id is None:
             raise HTTPException(status_code=500, detail="get_health_trends: missing user_id (caretaker context required)")
         await self._assert_participant_in_owned_group(participant_id, user_id)
+        profile_element_ids_sq = (
+            select(FieldElementMap.element_id)
+            .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .where(FormField.profile_field.isnot(None))
+        )
         stmt = (
             select(
                 DataElement.element_id,
@@ -3088,6 +3164,7 @@ class CaretakersQuery:
             )
             .join(DataElement, DataElement.element_id == HealthDataPoint.element_id)
             .where(HealthDataPoint.participant_id == participant_id)
+            .where(HealthDataPoint.element_id.not_in(profile_element_ids_sq))
             .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
             .order_by(DataElement.element_id, HealthDataPoint.observed_at)
         )

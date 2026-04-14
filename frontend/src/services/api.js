@@ -619,8 +619,8 @@ export const api = {
 
   // ── Data Elements (researcher) ──
 
-  listElements: ({ includeInactive = false } = {}) =>
-    request(`/data-elements/elements?t=${new Date().getTime()}${includeInactive ? "&include_inactive=true" : ""}`),
+  listElements: ({ includeInactive = false, excludeProfile = false } = {}) =>
+    request(`/data-elements/elements?t=${new Date().getTime()}${includeInactive ? "&include_inactive=true" : ""}${excludeProfile ? "&exclude_profile=true" : ""}`),
 
   listDeletedElements: () =>
     request("/data-elements/deleted"),

@@ -39,6 +39,7 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         # had these granted manually — the seed is now catching up.
         P.CARETAKER_READ,
         P.CARETAKER_WRITE,
+        P.SEND_INVITE,
     ],
 }
 

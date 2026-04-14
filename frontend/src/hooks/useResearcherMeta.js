@@ -55,8 +55,9 @@ export function useResearcherMeta({
   includeSurveys = false,
   includeElements = false,
   includeInactiveElements = false,
+  excludeProfileElements = false,
 } = {}) {
-  const elementsKey = `elements:${includeInactiveElements ? "all" : "active"}`;
+  const elementsKey = `elements:${includeInactiveElements ? "all" : "active"}:${excludeProfileElements ? "no-profile" : "all"}`;
   const initialState = useMemo(
     () => ({
       groups: includeGroups ? readCachedValue("groups", []) : [],
@@ -103,7 +104,7 @@ export function useResearcherMeta({
                 elementsKey,
                 () =>
                   api
-                    .listElements({ includeInactive: includeInactiveElements })
+                    .listElements({ includeInactive: includeInactiveElements, excludeProfile: excludeProfileElements })
                     .then((data) => (Array.isArray(data) ? data : data?.elements || [])),
                 { force },
               )

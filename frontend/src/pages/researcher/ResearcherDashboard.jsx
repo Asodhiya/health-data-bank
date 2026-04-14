@@ -180,7 +180,7 @@ function createDefaultFilters() {
 function createElementFilterDraft() {
   return {
     element_id: "",
-    operator: "gte",
+    operator: "has_value",
     value: "",
     value_max: "",
   };
@@ -276,6 +276,7 @@ export default function ResearcherDashboard() {
     includeSurveys: shouldLoadSurveys,
     includeElements: true,
     includeInactiveElements: true,
+    excludeProfileElements: true,
     includeGroups: shouldLoadGroups,
   });
 
@@ -472,20 +473,8 @@ export default function ResearcherDashboard() {
 
   const elementOperatorOptions = useMemo(
     () => ({
-      numeric: [
-        { value: "eq", label: "=" },
-        { value: "gt", label: ">" },
-        { value: "gte", label: ">=" },
-        { value: "lt", label: "<" },
-        { value: "lte", label: "<=" },
-        { value: "between", label: "Between" },
-        { value: "has_value", label: "Has any value" },
-        { value: "is_empty", label: "Is empty" },
-      ],
-      text: [
-        { value: "has_value", label: "Has any value" },
-        { value: "is_empty", label: "Is empty" },
-      ],
+      numeric: [],
+      text: [],
     }),
     [],
   );
@@ -1001,7 +990,6 @@ export default function ResearcherDashboard() {
   };
 
   const addElementFilterById = (elementId) => {
-    const nextIsNumeric = isNumericElement(elementId);
     if (!elementId) return;
     const existing = (draftFilters.element_filters || []).find(
       (filter) => String(filter.element_id) === String(elementId),
@@ -1009,15 +997,15 @@ export default function ResearcherDashboard() {
     if (existing) {
       setElementDraft({
         element_id: String(existing.element_id || ""),
-        operator: nextIsNumeric ? (existing.operator || "gte") : (["has_value", "is_empty"].includes(existing.operator) ? existing.operator : "has_value"),
-        value: nextIsNumeric ? (existing.value ?? "") : "",
-        value_max: nextIsNumeric ? (existing.value_max ?? "") : "",
+        operator: "has_value",
+        value: "",
+        value_max: "",
       });
       setEditingElementId(String(elementId));
     } else {
       setElementDraft(() => ({
         element_id: elementId,
-        operator: nextIsNumeric ? "gte" : "has_value",
+        operator: "has_value",
         value: "",
         value_max: "",
       }));
@@ -1049,9 +1037,9 @@ export default function ResearcherDashboard() {
     if (!existing) return;
     setElementDraft({
       element_id: String(existing.element_id || ""),
-      operator: existing.operator || "gte",
-      value: existing.value ?? "",
-      value_max: existing.value_max ?? "",
+      operator: "has_value",
+      value: "",
+      value_max: "",
     });
     setEditingElementId(String(elementId));
     setShowElementMenu(false);
@@ -2145,14 +2133,7 @@ export default function ResearcherDashboard() {
                         const label = element
                           ? `${element.label}${element.unit ? ` (${element.unit})` : ""}`
                           : "Selected element";
-                        const suffix =
-                          filter.operator === "between" && filter.value_max !== ""
-                            ? ` - ${filter.value} to ${filter.value_max}`
-                            : ["has_value", "is_empty"].includes(filter.operator)
-                              ? ` - ${filter.operator === "has_value" ? "has value" : "is empty"}`
-                              : filter.value !== "" && filter.value !== undefined && filter.value !== null
-                                ? ` - ${filter.operator} ${filter.value}`
-                                : "";
+                        const suffix = "";
                         return (
                           <div
                             key={String(filter.element_id)}
@@ -2239,51 +2220,6 @@ export default function ResearcherDashboard() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {(() => {
-                  const showValueInput =
-                    !["has_value", "is_empty"].includes(elementDraft.operator) &&
-                    isNumericElement(elementDraft.element_id);
-                  const operatorChoices = isNumericElement(elementDraft.element_id)
-                    ? elementOperatorOptions.numeric
-                    : elementOperatorOptions.text;
-                  return (
-                    <>
-                <select
-                  value={elementDraft.operator}
-                  onChange={(event) => updateElementDraft("operator", event.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500"
-                >
-                  {operatorChoices.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                {!showValueInput ? (
-                  <div className="hidden sm:block" />
-                ) : (
-                  <input
-                    type="number"
-                    value={elementDraft.value}
-                    onChange={(event) => updateElementDraft("value", event.target.value)}
-                    placeholder="Value"
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500"
-                  />
-                )}
-                {elementDraft.operator === "between" && showValueInput ? (
-                  <input
-                    type="number"
-                    value={elementDraft.value_max}
-                    onChange={(event) => updateElementDraft("value_max", event.target.value)}
-                    placeholder="Value max"
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 sm:col-span-2"
-                  />
-                ) : null}
-                    </>
-                  );
-                })()}
-              </div>
               <div className="flex justify-end">
                 <button
                   type="button"
