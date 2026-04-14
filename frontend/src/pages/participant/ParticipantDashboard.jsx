@@ -139,9 +139,15 @@ export default function ParticipantDashboard() {
 
   const greetings = getGreeting();
 
-  const completedSurveys = surveys.filter((s) => s.status === "COMPLETED").length;
-  const inProgressSurveys = surveys.filter((s) => s.status === "IN_PROGRESS").length;
-  const newSurveys = surveys.filter((s) => s.status === "NEW").length;
+  const { completedSurveys, inProgressSurveys, newSurveys } = surveys.reduce(
+    (acc, s) => {
+      if (s.status === "COMPLETED") acc.completedSurveys++;
+      else if (s.status === "IN_PROGRESS") acc.inProgressSurveys++;
+      else if (s.status === "NEW") acc.newSurveys++;
+      return acc;
+    },
+    { completedSurveys: 0, inProgressSurveys: 0, newSurveys: 0 }
+  );
   const totalSurveys = surveys.length;
 
   const activeGoalsCount = goals.length;

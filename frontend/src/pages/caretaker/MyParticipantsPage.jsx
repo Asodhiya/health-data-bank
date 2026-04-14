@@ -1,7 +1,10 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { usePolling } from "../../hooks/usePolling";
+import { useDebounced } from "../../hooks/useDebounced";
 import { useOutletContext, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../services/api";
+import { fmt, daysSince, getAge, pct, daysUntil } from "../../utils/dateFormatters";
+import FlagBadge from "../../components/FlagBadge";
 
 // ─── Status helpers (4-bucket activity model — matches CaretakerDashboard) ─────
 
@@ -161,30 +164,7 @@ function transformInvite(inv) {
   };
 }
 
-// ─── Utilities ──────────────────────────────────────────────────────────────────
-
-function fmt(dateStr) {
-  if (!dateStr) return "—";
-  return new Date(dateStr).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" });
-}
-function daysSince(dateStr) {
-  if (!dateStr) return null;
-  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
-  if (diff === 0) return "Today";
-  if (diff === 1) return "Yesterday";
-  return `${diff}d ago`;
-}
-function getAge(dob) {
-  if (!dob) return null;
-  const today = new Date();
-  const birth = new Date(dob);
-  let age = today.getFullYear() - birth.getFullYear();
-  const m = today.getMonth() - birth.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
-  return age;
-}
-function pct(val, total) { return total > 0 ? (val / total) * 100 : 0; }
-function daysUntil(d) { if (!d) return ""; const diff = Math.floor((new Date(d).getTime() - Date.now()) / 86400000); if (diff < 0) return "Expired"; if (diff === 0) return "Today"; if (diff === 1) return "Tomorrow"; return `${diff}d left`; }
+// Utilities imported from ../../utils/dateFormatters
 
 // ─── Sub-Components ─────────────────────────────────────────────────────────────
 
@@ -218,13 +198,6 @@ function InfoRow({ label, value }) {
       <span className="text-xs font-semibold text-slate-700 text-right">{value || "—"}</span>
     </div>
   );
-}
-
-function FlagBadge({ text }) {
-  const isCritical = text.toLowerCase().includes("high");
-  const isWarning = text.toLowerCase().includes("inactive") || text.toLowerCase().includes("no ");
-  const colors = isCritical ? "bg-rose-50 text-rose-700 border-rose-100" : isWarning ? "bg-amber-50 text-amber-700 border-amber-100" : "bg-slate-50 text-slate-600 border-slate-100";
-  return <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full border ${colors}`}>{text}</span>;
 }
 
 function ChevronIcon({ direction = "down", className = "" }) {
@@ -1226,7 +1199,7 @@ export default function MyParticipantsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debouncedSearch = useDebounced(search, 300);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [participantsRefreshing, setParticipantsRefreshing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -1241,6 +1214,12 @@ export default function MyParticipantsPage() {
   const [selectedFormDetail, setSelectedFormDetail] = useState(null);
   const hasBootstrappedRef = useRef(false);
   const groupsMapRef = useRef({});
+
+  useEffect(() => {
+    const map = {};
+    groups.forEach((g) => { map[g.id] = { group_id: g.id, name: g.name }; });
+    groupsMapRef.current = map;
+  }, [groups]);
   const [participantSummary, setParticipantSummary] = useState({ total: 0, active: 0, inactive: 0, flagged: 0 });
   const [activityCounts, setActivityCounts] = useState({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 });
   const [formsSummary, setFormsSummary] = useState({ total: 0, active: 0, revoked: 0 });
@@ -1276,6 +1255,7 @@ export default function MyParticipantsPage() {
   }
 
   async function handleViewForm(formRow) {
+    if (formDetailLoading) return;
     setFormModalOpen(true);
     setFormDetailLoading(true);
     setFormDetailError("");
@@ -1479,29 +1459,26 @@ export default function MyParticipantsPage() {
 
   useEffect(() => {
     if (!hasBootstrappedRef.current) return;
-    // when group or view changes, reset paged datasets and refetch with current filters
     setForms([]);
     setFormsOffset(0);
     setFormsHasMore(false);
     setFormsLoading(view === "forms");
     setParticipantsRefreshing(true);
-    loadParticipantsPage({
-      reset: true,
-      offsetValue: 0,
-      queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
-    }).finally(() => setParticipantsRefreshing(false));
-    loadSummaries();
+
+    const tasks = [
+      loadParticipantsPage({
+        reset: true,
+        offsetValue: 0,
+        queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
+      }),
+      loadSummaries(),
+    ];
     if (view === "forms") {
-      loadFormsPage({ reset: true, offsetValue: 0 });
+      tasks.push(loadFormsPage({ reset: true, offsetValue: 0 }));
     }
+    Promise.all(tasks).finally(() => setParticipantsRefreshing(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGroupQuery, view, loadParticipantsPage, loadSummaries, loadFormsPage]);
-
-  // Debounce the search input so we don't fire one request per keystroke.
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(timer);
-  }, [search]);
 
   // B6: Refetch participants whenever filters/search/sort change.
   // Server-side filtering replaces the old client-side `processed` memo.
@@ -1559,7 +1536,7 @@ export default function MyParticipantsPage() {
     loadParticipantsPage, loadSummaries, loadFormsPage, loadInvitesPage,
   ]);
 
-  usePolling(backgroundRefresh, 30_000);
+  usePolling(backgroundRefresh, 90_000);
 
   // ── Sort handler ────────────────────────────────────────────────────────────
 

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useDebounced } from "../../hooks/useDebounced";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 
@@ -498,7 +499,7 @@ function AddParticipantsModal({ open, onClose, group, onConfirm }) {
   const [selectedNames, setSelectedNames] = useState({});
   const [selDropOpen, setSelDropOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debouncedSearch = useDebounced(search, 300);
   const [items, setItems] = useState([]);
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
@@ -506,10 +507,7 @@ function AddParticipantsModal({ open, onClose, group, onConfirm }) {
   const [submitting, setSubmitting] = useState(false);
   const [addError, setAddError] = useState("");
 
-  useEffect(() => {
-    const t = setTimeout(() => { setDebouncedSearch(search); setPage(0); }, 300);
-    return () => clearTimeout(t);
-  }, [search]);
+  useEffect(() => { setPage(0); }, [debouncedSearch]);
 
   useEffect(() => {
     if (!open || !group) return;
@@ -816,7 +814,7 @@ export default function UserManagementPage() {
 
   // Search, filter, sort
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debouncedSearch = useDebounced(search.trim(), 250);
   const [activeRole, setActiveRole] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterGroup, setFilterGroup] = useState("all");
@@ -866,13 +864,6 @@ export default function UserManagementPage() {
   const GROUP_MODAL_PAGE_SIZE = 8;
   const didRunSearchSync = useRef(false);
   const msg = (m, t = "success") => { setToast({ show: true, message: m, type: t }); setTimeout(() => setToast(p => ({ ...p, show: false })), 3500); };
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(search.trim());
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [search]);
 
   // ── Fetch all data on mount ────────────────────────────────────────────────
   const fetchData = useCallback(async () => {

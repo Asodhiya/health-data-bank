@@ -1,30 +1,12 @@
 import { useState, useEffect, useMemo } from "react";
 import { api } from "../../services/api";
 import { getApiErrorMessage } from "../../utils/apiErrors";
+import { normalizeType, supportsUnit, typeLabel } from "../../utils/elementTypes";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const toTitleCase = (str = "") =>
   str.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-
-const normalizeType = (dt = "") => {
-  const d = dt.toLowerCase();
-  if (d === "boolean" || d === "bool") return "boolean";
-  if (d === "text" || d === "string") return "text";
-  if (d === "date") return "date";
-  if (d === "integer" || d === "int") return "integer";
-  if (["number", "float", "double", "decimal", "numeric"].includes(d)) return "float";
-  return "float";
-};
-
-const supportsUnit = (dt = "") => ["integer", "float"].includes(normalizeType(dt));
-
-const typeLabel = (dt) => {
-  const t = normalizeType(dt);
-  if (t === "integer") return "Integer";
-  if (t === "float") return "Float";
-  return t.charAt(0).toUpperCase() + t.slice(1);
-};
 
 const TYPE_FILTERS = ["All", "Integer", "Float", "Boolean", "Text", "Date"];
 

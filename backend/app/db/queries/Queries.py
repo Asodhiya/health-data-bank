@@ -681,12 +681,18 @@ class GoalTemplateQuery:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def list_templates(self):
-        result = await self.db.execute(
+    async def list_templates(self, limit: int | None = None, offset: int = 0):
+        stmt = (
             select(GoalTemplate, DataElement)
             .join(DataElement, DataElement.element_id == GoalTemplate.element_id)
             .where(GoalTemplate.is_active == True)
+            .order_by(GoalTemplate.created_at.desc())
         )
+        if offset:
+            stmt = stmt.offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = await self.db.execute(stmt)
         return [
             {**tpl.__dict__, "element": element}
             for tpl, element in result.all()
@@ -746,12 +752,18 @@ class GoalTemplateQuery:
         await self.db.refresh(template)
         return template
 
-    async def list_deleted_templates(self):
-        result = await self.db.execute(
+    async def list_deleted_templates(self, limit: int | None = None, offset: int = 0):
+        stmt = (
             select(GoalTemplate, DataElement)
             .join(DataElement, DataElement.element_id == GoalTemplate.element_id)
             .where(GoalTemplate.is_active == False)
+            .order_by(GoalTemplate.created_at.desc())
         )
+        if offset:
+            stmt = stmt.offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = await self.db.execute(stmt)
         return [
             {**tpl.__dict__, "element": element}
             for tpl, element in result.all()
@@ -2317,6 +2329,8 @@ class CaretakersQuery:
             stmt = stmt.order_by(desc(GroupMember.joined_at) if is_desc else GroupMember.joined_at)
         elif sort_by == "submission_date":
             stmt = stmt.order_by(desc(submissions_sq.c.last_submission_at) if is_desc else submissions_sq.c.last_submission_at)
+        else:
+            stmt = stmt.order_by(User.first_name, User.last_name)
 
         if limit is not None:
             stmt = stmt.limit(limit).offset(max(0, offset))
