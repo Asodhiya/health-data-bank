@@ -181,10 +181,10 @@ function SurveyModal({ group, onClose, currentUser }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
+      <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-white shadow-2xl sm:h-auto sm:max-h-[90vh] sm:max-w-3xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="px-6 pt-6 pb-4 border-b border-slate-100 flex items-start justify-between gap-4">
+        <div className="flex shrink-0 flex-col gap-3 border-b border-slate-100 px-4 pb-4 pt-4 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:pt-6">
           <div>
             <h2 className="text-base font-bold text-slate-900">{group.name}</h2>
             {group.description && (
@@ -192,14 +192,14 @@ function SurveyModal({ group, onClose, currentUser }) {
             )}
             <p className="text-xs text-slate-400 mt-1">{group.member_count ?? 0} member{(group.member_count ?? 0) !== 1 ? "s" : ""}</p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0">
             <button
               onClick={() => setPublishOpen((prev) => !prev)}
-              className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+              className="flex-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 sm:flex-none"
             >
               {publishOpen ? "Close assign" : "Assign survey"}
             </button>
-            <button onClick={onClose} className="text-slate-300 hover:text-slate-500 transition-colors">
+            <button onClick={onClose} className="rounded-xl border border-slate-200 p-2 text-slate-300 transition-colors hover:text-slate-500 sm:border-transparent sm:p-0">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -208,8 +208,8 @@ function SurveyModal({ group, onClose, currentUser }) {
         </div>
 
         {publishOpen && (
-          <div className="border-b border-slate-100 bg-slate-50 px-6 py-4">
-            <div className="grid min-h-[22rem] gap-3">
+          <div className="max-h-[48vh] shrink-0 overflow-y-auto border-b border-slate-100 bg-slate-50 px-4 py-4 sm:max-h-[26rem] sm:px-6">
+            <div className="grid gap-3">
               <div>
                 <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                   Your surveys
@@ -222,7 +222,7 @@ function SurveyModal({ group, onClose, currentUser }) {
                   className="mb-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-emerald-400"
                 />
                 <div
-                  className="max-h-52 min-h-52 overflow-y-auto overscroll-contain rounded-xl border border-slate-200 bg-white"
+                  className="max-h-48 min-h-40 overflow-y-auto overscroll-contain rounded-xl border border-slate-200 bg-white sm:max-h-52 sm:min-h-52"
                   onWheel={(event) => event.stopPropagation()}
                   onTouchMove={(event) => event.stopPropagation()}
                   style={{ WebkitOverflowScrolling: "touch" }}
@@ -241,12 +241,12 @@ function SurveyModal({ group, onClose, currentUser }) {
                       <button
                         type="button"
                         onClick={() => setSelectedFormId("")}
-                        className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition ${
+                        className={`flex w-full flex-col items-start gap-1 px-3 py-2 text-left text-sm transition sm:flex-row sm:items-center sm:justify-between ${
                           !selectedFormId ? "bg-emerald-50 text-emerald-700" : "text-slate-600 hover:bg-slate-50"
                         }`}
                       >
                         <span className="font-medium">No survey selected</span>
-                        {!selectedFormId ? <span className="text-[11px] font-semibold">Selected</span> : null}
+                        {!selectedFormId ? <span className="text-[11px] font-semibold sm:shrink-0">Selected</span> : null}
                       </button>
                       {publishableForms.map((form) => {
                         const isSelected = String(selectedFormId) === String(form.form_id);
@@ -255,19 +255,19 @@ function SurveyModal({ group, onClose, currentUser }) {
                             key={form.form_id}
                             type="button"
                             onClick={() => setSelectedFormId(form.form_id)}
-                            className={`flex w-full items-start justify-between gap-3 border-t border-slate-100 px-3 py-2 text-left transition ${
+                            className={`flex w-full flex-col items-start gap-1.5 border-t border-slate-100 px-3 py-2 text-left transition sm:flex-row sm:items-start sm:justify-between sm:gap-3 ${
                               isSelected ? "bg-emerald-50" : "hover:bg-slate-50"
                             }`}
                           >
-                            <div className="min-w-0">
-                              <p className={`truncate text-sm font-semibold ${isSelected ? "text-emerald-700" : "text-slate-800"}`}>
+                            <div className="min-w-0 flex-1">
+                              <p className={`break-words text-sm font-semibold leading-5 sm:truncate ${isSelected ? "text-emerald-700" : "text-slate-800"}`}>
                                 {form.title}
                                 {form.version ? ` (v${form.version})` : ""}
                               </p>
                               <p className="mt-0.5 text-[11px] text-slate-400">{form.status || "Unknown"}</p>
                             </div>
                             {isSelected ? (
-                              <span className="shrink-0 text-[11px] font-semibold text-emerald-700">Selected</span>
+                              <span className="text-[11px] font-semibold text-emerald-700 sm:shrink-0">Selected</span>
                             ) : null}
                           </button>
                         );
@@ -298,7 +298,7 @@ function SurveyModal({ group, onClose, currentUser }) {
                 </select>
               </div>
               {selectedForm && (
-                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-500">
                   Assigning <span className="font-semibold text-slate-700">{selectedForm.title}</span>
                   {selectedForm.version ? ` (v${selectedForm.version})` : ""} to <span className="font-semibold text-slate-700">{group.name}</span>.
                 </div>
@@ -321,11 +321,11 @@ function SurveyModal({ group, onClose, currentUser }) {
                     <span className="font-semibold text-slate-700">{group.name}</span> with{" "}
                     <span className="font-semibold text-slate-700">{confirmAction.cadence}</span> cadence.
                   </p>
-                  <div className="mt-3 flex justify-end gap-2">
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
                     <button
                       type="button"
                       onClick={() => setConfirmAction(null)}
-                      className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-200"
+                      className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-200"
                     >
                       Cancel
                     </button>
@@ -333,18 +333,18 @@ function SurveyModal({ group, onClose, currentUser }) {
                       type="button"
                       onClick={handleConfirmAction}
                       disabled={publishing}
-                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                      className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                     >
                       {publishing ? "Publishing..." : "Yes, publish"}
                     </button>
                   </div>
                 </div>
               )}
-              <div className="flex justify-end">
+              <div className="sticky bottom-0 -mx-4 border-t border-slate-200 bg-slate-50 px-4 pt-3 sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0">
                 <button
                   onClick={confirmPublish}
                   disabled={!selectedFormId || publishing || alreadyAssigned}
-                  className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:py-2"
                 >
                   {publishing ? "Assigning..." : "Assign to group"}
                 </button>
@@ -355,7 +355,7 @@ function SurveyModal({ group, onClose, currentUser }) {
 
         {/* Filter pills */}
         {!loading && surveys.length > 0 && (
-          <div className="px-6 pt-3 pb-2 flex items-center gap-2 flex-wrap">
+          <div className="flex shrink-0 items-center gap-2 px-4 pb-2 pt-3 sm:px-6">
             {FILTER_OPTIONS.map((opt) => {
               const count = opt === "all" ? surveys.length : surveys.filter((s) => s.status === opt).length;
               if (opt !== "all" && count === 0) return null;
@@ -380,7 +380,7 @@ function SurveyModal({ group, onClose, currentUser }) {
 
         {/* Survey list */}
         <div
-          className="max-h-[55vh] overflow-y-auto overscroll-contain px-4 py-3 sm:px-6"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 sm:px-6"
           onWheel={(event) => event.stopPropagation()}
           onTouchMove={(event) => event.stopPropagation()}
           style={{ WebkitOverflowScrolling: "touch" }}
@@ -409,7 +409,7 @@ function SurveyModal({ group, onClose, currentUser }) {
               {visible.map((s) => (
                 <div key={s.form_id} className="flex flex-col gap-2 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-800 truncate">
+                    <p className="break-words text-sm font-semibold text-slate-800 sm:truncate">
                       {s.title}
                       {s.version > 1 && (
                         <span className="ml-1.5 text-[11px] font-bold text-slate-400">v{s.version}</span>
@@ -422,7 +422,7 @@ function SurveyModal({ group, onClose, currentUser }) {
                       )}
                     </p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 shrink-0 sm:gap-3">
+                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:gap-3">
                     <span className="text-[11px] text-slate-400 font-medium">
                       {s.submission_count ?? 0} submission{(s.submission_count ?? 0) !== 1 ? "s" : ""}
                     </span>
