@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { usePolling } from "../../hooks/usePolling";
 import { useOutletContext, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../services/api";
 
@@ -1516,6 +1517,50 @@ export default function MyParticipantsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, debouncedSearch, sort]);
 
+  // ── Auto-refresh ────────────────────────────────────────────────────────────
+  //
+  // Re-pulls the currently-visible slice every 30s: participants list with the
+  // caretaker's current filters/search/sort, plus summary counts, plus the
+  // forms or invites list if that tab is open. Uses the existing paged loaders
+  // so pagination state is respected.
+  //
+  // Suppressed while any top-level modal is open so we don't interrupt the
+  // user mid-action. Skipped on the very first call (initial fetchData has
+  // its own mount effect) and while bootstrap hasn't finished.
+  const backgroundRefresh = useCallback(async ({ background = false } = {}) => {
+    if (!background) return;
+    if (!hasBootstrappedRef.current) return;
+    if (showFilters || showInvite || formModalOpen) return;
+
+    const tasks = [
+      loadParticipantsPage({
+        reset: true,
+        offsetValue: 0,
+        queryParamsOverride: buildParticipantsQueryParams(filters, debouncedSearch, sort),
+      }),
+      loadSummaries(),
+    ];
+    if (view === "forms") {
+      tasks.push(loadFormsPage({ reset: true, offsetValue: 0 }));
+    }
+    if (view === "invites") {
+      tasks.push(loadInvitesPage({ reset: true, offsetValue: 0 }));
+    }
+    try {
+      await Promise.all(tasks);
+    } catch (err) {
+      // Swallow errors on background refresh — we don't want a transient
+      // network blip to blank the page. Console-log for debugging.
+      console.error("Background refresh failed:", err);
+    }
+  }, [
+    showFilters, showInvite, formModalOpen,
+    view, filters, debouncedSearch, sort,
+    loadParticipantsPage, loadSummaries, loadFormsPage, loadInvitesPage,
+  ]);
+
+  usePolling(backgroundRefresh, 30_000);
+
   // ── Sort handler ────────────────────────────────────────────────────────────
 
   function handleSort(field) {
@@ -1623,20 +1668,20 @@ export default function MyParticipantsPage() {
       {/* View toggle */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-1.5 flex gap-1">
         <button onClick={() => setView("participants")}
-          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all ${view === "participants" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"}`}>
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-          <span className="hidden sm:inline">Participants</span>
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${view === "participants" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"}`}>
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+          Participants
         </button>
         <button onClick={() => setView("invites")}
-          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all ${view === "invites" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"}`}>
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-          <span className="hidden sm:inline">Invites</span>
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${view === "invites" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"}`}>
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+          Invites
           {invites.filter(i => i.status === "pending").length > 0 && <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${view === "invites" ? "bg-blue-500 text-white" : "bg-amber-100 text-amber-700"}`}>{invites.filter(i => i.status === "pending").length}</span>}
         </button>
         <button onClick={() => setView("forms")}
-          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all ${view === "forms" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"}`}>
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-          <span className="hidden sm:inline">Forms</span>
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${view === "forms" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"}`}>
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Forms
           {formsSummary.total > 0 && <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${view === "forms" ? "bg-blue-500 text-white" : "bg-slate-200 text-slate-600"}`}>{formsSummary.total}</span>}
         </button>
       </div>

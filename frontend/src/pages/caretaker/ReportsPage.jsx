@@ -26,6 +26,37 @@ function ScopeBadge({ scope }) {
   return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${s[scope] || s.group}`}>{scope}</span>;
 }
 
+// ─── Shared: Numerical / Graphical view toggle ──────────────────────────────────
+// Used at the top of each report view (Group, Comparison, Trends) to flip between
+// a numbers-first layout (tables, stat cards) and a chart-first layout.
+function ViewToggle({ value, onChange }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">View</span>
+      <div className="flex gap-0.5 bg-slate-100 rounded-lg p-0.5">
+        <button
+          onClick={() => onChange("numerical")}
+          className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${value === "numerical" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+          Numerical
+        </button>
+        <button
+          onClick={() => onChange("graphical")}
+          className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${value === "graphical" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+          Graphical
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Shared: MetricPicker (driven by real elements) ─────────────────────────────
 
 // ─── Shared: MetricPicker (Reports v2 — grouped by form, with metadata) ────────
@@ -211,6 +242,7 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
   const [report, setReport] = useState(null);
   const [chartMetric, setChartMetric] = useState(null);
   const [chartType, setChartType] = useState("bar");
+  const [viewMode, setViewMode] = useState("numerical"); // "numerical" | "graphical"
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -356,10 +388,13 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
 
   return (
     <div className="space-y-5">
-      <button onClick={() => setReport(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-        Back to Configuration
-      </button>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <button onClick={() => setReport(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          Back to Configuration
+        </button>
+        {elems.length > 0 && <ViewToggle value={viewMode} onChange={setViewMode} />}
+      </div>
       <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="font-bold text-slate-700">Group Report — {groupName}</span>
         <span>·</span><span>{elems.length} metrics</span>
@@ -392,62 +427,8 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
             </div>
           </div>
 
-          {/* ── Metric Detail Cards ── */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {elems.map(e => {
-              const range = (e.max != null && e.min != null) ? (e.max - e.min) : null;
-              const variability = e.stddev != null && e.avg != null && e.avg !== 0
-                ? ((e.stddev / Math.abs(e.avg)) * 100)
-                : null;
-              const variabilityLabel = variability != null
-                ? (variability < 15 ? "Low" : variability < 40 ? "Moderate" : "High")
-                : null;
-              const variabilityColor = variability != null
-                ? (variability < 15 ? "text-emerald-600 bg-emerald-50" : variability < 40 ? "text-amber-600 bg-amber-50" : "text-rose-600 bg-rose-50")
-                : "text-slate-400 bg-slate-50";
-
-              return (
-                <div key={e.element_id} onClick={() => setChartMetric(e.element_id)}
-                  className={`bg-white rounded-2xl shadow-sm border px-4 py-4 cursor-pointer transition-colors ${chartMetric === e.element_id ? "border-blue-200 bg-blue-50/20" : "border-slate-100 hover:border-blue-200"}`}>
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <p className="text-sm font-bold text-slate-700">{e.label}</p>
-                      <p className="text-[11px] text-slate-400">{e.participant_count || 0} participant{(e.participant_count || 0) !== 1 ? "s" : ""} · {e.count} data point{e.count !== 1 ? "s" : ""}</p>
-                    </div>
-                    {variabilityLabel && (
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${variabilityColor}`}>{variabilityLabel} variability</span>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-4 gap-2 mt-3">
-                    <div className="text-center">
-                      <p className="text-lg font-extrabold text-blue-600">{e.avg ?? "—"}</p>
-                      <p className="text-[10px] text-slate-400">Average</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-lg font-extrabold text-slate-600">{e.median ?? "—"}</p>
-                      <p className="text-[10px] text-slate-400">Median</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-lg font-extrabold text-slate-500">{e.min ?? "—"}</p>
-                      <p className="text-[10px] text-slate-400">Min</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-lg font-extrabold text-slate-500">{e.max ?? "—"}</p>
-                      <p className="text-[10px] text-slate-400">Max</p>
-                    </div>
-                  </div>
-                  {(e.stddev != null || range != null) && (
-                    <div className="flex items-center gap-3 mt-2 pt-2 border-t border-slate-100">
-                      {e.stddev != null && <p className="text-[11px] text-slate-400">Std Dev: <span className="font-semibold text-slate-600">{e.stddev}</span> {e.unit}</p>}
-                      {range != null && <p className="text-[11px] text-slate-400">Range: <span className="font-semibold text-slate-600">{range.toFixed(1)}</span> {e.unit}</p>}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* ── Chart with Bar/Line toggle ── */}
+          {/* ── Chart with Bar/Line toggle (Graphical view) ── */}
+          {viewMode === "graphical" && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Average vs Median Comparison</p>
@@ -490,8 +471,10 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
               </ResponsiveContainer>
             </div>
           </div>
+          )}
 
-          {/* ── Full Statistics Table ── */}
+          {/* ── Full Statistics Table (Numerical view) ── */}
+          {viewMode === "numerical" && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Full Statistical Summary</p>
@@ -525,6 +508,7 @@ function GroupReportTab({ groups, selectedGroupId, elements }) {
               </table>
             </div>
           </div>
+          )}
         </>
       )}
     </div>
@@ -544,6 +528,8 @@ function ComparisonTab({ participants, groups, selectedGroupId, initialParticipa
   const [generating, setGenerating] = useState(false);
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
+  const [viewMode, setViewMode] = useState("numerical"); // "numerical" | "graphical"
+  const [chartType, setChartType] = useState("bar"); // "bar" | "line"
   // Reports v2: participant-aware metric pool. Replaces the previous
   // group-level elements prop, which showed metrics that may not exist
   // for the chosen participant.
@@ -730,10 +716,13 @@ function ComparisonTab({ participants, groups, selectedGroupId, initialParticipa
 
   return (
     <div className="space-y-5">
-      <button onClick={() => setReport(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-        Back to Configuration
-      </button>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <button onClick={() => setReport(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          Back to Configuration
+        </button>
+        {elems.length > 0 && <ViewToggle value={viewMode} onChange={setViewMode} />}
+      </div>
       <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="font-bold text-slate-700">{subjectName} vs {compLabel}</span>
         <span>·</span><span>{elems.length} elements</span>
@@ -747,22 +736,47 @@ function ComparisonTab({ participants, groups, selectedGroupId, initialParticipa
         </div>
       ) : (
         <>
+          {viewMode === "graphical" && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Average Comparison</p>
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Average Comparison</p>
+              <div className="flex gap-0.5 bg-slate-100 rounded-lg p-0.5">
+                <button onClick={() => setChartType("bar")} className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${chartType === "bar" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>Bar
+                </button>
+                <button onClick={() => setChartType("line")} className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${chartType === "line" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>Line
+                </button>
+              </div>
+            </div>
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={barData} margin={{ bottom: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} angle={-20} textAnchor="end" height={50} />
-                  <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                  <ReTooltip contentStyle={CHART_TT} />
-                  <Legend wrapperStyle={{ fontSize: "11px" }} />
-                  <Bar dataKey={subjectName} fill="#6366f1" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey={compLabel} fill="#94a3b8" radius={[4, 4, 0, 0]} />
-                </BarChart>
+                {chartType === "bar" ? (
+                  <BarChart data={barData} margin={{ bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} angle={-20} textAnchor="end" height={50} />
+                    <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                    <ReTooltip contentStyle={CHART_TT} />
+                    <Legend wrapperStyle={{ fontSize: "11px" }} />
+                    <Bar dataKey={subjectName} fill="#6366f1" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey={compLabel} fill="#94a3b8" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                ) : (
+                  <LineChart data={barData} margin={{ bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} angle={-20} textAnchor="end" height={50} />
+                    <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                    <ReTooltip contentStyle={CHART_TT} />
+                    <Legend wrapperStyle={{ fontSize: "11px" }} />
+                    <Line type="monotone" dataKey={subjectName} stroke="#6366f1" strokeWidth={2.5} dot={{ r: 5, fill: "#6366f1" }} />
+                    <Line type="monotone" dataKey={compLabel} stroke="#94a3b8" strokeWidth={2.5} dot={{ r: 5, fill: "#94a3b8" }} />
+                  </LineChart>
+                )}
               </ResponsiveContainer>
             </div>
           </div>
+          )}
+          {viewMode === "numerical" && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Detailed Comparison</p>
@@ -793,6 +807,7 @@ function ComparisonTab({ participants, groups, selectedGroupId, initialParticipa
               </table>
             </div>
           </div>
+          )}
         </>
       )}
     </div>
@@ -810,6 +825,8 @@ function TrendsTab({ participants }) {
   const [trends, setTrends] = useState(null);
   const [error, setError] = useState(null);
   const [visibleMetrics, setVisibleMetrics] = useState([]);
+  const [viewMode, setViewMode] = useState("graphical"); // "numerical" | "graphical"
+  const [chartType, setChartType] = useState("line"); // "line" | "bar" — global, flips all metric charts
   // Reports v2: participant-aware metric pool, replaces the previous
   // group-level elements prop.
   const [participantElements, setParticipantElements] = useState([]);
@@ -939,10 +956,13 @@ function TrendsTab({ participants }) {
 
   return (
     <div className="space-y-5">
-      <button onClick={() => { setTrends(null); setVisibleMetrics([]); }} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-        Back to Configuration
-      </button>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <button onClick={() => { setTrends(null); setVisibleMetrics([]); }} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          Back to Configuration
+        </button>
+        {trends.length > 0 && <ViewToggle value={viewMode} onChange={setViewMode} />}
+      </div>
 
       <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="font-bold text-slate-700">{pName}</span>
@@ -950,10 +970,22 @@ function TrendsTab({ participants }) {
         <span>·</span><span>{fmt(dateFrom)} — {fmt(dateTo)}</span>
       </div>
 
-      {/* Metric visibility toggles */}
+      {/* Metric visibility toggles + (graphical only) chart-type toggle */}
       {trends.length > 0 && (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Show / Hide Metrics</p>
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Show / Hide Metrics</p>
+            {viewMode === "graphical" && (
+              <div className="flex gap-0.5 bg-slate-100 rounded-lg p-0.5">
+                <button onClick={() => setChartType("line")} className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${chartType === "line" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>Line
+                </button>
+                <button onClick={() => setChartType("bar")} className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${chartType === "bar" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>Bar
+                </button>
+              </div>
+            )}
+          </div>
           <div className="flex flex-wrap gap-2">
             {trends.map((t, i) => {
               const isVisible = visibleMetrics.includes(t.element_id);
@@ -970,7 +1002,11 @@ function TrendsTab({ participants }) {
               );
             })}
           </div>
-          <p className="text-[10px] text-slate-400 mt-2">Click a metric to show or hide its chart below</p>
+          <p className="text-[10px] text-slate-400 mt-2">
+            {viewMode === "graphical"
+              ? "Click a metric to show or hide its chart below"
+              : "Click a metric to show or hide its summary below"}
+          </p>
         </div>
       )}
 
@@ -981,35 +1017,110 @@ function TrendsTab({ participants }) {
         </div>
       ) : displayedTrends.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 px-6 py-10 text-center">
-          <p className="text-sm text-slate-400">All metrics are hidden. Click a metric above to show its chart.</p>
+          <p className="text-sm text-slate-400">All metrics are hidden. Click a metric above to show it.</p>
         </div>
-      ) : displayedTrends.map((t, idx) => (
-        <div key={t.element_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{t.label}{t.unit && <span className="text-slate-300 font-normal normal-case"> ({t.unit})</span>}</p>
-            {t.points.length >= 2 && (() => {
-              const change = t.points[t.points.length - 1].value - t.points[0].value;
-              return (
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${change < 0 ? "bg-emerald-50 text-emerald-700" : change > 0 ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
-                  {change > 0 ? "+" : ""}{change.toFixed(1)} overall
-                </span>
-              );
-            })()}
-          </div>
-          <div className="h-52">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={t.points}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94a3b8" }}
-                  tickFormatter={d => new Date(d).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} />
-                <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                <ReTooltip contentStyle={CHART_TT} formatter={v => t.unit ? `${v} ${t.unit}` : `${v}`} labelFormatter={d => fmt(d)} />
-                <Line type="monotone" dataKey="value" name={t.label} stroke={COLORS[trends.indexOf(t) % COLORS.length]} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+      ) : viewMode === "numerical" ? (
+        /* ── Numerical view: per-metric summary cards ── */
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {displayedTrends.map((t) => {
+            const pts = (t.points || []).filter(p => p && p.value != null);
+            const firstVal = pts.length > 0 ? pts[0].value : null;
+            const lastVal = pts.length > 0 ? pts[pts.length - 1].value : null;
+            const minVal = pts.length > 0 ? Math.min(...pts.map(p => p.value)) : null;
+            const maxVal = pts.length > 0 ? Math.max(...pts.map(p => p.value)) : null;
+            const delta = firstVal != null && lastVal != null ? lastVal - firstVal : null;
+            const deltaPct = delta != null && firstVal !== 0 && firstVal != null
+              ? ((delta / Math.abs(firstVal)) * 100)
+              : null;
+            const deltaColor = delta == null
+              ? "text-slate-400 bg-slate-50"
+              : delta < 0
+                ? "text-emerald-600 bg-emerald-50"
+                : delta > 0
+                  ? "text-amber-600 bg-amber-50"
+                  : "text-slate-500 bg-slate-50";
+            return (
+              <div key={t.element_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-bold text-slate-700">{t.label}</p>
+                    <p className="text-[11px] text-slate-400">{pts.length} data point{pts.length !== 1 ? "s" : ""}{t.unit ? ` · ${t.unit}` : ""}</p>
+                  </div>
+                  {delta != null && (
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${deltaColor}`}>
+                      {delta > 0 ? "+" : ""}{delta.toFixed(1)}
+                      {deltaPct != null && <span className="opacity-60"> ({deltaPct > 0 ? "+" : ""}{deltaPct.toFixed(0)}%)</span>}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  <div className="text-center">
+                    <p className="text-lg font-extrabold text-blue-600">{firstVal ?? "—"}</p>
+                    <p className="text-[10px] text-slate-400">First</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-extrabold text-indigo-600">{lastVal ?? "—"}</p>
+                    <p className="text-[10px] text-slate-400">Last</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-extrabold text-slate-500">{minVal ?? "—"}</p>
+                    <p className="text-[10px] text-slate-400">Min</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-extrabold text-slate-500">{maxVal ?? "—"}</p>
+                    <p className="text-[10px] text-slate-400">Max</p>
+                  </div>
+                </div>
+                {pts.length >= 2 && firstVal != null && lastVal != null && (
+                  <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-400">
+                    {fmt(pts[0].date)} → {fmt(pts[pts.length - 1].date)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-      ))}
+      ) : (
+        /* ── Graphical view: per-metric charts (Line or Bar depending on chartType) ── */
+        displayedTrends.map((t) => (
+          <div key={t.element_id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{t.label}{t.unit && <span className="text-slate-300 font-normal normal-case"> ({t.unit})</span>}</p>
+              {t.points.length >= 2 && (() => {
+                const change = t.points[t.points.length - 1].value - t.points[0].value;
+                return (
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${change < 0 ? "bg-emerald-50 text-emerald-700" : change > 0 ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
+                    {change > 0 ? "+" : ""}{change.toFixed(1)} overall
+                  </span>
+                );
+              })()}
+            </div>
+            <div className="h-52">
+              <ResponsiveContainer width="100%" height="100%">
+                {chartType === "line" ? (
+                  <LineChart data={t.points}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94a3b8" }}
+                      tickFormatter={d => new Date(d).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} />
+                    <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                    <ReTooltip contentStyle={CHART_TT} formatter={v => t.unit ? `${v} ${t.unit}` : `${v}`} labelFormatter={d => fmt(d)} />
+                    <Line type="monotone" dataKey="value" name={t.label} stroke={COLORS[trends.indexOf(t) % COLORS.length]} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  </LineChart>
+                ) : (
+                  <BarChart data={t.points}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94a3b8" }}
+                      tickFormatter={d => new Date(d).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} />
+                    <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                    <ReTooltip contentStyle={CHART_TT} formatter={v => t.unit ? `${v} ${t.unit}` : `${v}`} labelFormatter={d => fmt(d)} />
+                    <Bar dataKey="value" name={t.label} fill={COLORS[trends.indexOf(t) % COLORS.length]} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ))
+      )}
     </div>
   );
 }
