@@ -506,7 +506,7 @@ export default function UserDetailPage() {
       </div>
 
       {/* ═══ QUICK STATS ═══ */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Last Login" value={user.lastLoginAt ? timeAgo(user.lastLoginAt) : "Never"} sub={fmtTime(user.lastLoginAt)} icon="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" color="blue" />
         {user.role === "participant" && <>
           <StatCard label="Submissions" value={submissions?.length ?? "—"} sub="All time" icon="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" color="violet" />
@@ -524,7 +524,7 @@ export default function UserDetailPage() {
         <div className="flex border-b border-slate-100 overflow-x-auto">
           {tabs.map(t => (
             <button key={t.k} onClick={() => { setTab(t.k); setActFilter("all"); }}
-              className={`px-5 py-3.5 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${tab === t.k ? "border-blue-600 text-blue-600" : "border-transparent text-slate-400 hover:text-slate-700"}`}>
+              className={`px-3 sm:px-5 py-3.5 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${tab === t.k ? "border-blue-600 text-blue-600" : "border-transparent text-slate-400 hover:text-slate-700"}`}>
               {t.l}
             </button>
           ))}

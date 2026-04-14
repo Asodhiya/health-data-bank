@@ -420,6 +420,7 @@ export default function GoalTemplates() {
   const [sort, setSort] = useState("newest");
   const [showHelp, setShowHelp] = useState(false);
   const [toast, setToast] = useState(null);
+  const [saving, setSaving] = useState(false);
   const { elements: metaElements, refresh: refreshMetaElements } = useResearcherMeta({ includeElements: true });
 
   useEffect(() => {
@@ -514,6 +515,7 @@ export default function GoalTemplates() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     if (!formData.element_id) {
       showToast("Please select a data element before saving.");
       return;
@@ -525,6 +527,7 @@ export default function GoalTemplates() {
     // Strip UI-only flag; for incremental goals default window to "daily"
     const { _tracked, ...payload } = formData;
     if (payload.progress_mode !== "absolute") payload.window = payload.window || "daily";
+    setSaving(true);
     try {
       if (editingId) {
         await api.updateGoalTemplate(editingId, payload);
@@ -540,6 +543,8 @@ export default function GoalTemplates() {
       fetchAllData();
     } catch (err) {
       showToast(getApiErrorMessage(err, "Save failed"));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -1184,9 +1189,10 @@ export default function GoalTemplates() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-sm font-semibold text-white rounded-xl transition shadow-sm bg-blue-700 hover:bg-blue-800"
+                  disabled={saving}
+                  className="px-4 py-2 text-sm font-semibold text-white rounded-xl transition shadow-sm bg-blue-700 hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {editingId ? "Save changes" : "Create goal"}
+                  {saving ? (editingId ? "Saving…" : "Creating…") : (editingId ? "Save changes" : "Create goal")}
                 </button>
               </div>
             </form>

@@ -198,7 +198,7 @@ function BackupDetail({ backup, onUploadLegacy }) {
         )}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         {[
           { label: "Snapshot name", value: backup.storage_path || backup.snapshot_name || "—" },
           { label: "Created at", value: backup.created_at ? formatDate(backup.created_at) : "—" },
@@ -546,7 +546,7 @@ function AutoBackupPanel({ showToast }) {
 
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Retention Policy</label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
               {[{ value: "3", label: "Keep last 3" }, { value: "5", label: "Keep last 5" }, { value: "10", label: "Keep last 10" }, { value: "0", label: "Keep all" }].map((opt) => (
                 <button key={opt.value} onClick={() => setRetention(opt.value)} className={`px-3 py-2.5 text-sm font-medium rounded-xl border transition-all ${selClass(opt.value, retention)}`}>{opt.label}</button>
               ))}

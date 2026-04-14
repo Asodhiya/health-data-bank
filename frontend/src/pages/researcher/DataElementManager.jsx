@@ -527,13 +527,14 @@ const DataElementManager = () => {
         ) : totalCount === 0 ? (
           <div className="py-20 text-center text-slate-300 text-sm">{showDeleted ? "No deleted elements found." : "No elements found."}</div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto -mx-6 px-6">
+          <table className="w-full min-w-[520px] text-sm">
             <thead>
               <tr className="bg-slate-50 text-left">
                 <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide rounded-l-lg">Label</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Code</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Datatype</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Unit</th>
+                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide hidden sm:table-cell">Code</th>
+                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide hidden md:table-cell">Datatype</th>
+                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide hidden md:table-cell">Unit</th>
                 <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide rounded-r-lg">Actions</th>
               </tr>
             </thead>
@@ -550,36 +551,37 @@ const DataElementManager = () => {
                     onClick={() => setSelectedEl(el)}
                     className="cursor-pointer hover:bg-slate-50 transition-colors group"
                   >
-                    <td className="px-4 py-3.5 font-semibold text-slate-800">
-                      <div className="flex items-center gap-2">
-                        <span>{toTitleCase(el.label || el.name)}</span>
+                    <td className="px-4 py-3.5 font-semibold text-slate-800 max-w-[160px] sm:max-w-none">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="truncate">{toTitleCase(el.label || el.name)}</span>
                         {showDeleted && (
-                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 w-fit">
                             Deleted
                           </span>
                         )}
+                        <span className="sm:hidden font-mono text-xs text-blue-600 truncate">{el.code}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3.5 hidden sm:table-cell">
                       <span className="inline-block font-mono text-sm text-blue-700 bg-blue-50 border border-blue-200 px-3 py-0.5 rounded-full">
                         {el.code}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-slate-500">
+                    <td className="px-4 py-3.5 text-slate-500 hidden md:table-cell">
                       {normalizeType(el.datatype)}
                     </td>
-                    <td className="px-4 py-3.5 text-slate-500">
+                    <td className="px-4 py-3.5 text-slate-500 hidden md:table-cell">
                       {el.unit || "—"}
                     </td>
                     <td className="px-4 py-3.5">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
                         {goalCount > 0 && (
-                          <span className="px-2 py-0.5 bg-violet-50 text-violet-700 text-xs font-semibold rounded-full border border-violet-100">
+                          <span className="px-2 py-0.5 bg-violet-50 text-violet-700 text-xs font-semibold rounded-full border border-violet-100 hidden sm:inline-block">
                             {goalCount} {goalCount === 1 ? "goal" : "goals"}
                           </span>
                         )}
                         {isMapped && (
-                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full border border-emerald-100">
+                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full border border-emerald-100 hidden sm:inline-block">
                             {count} {count === 1 ? "survey" : "surveys"}
                           </span>
                         )}
@@ -620,6 +622,7 @@ const DataElementManager = () => {
               })}
             </tbody>
           </table>
+          </div>
         )}
 
         {/* Pagination */}

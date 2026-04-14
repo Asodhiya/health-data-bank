@@ -1225,6 +1225,7 @@ function PublishModal({
   const [cadence, setCadence] = useState(initialCadence || 'once');
   const [preview, setPreview] = useState({}); // { groupId: inProgressCount }
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setSelectedGroups(new Set(deployedGroupIds.map(String)));
@@ -1356,10 +1357,18 @@ function PublishModal({
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium hover:text-slate-700 transition">Cancel</button>
           <button
-            onClick={() => onConfirm([...selectedGroups], new Set(deployedGroupIds.map(String)), cadence)}
-            disabled={(selectedGroups.size === 0 && deployedGroupIds.length === 0) || previewLoading}
+            onClick={async () => {
+              if (saving) return;
+              setSaving(true);
+              try {
+                await onConfirm([...selectedGroups], new Set(deployedGroupIds.map(String)), cadence);
+              } finally {
+                setSaving(false);
+              }
+            }}
+            disabled={(selectedGroups.size === 0 && deployedGroupIds.length === 0) || previewLoading || saving}
             className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">
-            {previewLoading ? 'Checking…' : 'Save'}
+            {saving ? 'Saving…' : previewLoading ? 'Checking…' : 'Save'}
           </button>
         </div>
       </div>
@@ -1388,6 +1397,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const isLocked = !!form?._locked;
   const isDraft = !isLocked && (!form?.status || form.status === 'DRAFT');
@@ -1540,10 +1550,16 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
     triggerAutoSave();
   };
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
+    if (saving) return;
     if (!validate()) return;
-    onSave({ ...form, title, description: desc, fields });
-    isDirtyRef.current = false;
+    setSaving(true);
+    try {
+      await onSave({ ...form, title, description: desc, fields });
+      isDirtyRef.current = false;
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1584,8 +1600,8 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                     <button onClick={() => setMode('edit')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'edit' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Edit</button>
                     <button onClick={() => setMode('preview')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'preview' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Preview</button>
                   </div>
-                  <button onClick={handleSaveDraft} className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm flex items-center gap-1.5">
-                    <SaveIco /> Save Draft
+                  <button onClick={handleSaveDraft} disabled={saving} className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <SaveIco /> {saving ? 'Saving…' : 'Save Draft'}
                   </button>
                 </>
               ) : (
@@ -1784,9 +1800,9 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
               <p className="text-sm text-slate-500 text-center">You have changes that haven't been saved. What would you like to do?</p>
             </div>
             <div className="flex flex-col gap-2 px-6 pb-6">
-              <button onClick={() => { handleSaveDraft(); setShowUnsavedModal(false); }}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition">
-                Save &amp; Leave
+              <button onClick={() => { handleSaveDraft(); setShowUnsavedModal(false); }} disabled={saving}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed">
+                {saving ? 'Saving…' : 'Save & Leave'}
               </button>
               <button onClick={() => { setShowUnsavedModal(false); isDirtyRef.current = false; onBack(); }}
                 className="w-full py-2.5 text-sm font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition">
