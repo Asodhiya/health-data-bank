@@ -4,6 +4,7 @@ import { api } from "../../services/api";
 import { useResearcherMeta } from "../../hooks/useResearcherMeta";
 import { normalizeAvailableSurveys } from "../../utils/researcherSurveys";
 import { LANGUAGES } from "../../utils/formOptions";
+import { formatDateTime } from "../../utils/dateFormatters";
 import {
   Bar,
   BarChart,
@@ -122,19 +123,6 @@ function getDemographicFieldLabel(field) {
 function getParticipantMarker(participantNumber) {
   if (!participantNumber) return "Participant";
   return `Participant ${participantNumber}`;
-}
-
-function formatObservedAt(value) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return String(value);
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(parsed);
 }
 
 function getGroupByLabel(groupBy) {
@@ -1576,7 +1564,7 @@ export default function ResearcherDashboard() {
                               View submission
                             </Link>
                           ) : column.id === "observed_at" && value ? (
-                            <span className="text-slate-600">{formatObservedAt(value)}</span>
+                            <span className="text-slate-600">{formatDateTime(value)}</span>
                           ) : META_COLUMN_IDS.has(column.id) && value ? (
                             String(value)
                           ) : column.id.includes("id") && value ? (

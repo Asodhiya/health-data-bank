@@ -190,7 +190,6 @@ function App() {
               element={<ResearcherSubmissionDetailPage />}
             />
             <Route path="/groups" element={<Groups />} />
-            <Route path="/researcher/goals" element={<GoalTemplates />} />
           </Route>
         </Route>
         </Routes>

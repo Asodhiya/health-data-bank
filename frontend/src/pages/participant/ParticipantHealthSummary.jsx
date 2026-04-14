@@ -3,6 +3,7 @@ import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { generatePDFReport, generateCSVReport } from "../../utils/healthReportExport";
+import { fmtShortDate } from "../../utils/dateFormatters";
 import GuideTooltip from "../../components/GuideTooltip";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -432,8 +433,6 @@ function LineChart({ points, color = "#3b82f6", unit = "" }) {
     Math.round((i / (xCount - 1)) * (filtered.length - 1))
   );
 
-  const fmtDate = (d) =>
-    d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const fmtVal = (v) =>
     `${Number(v).toFixed(range < 10 ? 1 : 0)}${unit ? " " + unit : ""}`;
 
@@ -542,7 +541,7 @@ function LineChart({ points, color = "#3b82f6", unit = "" }) {
             fill="#475569"
             fontFamily="system-ui,sans-serif"
           >
-            {fmtDate(pts[i].date)}
+            {fmtShortDate(pts[i].date)}
           </text>
         ))}
 
@@ -573,7 +572,7 @@ function LineChart({ points, color = "#3b82f6", unit = "" }) {
               textAnchor="middle" fontSize="8.5" fill="#94a3b8"
               fontFamily="system-ui,sans-serif"
             >
-              {fmtDate(hovered.date)}
+              {fmtShortDate(hovered.date)}
             </text>
           </>
         )}
@@ -1042,7 +1041,6 @@ function ComparisonVisual({ el, tsPoints }) {
     return { color: "text-amber-600", label: "Below average", badge: "bg-amber-100 text-amber-600" };
   })();
 
-  const fmtDate = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const fmtVal = (v) => `${Number(v).toFixed(1)}${unit ? " " + unit : ""}`;
 
   // Categorical (non-numeric) fallback
@@ -1204,7 +1202,7 @@ function ComparisonVisual({ el, tsPoints }) {
             fontSize="9" fontWeight="600" fill="#475569"
             fontFamily="system-ui,sans-serif"
           >
-            {fmtDate(pts2[i].date)}
+            {fmtShortDate(pts2[i].date)}
           </text>
         ))}
 
@@ -1218,7 +1216,7 @@ function ComparisonVisual({ el, tsPoints }) {
               {fmtVal(hovered.val)}
             </text>
             <text x={tipX(hovered.x)} y={hovered.y - 15} textAnchor="middle" fontSize="8.5" fill="#94a3b8" fontFamily="system-ui,sans-serif">
-              {fmtDate(hovered.date)}
+              {fmtShortDate(hovered.date)}
             </text>
           </>
         )}

@@ -416,7 +416,6 @@ export const api = {
     request(`/admin_only/invites/${inviteId}`, { method: "DELETE" }),
 
   // ── Admin: User Management ──
-  adminListUsers: () => request("/admin_only/users"),
   adminGetUserById: (userId) => request(`/admin_only/users/by-id/${userId}`),
   adminListUsersPaged: async (limit = 50, offset = 0, search = "", sortField = "joined", sortDir = "desc", role = null, excludeGroupId = null, activeOnly = false) => {
     const params = new URLSearchParams({
@@ -436,7 +435,8 @@ export const api = {
       return await request(`/admin_only/users/paged?${params.toString()}`);
     } catch (error) {
       // Backward-compatible fallback for environments that only expose /users.
-      const full = await request("/admin_only/users");
+      // Cap at 500 to avoid loading entire dataset if the flat endpoint predates pagination.
+      const full = await request("/admin_only/users?limit=500");
       const normalizedSearch = String(search || "").trim().toLowerCase();
       const list = Array.isArray(full) ? full : [];
       const filtered = normalizedSearch
@@ -833,12 +833,6 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-
-//  caretakerGenerateParticipantReport: (participantId, payload) =>
-//    request(`/caretaker/reports/participant?participant_id=${participantId}`, {
-//      method: "POST",
-//      body: JSON.stringify(payload),
-//    }),
 
   caretakerGetReport: (reportId) => request(`/caretaker/reports/${reportId}`),
 

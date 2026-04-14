@@ -1,16 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
 import GuideTooltip from "../../components/GuideTooltip";
+import SVGIcon from "../../components/SVGIcon";
+import { getLastNDays, fmtShortDay, fmtEntryStamp, isSameDay } from "../../utils/dateFormatters";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 
-const Svg = ({ d, size = 20, sw = 1.8, stroke = "currentColor", fill = "none", ...rest }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke}
-    strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" {...rest}>
-    {typeof d === "string" ? <path d={d} /> : d}
-  </svg>
-);
+const Svg = SVGIcon;
 
 const PlusIco    = () => <Svg d="M12 5v14M5 12h14" size={18} />;
 const TrashIco   = () => <Svg d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" size={15} />;
@@ -41,31 +38,6 @@ const normalizeDatatype = (raw) => {
   if (!["text", "number", "boolean", "integer", "float"].includes(n)) return "number";
   return n;
 };
-
-function getLastNDays(n) {
-  return Array.from({ length: n }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (n - 1 - i));
-    return d;
-  });
-}
-function fmtShortDay(date) {
-  return date.toLocaleDateString("en-US", { weekday: "short" });
-}
-function fmtEntryStamp(isoStr) {
-  if (!isoStr) return "";
-  const d = new Date(isoStr);
-  if (isSameDay(d, new Date())) {
-    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  }
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
-    " " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-}
-function isSameDay(d1, d2) {
-  return d1.getFullYear() === d2.getFullYear() &&
-    d1.getMonth() === d2.getMonth() &&
-    d1.getDate() === d2.getDate();
-}
 
 function usesBooleanLogging(datatype) {
   return normalizeDatatype(datatype) === "boolean";
@@ -113,6 +85,8 @@ function getGoalUsagePercent(current, target, direction) {
 export default function HealthGoals() {
   const [activeGoals, setActiveGoals]     = useState([]);
   const [templates, setTemplates]         = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const templatesFetched                  = useRef(false);
   const [timeseries, setTimeseries]       = useState([]);
   const [loading, setLoading]             = useState(true);
   const [activeGoalId, setActiveGoalId]   = useState(null);
@@ -140,14 +114,12 @@ export default function HealthGoals() {
   const fetchData = useCallback(async ({ background = false } = {}) => {
     try {
       if (!background) setLoading(true);
-      const [goalsData, templatesData, tsData] = await Promise.all([
+      const [goalsData, tsData] = await Promise.all([
         api.listParticipantGoals().catch(() => []),
-        api.browseGoalTemplates().catch(() => []),
         api.getMyHealthTimeseries().catch(() => []),
       ]);
       const goals = Array.isArray(goalsData) ? goalsData : [];
       setActiveGoals(goals);
-      setTemplates(Array.isArray(templatesData) ? templatesData : []);
       setTimeseries(Array.isArray(tsData) ? tsData : []);
       setGoalOrder((prev) => {
         const ids = goals.map((g) => g.goal_id);
@@ -165,6 +137,33 @@ export default function HealthGoals() {
   }, []);
 
   usePolling(fetchData, 30_000);
+
+  // Lazy-load goal templates only when the drawer opens — avoids shipping the
+  // full template library on initial dashboard load, and skips it from polling.
+  useEffect(() => {
+    if (!isDrawerOpen || templatesFetched.current) return;
+    let cancelled = false;
+    setTemplatesLoading(true);
+    api.browseGoalTemplates()
+      .then((data) => {
+        if (cancelled) return;
+        setTemplates(Array.isArray(data) ? data : []);
+        templatesFetched.current = true;
+      })
+      .catch(() => { if (!cancelled) setTemplates([]); })
+      .finally(() => { if (!cancelled) setTemplatesLoading(false); });
+    return () => { cancelled = true; };
+  }, [isDrawerOpen]);
+
+  // Refresh templates after a goal is added/removed so stale availability
+  // flags don't linger if the drawer stays open.
+  const refreshTemplates = useCallback(async () => {
+    if (!templatesFetched.current) return;
+    try {
+      const data = await api.browseGoalTemplates();
+      setTemplates(Array.isArray(data) ? data : []);
+    } catch { /* ignore */ }
+  }, []);
 
   // Sorted goals — respects user-defined drag order
   const sortedGoals = [...activeGoals].sort((a, b) => {
@@ -240,6 +239,7 @@ export default function HealthGoals() {
       setCustomTargets((p) => ({ ...p, [templateId]: "" }));
       setCustomWindows((p) => ({ ...p, [templateId]: "daily" }));
       await fetchData();
+      refreshTemplates();
     } catch (err) {
       const msg = err?.response?.status === 409
         ? "You already track this metric with another goal."
@@ -295,6 +295,7 @@ export default function HealthGoals() {
       setConfirmDeleteId(null);
       if (resolvedGoalId === goalId) setActiveGoalId(null);
       await fetchData();
+      refreshTemplates();
     } catch (err) {
       console.error("Failed to delete goal:", err);
       setConfirmDeleteId(null);
@@ -613,7 +614,11 @@ export default function HealthGoals() {
             </div>
           )}
 
-          {templates.length === 0 ? (
+          {templatesLoading && templates.length === 0 ? (
+            <div className="text-center py-10">
+              <p className="text-sm text-slate-500">Loading templates…</p>
+            </div>
+          ) : templates.length === 0 ? (
             <div className="text-center py-10">
               <p className="text-sm text-slate-500">No templates available.</p>
             </div>

@@ -45,20 +45,25 @@ export default function AdminInsightsPage() {
       ] = results;
 
       const failed = [];
+      const logFailure = (label, res) => {
+        console.error(`[AdminInsights] ${label} fetch failed:`, res.reason);
+        failed.push(label);
+      };
+
       if (systemStatsRes.status === "fulfilled") setSysStats(systemStatsRes.value ?? null);
-      else { setSysStats(null); failed.push("system stats"); }
+      else { setSysStats(null); logFailure("system stats", systemStatsRes); }
 
       if (groupsRes.status === "fulfilled") setGroups(Array.isArray(groupsRes.value) ? groupsRes.value : []);
-      else { setGroups([]); failed.push("groups"); }
+      else { setGroups([]); logFailure("groups", groupsRes); }
 
       if (caretakersRes.status === "fulfilled") setCaretakers(Array.isArray(caretakersRes.value) ? caretakersRes.value : []);
-      else { setCaretakers([]); failed.push("caretakers"); }
+      else { setCaretakers([]); logFailure("caretakers", caretakersRes); }
 
       if (onboardingRes.status === "fulfilled") setOnboardingStats(onboardingRes.value ?? null);
-      else { setOnboardingStats(null); failed.push("onboarding"); }
+      else { setOnboardingStats(null); logFailure("onboarding", onboardingRes); }
 
       if (surveyRes.status === "fulfilled") setSurveyStats(surveyRes.value ?? null);
-      else { setSurveyStats(null); failed.push("surveys"); }
+      else { setSurveyStats(null); logFailure("surveys", surveyRes); }
 
       if (roleGroupRes.status === "fulfilled") {
         setRoleSummary(Array.isArray(roleGroupRes.value?.role_summary) ? roleGroupRes.value.role_summary : []);
@@ -66,7 +71,7 @@ export default function AdminInsightsPage() {
       } else {
         setRoleSummary([]);
         setParticipantCountsByGroup({});
-        failed.push("role health");
+        logFailure("role health", roleGroupRes);
       }
 
       setError(failed.length ? `Could not fully load insights: ${failed.join(", ")}.` : null);

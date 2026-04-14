@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useDebounced } from "../../hooks/useDebounced";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 
@@ -166,7 +167,7 @@ export default function AuditLogPage() {
 
   // ── Filter state ──
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debouncedSearch = useDebounced(search, 350);
   const [catFilter, setCatFilter] = useState("all");
   const [sevFilter, setSevFilter] = useState("all");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -175,7 +176,6 @@ export default function AuditLogPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sort, setSort] = useState("desc");
-  const searchTimerRef = useRef();
 
   // ── UI state ──
   const [showFilters, setShowFilters] = useState(false);
@@ -186,21 +186,14 @@ export default function AuditLogPage() {
   const [exportFilename, setExportFilename] = useState(`audit-logs-${new Date().toISOString().split("T")[0]}`);
   const [isExporting, setIsExporting] = useState(false);
 
-  // ── Debounce search input (350 ms) ──
-  useEffect(() => {
-    clearTimeout(searchTimerRef.current);
-    searchTimerRef.current = setTimeout(() => setDebouncedSearch(search), 350);
-    return () => clearTimeout(searchTimerRef.current);
-  }, [search]);
-
-  // ── Fetch audit logs — reactive to server-side filter state ──
+  // ── Fetch audit logs — reactive to server-side filter + pagination state ──
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await api.getAuditLogs({
-        limit: 500,
-        offset: 0,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
         search: debouncedSearch || undefined,
         date_from: dateFrom || undefined,
         date_to: dateTo || undefined,
@@ -214,7 +207,7 @@ export default function AuditLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, dateFrom, dateTo, roleFilter]);
+  }, [debouncedSearch, dateFrom, dateTo, roleFilter, page, pageSize]);
 
   useEffect(() => {
     fetchLogs();
@@ -251,8 +244,9 @@ export default function AuditLogPage() {
     return r;
   }, [allLogs, catFilter, sevFilter, groupFilter, userFilter, sort]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
+  // Server handles pagination; client-side filters (cat/sev/group/user) narrow the current page only.
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const paged = filtered;
 
   // ── Export ──
   const handleExport = () => {
@@ -313,7 +307,7 @@ export default function AuditLogPage() {
   const clearAll = () => {
     setCatFilter("all"); setSevFilter("all"); setRoleFilter("all");
     setGroupFilter("all"); setUserFilter("all"); setDateFrom(""); setDateTo(""); setPage(1);
-    setSearch(""); setDebouncedSearch("");
+    setSearch("");
   };
   const setDatePreset = (days) => {
     const now = new Date(); const from = new Date(now); from.setDate(from.getDate() - days);
