@@ -1,4 +1,4 @@
-import { Outlet, Navigate } from 'react-router-dom';
+import { Outlet, Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import HDBLogo from '../components/HDBLogo';
 
@@ -21,12 +21,10 @@ export default function AuthLayout() {
         </div>
 
         {/* Footer */}
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs text-slate-400">
-          <a href="#" className="hover:text-slate-500 transition-colors">Terms &amp; Conditions</a>
-          <span>|</span>
-          <a href="#" className="hover:text-slate-500 transition-colors">About Us</a>
-          <span>|</span>
-          <a href="#" className="hover:text-slate-500 transition-colors">Copyright</a>
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+          <Link to="/terms" className="hover:text-slate-500 transition-colors">Terms and conditions</Link>
+          <span>·</span>
+          <span>© 2026 University of Prince Edward Island</span>
         </div>
       </div>
     </div>

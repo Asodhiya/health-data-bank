@@ -23,6 +23,8 @@ const BackgroundInfoPage = lazy(() => import("./pages/onboarding/BackgroundInfoP
 const ResetPasswordPage = lazy(() => import("./pages/auth/ResetPasswordPage"));
 const ConsentPage = lazy(() => import("./pages/onboarding/ConsentPage"));
 const IntakePage = lazy(() => import("./pages/onboarding/IntakePage"));
+const SendFeedbackPage = lazy(() => import("./pages/shared/SendFeedbackPage"));
+const TermsPage = lazy(() => import("./pages/shared/TermsPage"));
 
 // ── Shared pages ──
 const ProfilePage = lazy(() => import("./pages/shared/ProfilePage"));
@@ -99,6 +101,8 @@ function App() {
         <Route path="/dashboard" element={<DefaultRoute />} />
         <Route path="/logout" element={<Navigate to="/login" replace />} />
         <Route path="/maintenance" element={<MaintenancePage />} />
+        <Route path="/feedback/send" element={<SendFeedbackPage />} />
+        <Route path="/terms" element={<TermsPage />} />
 
         {/* ── Admin ── */}
         <Route element={<AdminRoute />}>
