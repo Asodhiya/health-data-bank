@@ -26,14 +26,22 @@ def _utc_day_bounds(target_date: date | None = None) -> tuple[datetime, datetime
 
 
 def _caretaker_message_element_expr(code_col, label_col, description_col):
-    haystack = func.lower(
-        func.concat(
-            func.coalesce(code_col, ""),
+    haystack = func.replace(
+        func.replace(
+            func.lower(
+                func.concat(
+                    func.coalesce(code_col, ""),
+                    " ",
+                    func.coalesce(label_col, ""),
+                    " ",
+                    func.coalesce(description_col, ""),
+                )
+            ),
+            "_",
             " ",
-            func.coalesce(label_col, ""),
-            " ",
-            func.coalesce(description_col, ""),
-        )
+        ),
+        "-",
+        " ",
     )
     return and_(
         or_(

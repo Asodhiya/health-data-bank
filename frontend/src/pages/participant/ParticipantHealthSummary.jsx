@@ -11,7 +11,8 @@ function isCaretakerMessageElement(item) {
   const haystack = [item?.code, item?.label, item?.description]
     .filter(Boolean)
     .join(" ")
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
   if (!["caretaker", "care team", "careteam"].some((token) => haystack.includes(token))) {
     return false;
   }

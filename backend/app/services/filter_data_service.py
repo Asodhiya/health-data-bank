@@ -29,6 +29,65 @@ PROFILE_DEMOGRAPHIC_FIELDS = {
 }
 
 
+def _caretaker_message_element_expr(code_col, label_col, description_col):
+    haystack = func.replace(
+        func.replace(
+            func.lower(
+                func.concat(
+                    func.coalesce(code_col, ""),
+                    " ",
+                    func.coalesce(label_col, ""),
+                    " ",
+                    func.coalesce(description_col, ""),
+                )
+            ),
+            "_",
+            " ",
+        ),
+        "-",
+        " ",
+    )
+    return and_(
+        or_(
+            haystack.like("%caretaker%"),
+            haystack.like("%care team%"),
+            haystack.like("%careteam%"),
+        ),
+        or_(
+            haystack.like("%note%"),
+            haystack.like("%notes%"),
+            haystack.like("%message%"),
+            haystack.like("%messages%"),
+        ),
+    )
+
+
+def _caretaker_message_element_ids_subquery():
+    return select(DataElement.element_id).where(
+        _caretaker_message_element_expr(
+            DataElement.code,
+            DataElement.label,
+            DataElement.description,
+        )
+    )
+
+
+def _is_caretaker_message_element(element: DataElement | None) -> bool:
+    if element is None:
+        return False
+    haystack = " ".join(
+        str(part or "")
+        for part in (
+            getattr(element, "code", None),
+            getattr(element, "label", None),
+            getattr(element, "description", None),
+        )
+    ).lower().replace("_", " ").replace("-", " ")
+    has_audience = any(token in haystack for token in ("caretaker", "care team", "careteam"))
+    has_message_type = any(token in haystack for token in ("note", "notes", "message", "messages"))
+    return has_audience and has_message_type
+
+
 def _normalize_profile_field_fallback(profile_field: str, value):
     if value is None:
         return None
@@ -966,7 +1025,15 @@ async def get_survey_results_pivoted(
         element_scope = (
             select(FieldElementMap.element_id)
             .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .join(DataElement, DataElement.element_id == FieldElementMap.element_id)
             .where(FormField.form_id.in_(survey_family_form_ids or [survey_id]))
+            .where(
+                ~_caretaker_message_element_expr(
+                    DataElement.code,
+                    DataElement.label,
+                    DataElement.description,
+                )
+            )
         )
     else:
         scoped_element_ids = []
@@ -977,12 +1044,19 @@ async def get_survey_results_pivoted(
         if scoped_element_ids:
             element_scope = select(DataElement.element_id).where(
                 DataElement.element_id.in_(scoped_element_ids)
+            ).where(
+                ~_caretaker_message_element_expr(
+                    DataElement.code,
+                    DataElement.label,
+                    DataElement.description,
+                )
             )
         else:
             element_scope = (
                 select(HealthDataPoint.element_id)
                 .distinct()
                 .where(HealthDataPoint.source_type.in_(source_types))
+                .where(~HealthDataPoint.element_id.in_(_caretaker_message_element_ids_subquery()))
             )
             if participant_ids is not None:
                 element_scope = element_scope.where(HealthDataPoint.participant_id.in_(participant_ids))
@@ -1166,6 +1240,13 @@ async def get_survey_results_pivoted(
             DataElement.unit,
         )
         .where(DataElement.element_id.in_(element_scope))
+        .where(
+            ~_caretaker_message_element_expr(
+                DataElement.code,
+                DataElement.label,
+                DataElement.description,
+            )
+        )
     )
     element_meta_rows = element_meta_result.all()
 
@@ -1379,7 +1460,15 @@ async def get_survey_results_grouped(
         element_scope = (
             select(FieldElementMap.element_id)
             .join(FormField, FormField.field_id == FieldElementMap.field_id)
+            .join(DataElement, DataElement.element_id == FieldElementMap.element_id)
             .where(FormField.form_id == survey_id)
+            .where(
+                ~_caretaker_message_element_expr(
+                    DataElement.code,
+                    DataElement.label,
+                    DataElement.description,
+                )
+            )
         )
     else:
         scoped_element_ids = []
@@ -1388,12 +1477,23 @@ async def get_survey_results_grouped(
                 scoped_element_ids.append(element_id)
 
         if scoped_element_ids:
-            element_scope = select(DataElement.element_id).where(DataElement.element_id.in_(scoped_element_ids))
+            element_scope = (
+                select(DataElement.element_id)
+                .where(DataElement.element_id.in_(scoped_element_ids))
+                .where(
+                    ~_caretaker_message_element_expr(
+                        DataElement.code,
+                        DataElement.label,
+                        DataElement.description,
+                    )
+                )
+            )
         else:
             element_scope = (
                 select(HealthDataPoint.element_id)
                 .distinct()
                 .where(HealthDataPoint.source_type.in_(source_types))
+                .where(~HealthDataPoint.element_id.in_(_caretaker_message_element_ids_subquery()))
             )
             if participant_ids is not None:
                 element_scope = element_scope.where(HealthDataPoint.participant_id.in_(participant_ids))
@@ -1442,6 +1542,11 @@ async def get_survey_results_grouped(
         group_element = await db.get(DataElement, group_by_element_id)
         if group_element is None:
             raise HTTPException(status_code=400, detail="Selected group_by data element was not found.")
+        if _is_caretaker_message_element(group_element):
+            raise HTTPException(
+                status_code=400,
+                detail="Selected group_by data element is not available for researcher analytics.",
+            )
         if not _is_categorical_element_datatype(getattr(group_element, "datatype", None)):
             raise HTTPException(
                 status_code=400,

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from app.db.models import (
     SurveyForm, FormDeployment, GroupMember, FormSubmission,
     SubmissionAnswer, FormField, ParticipantProfile,
-    FieldElementMap, HealthDataPoint, Group, CaretakerProfile, FieldOption, DataElement
+    FieldElementMap, HealthDataPoint, Group, CaretakerProfile, FieldOption, DataElement, CaretakerNote
 )
 from app.services.notification_service import create_notification, notification_exists_recent
 from app.services.survey_cadence import as_utc, get_cycle_key, get_cycle_label, normalize_cadence
@@ -391,7 +391,7 @@ def _is_caretaker_message_element(element: DataElement | None) -> bool:
         return False
     haystack = " ".join(
         str(value or "") for value in (element.code, element.label, element.description)
-    ).lower()
+    ).lower().replace("_", " ").replace("-", " ")
     audience_tokens = {"caretaker", "care team", "careteam"}
     if not any(token in haystack for token in audience_tokens):
         return False
@@ -618,6 +618,22 @@ async def submit_survey_response(form_id: UUID, user_id: UUID, answers: List[Dic
                 combined_message = "\n".join(
                     f"{entry['field_label']}: {entry['message']}" for entry in caretaker_messages
                 )
+                caretaker_id = await db.scalar(
+                    select(CaretakerProfile.caretaker_id)
+                    .join(Group, Group.caretaker_id == CaretakerProfile.caretaker_id)
+                    .where(Group.group_id == submission.group_id)
+                )
+                created_note = None
+                if caretaker_id:
+                    created_note = CaretakerNote(
+                        caretaker_id=caretaker_id,
+                        participant_id=participant.participant_id,
+                        text=combined_message,
+                        tag="participant-message",
+                    )
+                    db.add(created_note)
+                    await db.flush()
+
                 already_notified = await notification_exists_recent(
                     db,
                     user_id=caretaker_user_id,
@@ -633,7 +649,10 @@ async def submit_survey_response(form_id: UUID, user_id: UUID, answers: List[Dic
                         notification_type="message",
                         title="Participant message received",
                         message=f"{participant_name} sent a message from '{form.title if form else 'a survey'}'.\n{combined_message}",
-                        link="/caretaker/participants",
+                        link=(
+                            f"/caretaker/participants/{participant.participant_id}?tab=notes&note={created_note.note_id}"
+                            if created_note else f"/caretaker/participants/{participant.participant_id}?tab=notes"
+                        ),
                         role_target="caretaker",
                         source_type="participant_message",
                         source_id=submission.submission_id,

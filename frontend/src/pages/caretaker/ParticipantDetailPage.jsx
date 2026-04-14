@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { useParams, useNavigate, useOutletContext } from "react-router-dom";
+import { useParams, useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 import { api } from "../../services/api";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
@@ -720,7 +720,7 @@ function TrendsTab({ trends, loading: trendsLoading }) {
 
 // ─── Tab: Notes & Feedback (unchanged — already working) ────────────────────────
 
-function NotesTab({ participantId, participantName, feedbackItems, noteItems }) {
+function NotesTab({ participantId, participantName, feedbackItems, noteItems, highlightNoteId = null }) {
   const [notes, setNotes] = useState([...(feedbackItems || []), ...(noteItems || [])]);
   const [generalFeedbackText, setGeneralFeedbackText] = useState("");
   const [generalFeedbackSaving, setGeneralFeedbackSaving] = useState(false);
@@ -737,6 +737,13 @@ function NotesTab({ participantId, participantName, feedbackItems, noteItems }) 
   useEffect(() => {
     setNotes([...(feedbackItems || []), ...(noteItems || [])]);
   }, [feedbackItems, noteItems]);
+
+  useEffect(() => {
+    if (!highlightNoteId) return;
+    const target = document.getElementById(`note-${highlightNoteId}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlightNoteId, notes]);
 
   async function handleSendGeneralFeedback() {
     if (!generalFeedbackText.trim()) return;
@@ -806,6 +813,7 @@ function NotesTab({ participantId, participantName, feedbackItems, noteItems }) 
     "initial": "bg-slate-100 text-slate-600 border-slate-200",
     "concern": "bg-rose-50 text-rose-700 border-rose-100",
     "feedback": "bg-violet-50 text-violet-700 border-violet-100",
+    "participant-message": "bg-amber-50 text-amber-700 border-amber-100",
   };
 
   return (
@@ -904,7 +912,11 @@ function NotesTab({ participantId, participantName, feedbackItems, noteItems }) 
           ) : (
             <div className="space-y-3">
               {filtered.map(n => (
-                <div key={n.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                <div
+                  key={n.id}
+                  id={`note-${n.id}`}
+                  className={`bg-white rounded-2xl shadow-sm border p-5 ${String(n.id) === String(highlightNoteId) ? "border-blue-300 ring-2 ring-blue-100" : "border-slate-100"}`}
+                >
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-xs text-slate-400">{fmt(n.createdAt)}</span>
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${tagColors[n.tag] || tagColors["check-in"]}`}>{n.tag}</span>
@@ -934,8 +946,11 @@ export default function ParticipantDetailPage() {
   const { id: participantId } = useParams();
   const navigate = useNavigate();
   const { user } = useOutletContext();
+  const [searchParams] = useSearchParams();
 
-  const [activeTab, setActiveTab] = useState("overview");
+  const requestedTab = searchParams.get("tab");
+  const highlightedNoteId = searchParams.get("note");
+  const [activeTab, setActiveTab] = useState(requestedTab || "overview");
   const [participant, setParticipant] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [feedbackItems, setFeedbackItems] = useState([]);
@@ -1078,6 +1093,11 @@ export default function ParticipantDetailPage() {
     fetchTrends();
   }, [fetchData, fetchGoals, fetchTrends]);
 
+  useEffect(() => {
+    if (!requestedTab) return;
+    setActiveTab(requestedTab);
+  }, [requestedTab]);
+
   // ── Loading state ──
   if (loading) {
     return (
@@ -1175,6 +1195,7 @@ export default function ParticipantDetailPage() {
           participantName={p.fullName}
           feedbackItems={feedbackItems}
           noteItems={noteItems}
+          highlightNoteId={highlightedNoteId}
         />
       )}
     </div>
