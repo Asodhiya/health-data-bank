@@ -1,16 +1,24 @@
-# React + Vite
+# Health Data Bank - Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This is the React + Vite + Tailwind CSS frontend.
 
-Currently, two official plugins are available:
+## Getting Started (Docker)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+The easiest way to run the project is using Docker. This handles all dependencies and environment setup automatically.
 
-## React Compiler
+1. Ensure you have Docker installed.
+2. Run: `docker compose up --build`
+3. Open [http://localhost:5173](http://localhost:5173)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Manual Setup (Non-Docker)
 
-## Expanding the ESLint configuration
+If you prefer running it locally:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1. `npm install`
+2. `npm run dev`
+
+## Tech Stack
+
+- **Framework:** React (Vite)
+- **Styling:** Tailwind CSS
+- **Linting:** ESLint + Prettier
