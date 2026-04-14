@@ -111,6 +111,7 @@ function App() {
             />
             <Route path="/admin/insights" element={<AdminInsightsPage />} />
             <Route path="/admin/messages" element={<AdminMessagesPage />} />
+            <Route path="/admin/goals" element={<GoalTemplates />} />
             <Route path="/surveys" element={<SurveyBuilderPage />} />
             <Route path="/users" element={<UserManagementPage />} />
             <Route path="/admin/users/:id" element={<UserDetailPage />} />

@@ -219,9 +219,17 @@ export default function AdminDashboard() {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
         <h2 className="text-base font-bold text-slate-800 mb-3">Quick Access</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <button onClick={() => navigate("/onboarding-management")} className="text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-blue-200 hover:bg-blue-50/50 transition-colors">
+            <p className="text-sm font-semibold text-slate-800">Onboarding Management</p>
+            <p className="text-xs text-slate-500 mt-0.5">Consent, intake, and onboarding flow controls.</p>
+          </button>
           <button onClick={() => navigate("/users")} className="text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-blue-200 hover:bg-blue-50/50 transition-colors">
             <p className="text-sm font-semibold text-slate-800">Users & Roles</p>
             <p className="text-xs text-slate-500 mt-0.5">Manage accounts, groups, invites.</p>
+          </button>
+          <button onClick={() => navigate("/admin/goals")} className="text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-blue-200 hover:bg-blue-50/50 transition-colors">
+            <p className="text-sm font-semibold text-slate-800">Goal Builder</p>
+            <p className="text-xs text-slate-500 mt-0.5">Create and manage participant health goal templates.</p>
           </button>
           <button onClick={() => navigate("/admin/insights")} className="text-left px-4 py-3 rounded-xl border border-slate-200 hover:border-blue-200 hover:bg-blue-50/50 transition-colors">
             <p className="text-sm font-semibold text-slate-800">System Insights</p>

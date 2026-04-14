@@ -26,8 +26,14 @@ export const DASHBOARD_NAV = [
   },
 
   {
-    label: "Onboarding",
+    label: "Onboarding Management",
     to: "/onboarding-management",
+    roles: ["admin"],
+  },
+
+  {
+    label: "Goal Builder",
+    to: "/admin/goals",
     roles: ["admin"],
   },
 
