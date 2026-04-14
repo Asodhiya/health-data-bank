@@ -480,16 +480,6 @@ function ReactivateAnonymizedModal({ open, onClose, user, onConfirm }) {
   </Modal>;
 }
 
-// ── Group-level Invite Modal (Participant or Caretaker only) ─────────────────
-function GroupInviteModal({ open, onClose, group, onInviteSent, onError }) {
-  const [email, setEmail] = useState(""); const [role, setRole] = useState(""); const [status, setStatus] = useState(null);
-  const send = async () => { setStatus("loading"); try { await api.sendInvite(email.trim(), role, group?.group_id); onInviteSent?.({ email: email.trim(), role, groupId: group?.group_id, group_name: group?.name }); setStatus("success"); } catch (err) { setStatus(null); onError?.(err.message || "Failed."); } };
-  const reset = () => { setEmail(""); setRole(""); setStatus(null); };
-  if (!open) return null;
-  if (status === "success") return <Modal open={open} onClose={() => { reset(); onClose(); }}><div className="text-center py-4 space-y-3"><div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto"><IconCheck /></div><p className="text-lg font-bold text-slate-800">Invite Sent!</p><p className="text-sm text-slate-500">to <span className="font-semibold text-slate-700">{email}</span> → {group?.name}</p><div className="flex gap-3 pt-2"><button onClick={() => { reset(); onClose(); }} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Done</button></div></div></Modal>;
-  return <Modal open={open} onClose={() => status !== "loading" && onClose()}><h3 className="text-lg font-bold text-slate-800 mb-1">Invite to {group?.name}</h3><p className="text-sm text-slate-400 mb-4">Send a registration link</p><div className="space-y-4"><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="user@example.com" name="group-invite-email" autoComplete="off" className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 placeholder:text-slate-300" /></div><div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Role</label><div className="grid grid-cols-2 gap-2">{[{ value: "participant", label: "Participant", lightBg: "bg-blue-50", border: "border-blue-200", lightText: "text-blue-700" }, { value: "caretaker", label: "Caretaker", lightBg: "bg-emerald-50", border: "border-emerald-200", lightText: "text-emerald-700" }].map(r => <button key={r.value} onClick={() => setRole(r.value)} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold text-left transition-all ${role === r.value ? `${r.lightBg} ${r.border} ${r.lightText} ring-1 ring-current` : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{r.label}</button>)}</div></div>{role === "caretaker" && group?.caretaker_name && <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-700"><span className="font-semibold">Note:</span> {group.name} already has {group.caretaker_name} assigned.</div>}</div><div className="flex gap-3 mt-6"><button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={send} disabled={!email.trim() || !role || status === "loading"} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-40">{status === "loading" ? <><Spinner /> Sending…</> : <><IconMail /> Send</>}</button></div></Modal>;
-}
-
 // ── Add Existing Participants to Group Modal ─────────────────────────────────
 const MODAL_PAGE_SIZE = 8;
 function AddParticipantsModal({ open, onClose, group, onConfirm }) {
@@ -852,7 +842,6 @@ export default function UserManagementPage() {
   const [reactivateTarget, setReactivateTarget] = useState(null);
   const [reactivateLoading, setReactivateLoading] = useState(false);
   const [reactivateAnonymizedTarget, setReactivateAnonymizedTarget] = useState(null);
-  const [groupInviteTarget, setGroupInviteTarget] = useState(null);
   const [addParticipantsTarget, setAddParticipantsTarget] = useState(null);
   const [toast, setToast] = useState({ show: false, message: "", type: "success" });
   // Group detail modal
@@ -1182,6 +1171,24 @@ export default function UserManagementPage() {
 
   const clearFilters = () => { setFilterStatus("all"); setFilterGroup("all"); setFilterCaretaker("all"); setSearch(""); };
 
+  const openUserDrawerFromGroup = useCallback(async (userId) => {
+    setSelectedGroupModal(null);
+
+    const normalizedId = String(userId);
+    const existingUser = users.find((user) => String(user.id) === normalizedId);
+    if (existingUser) {
+      setDetailUser(existingUser);
+      return;
+    }
+
+    try {
+      const fetchedUser = await api.adminGetUserById(userId);
+      setDetailUser(transformUser(fetchedUser));
+    } catch (err) {
+      msg(err.message || "Failed to load user details.", "error");
+    }
+  }, [users]);
+
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleDeleteGroup = async (g) => { try { await api.adminDeleteGroup(g.group_id); setGroups(p => p.filter(x => x.group_id !== g.group_id)); setGroupMembersByGroup(prev => { const next = { ...prev }; delete next[g.group_id]; return next; }); if (selectedGroupModal?.group_id === g.group_id) setSelectedGroupModal(null); msg(`"${g.name}" deleted.`); } catch (err) { msg(err.message || "Failed.", "error"); } };
   const handleDeactivate = async (u) => {
@@ -1445,7 +1452,6 @@ export default function UserManagementPage() {
       <AssignCaretakerModal open={!!assignCaretakerTarget} onClose={() => setAssignCaretakerTarget(null)} group={assignCaretakerTarget} caretakers={caretakers} onAssign={handleAssignCaretaker} />
       <ReactivateModal open={!!reactivateTarget} onClose={() => setReactivateTarget(null)} user={reactivateTarget} onConfirm={confirmReactivate} loading={reactivateLoading} />
       <ReactivateAnonymizedModal open={!!reactivateAnonymizedTarget} onClose={() => setReactivateAnonymizedTarget(null)} user={reactivateAnonymizedTarget} onConfirm={handleAnonymizedReactivated} />
-      <GroupInviteModal open={!!groupInviteTarget} onClose={() => setGroupInviteTarget(null)} group={groupInviteTarget} onInviteSent={() => { refreshInvites(); msg("Invite sent."); }} onError={(m) => msg(m, "error")} />
       <AddParticipantsModal open={!!addParticipantsTarget} onClose={() => setAddParticipantsTarget(null)} group={addParticipantsTarget} onConfirm={(group, pIds) => { setUsers(p => p.map(u => pIds.includes(u.id) ? { ...u, groupId: group.group_id, group: group.name } : u)); setGroups(prev => prev.map(g => g.group_id === group.group_id ? { ...g, member_count: Number(g.member_count || 0) + pIds.length } : g)); setGroupMembersByGroup(prev => { if (!Array.isArray(prev[group.group_id])) return prev; const additions = users.filter(u => pIds.includes(u.id)).map(u => ({ participant_id: u.id, name: `${u.firstName} ${u.lastName}`.trim() || u.email || "Unknown", joined_at: null })).filter(member => !prev[group.group_id].some(existing => existing.participant_id === member.participant_id)); return { ...prev, [group.group_id]: [...prev[group.group_id], ...additions] }; }); setAddParticipantsTarget(null); msg(`${pIds.length} participant${pIds.length > 1 ? "s" : ""} added to "${group.name}".`); }} />
 
       {/* Header */}
@@ -1747,10 +1753,6 @@ export default function UserManagementPage() {
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
                   <IconPlus /> Add participant
                 </button>
-                <button onClick={() => setGroupInviteTarget(g)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
-                  <IconMail /> Invite
-                </button>
                 <button onClick={() => setEditGroupTarget(g)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
                   <IconEdit /> Edit
@@ -1843,7 +1845,7 @@ export default function UserManagementPage() {
                         ) : pMembers.length === 0 ? (
                           <div className="py-14 text-center px-6">
                             <p className="text-sm font-semibold text-slate-600 mb-1">No participants yet</p>
-                            <p className="text-xs text-slate-400 mb-4">Add or invite participants to this group.</p>
+                            <p className="text-xs text-slate-400 mb-4">Add participants to this group.</p>
                             <button onClick={() => setAddParticipantsTarget(g)}
                               className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700">
                               <IconPlus /> Add participant
@@ -1855,7 +1857,7 @@ export default function UserManagementPage() {
                               <div key={m.participant_id} className="px-5 py-3.5 flex items-center gap-3 hover:bg-slate-50/50 transition-colors">
                                 <Avatar name={m.name} size="sm" />
                                 <div className="flex-1 min-w-0">
-                                  <button onClick={() => { setSelectedGroupModal(null); navigate(`/admin/users/${m.participant_id}`); }}
+                                  <button onClick={() => openUserDrawerFromGroup(m.participant_id)}
                                     className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline text-left truncate block">
                                     {m.name}
                                   </button>
@@ -1924,7 +1926,7 @@ export default function UserManagementPage() {
                                 <div key={m.participant_id} className="px-5 py-3.5 flex items-center gap-3 hover:bg-slate-50/50 transition-colors">
                                   <Avatar name={m.name} size="sm" />
                                   <div className="flex-1 min-w-0">
-                                    <button onClick={() => { setSelectedGroupModal(null); navigate(`/admin/users/${m.participant_id}`); }}
+                                    <button onClick={() => openUserDrawerFromGroup(m.participant_id)}
                                       className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline text-left truncate block">
                                       {m.name}
                                     </button>

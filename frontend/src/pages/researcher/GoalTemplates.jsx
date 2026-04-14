@@ -21,6 +21,21 @@ function fmt(val, unit) {
   return `${val}${unit ? " " + unit : ""}`;
 }
 
+function goalTypeLabel(template) {
+  const mode = template.progress_mode || "incremental";
+  const win = (template.window || "daily").toLowerCase();
+  if (mode === "absolute") {
+    if (win === "none") return "Track until reached";
+    if (win === "weekly") return "Weekly tracked";
+    if (win === "monthly") return "Monthly tracked";
+    return `${win} tracked`;
+  }
+  if (win === "daily") return "Daily goal";
+  if (win === "weekly") return "Weekly goal";
+  if (win === "monthly") return "Monthly goal";
+  return `${win} goal`;
+}
+
 
 // ── Raw data table ─────────────────────────────────────────────────────────
 
@@ -157,7 +172,7 @@ function StatsPanel({ template, dataElements, onClose }) {
           <p className="text-xs text-slate-400 mt-0.5">
             Metric: {element?.label || template.element?.label || "Unknown"}
             {unit && <> · Unit: {unit}</>}
-            {" · "}{template.direction === "at_most" ? "At most" : "At least"} · {template.progress_mode === "absolute" ? "Absolute" : "Incremental"}
+            {" · "}{template.direction === "at_most" ? "At most" : "At least"} · {goalTypeLabel(template)}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -524,9 +539,9 @@ export default function GoalTemplates() {
       showToast("That data element already has an active goal template.");
       return;
     }
-    // Strip UI-only flag; for incremental goals default window to "daily"
+    // Strip UI-only flag; ensure window has a valid value
     const { _tracked, ...payload } = formData;
-    if (payload.progress_mode !== "absolute") payload.window = payload.window || "daily";
+    payload.window = payload.window || (payload.progress_mode === "absolute" ? "monthly" : "daily");
     setSaving(true);
     try {
       if (editingId) {
@@ -823,8 +838,8 @@ export default function GoalTemplates() {
                     <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400">
                       {t.direction === "at_most" ? "At most" : "At least"}
                     </span>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400">
-                      {t.progress_mode === "absolute" ? "Absolute" : "Incremental"}
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${t.progress_mode === "absolute" && (t.window || "daily") === "none" ? "bg-violet-50 text-violet-400" : "bg-slate-100 text-slate-400"}`}>
+                      {goalTypeLabel(t)}
                     </span>
                   </div>
 
@@ -887,8 +902,8 @@ export default function GoalTemplates() {
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
                     {t.direction === "at_most" ? "At most" : "At least"}
                   </span>
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
-                    {t.progress_mode === "absolute" ? "Absolute" : "Incremental"}
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${t.progress_mode === "absolute" && (t.window || "daily") === "none" ? "bg-violet-50 text-violet-500" : "bg-slate-100 text-slate-500"}`}>
+                    {goalTypeLabel(t)}
                   </span>
                 </div>
 
@@ -1021,8 +1036,7 @@ export default function GoalTemplates() {
                 <p className="text-[10px] font-black uppercase text-slate-400 mt-2">
                   Behavior:{" "}
                   <span className="text-slate-600">
-                    {formData.progress_mode || "incremental"} · {formData.direction || "at_least"}
-                    {formData.progress_mode === "absolute" ? ` · ${formData.window || "monthly"} window` : ""}
+                    {formData.progress_mode || "incremental"} · {formData.direction || "at_least"} · {formData.window || (formData.progress_mode === "absolute" ? "monthly" : "daily")} window
                   </span>
                 </p>
               </div>
@@ -1109,8 +1123,8 @@ export default function GoalTemplates() {
                   </div>
                 </div>
 
-                {/* Goal type + window (grid when absolute so window selector appears) */}
-                <div className={`grid gap-3 ${formData.progress_mode === "absolute" ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
+                {/* Goal type + window — always shown, options differ by mode */}
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                   <div>
                     <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Progress mode</label>
                     <select
@@ -1122,13 +1136,13 @@ export default function GoalTemplates() {
                           ...p,
                           progress_mode: v,
                           _tracked: v === "absolute",
-                          // default to monthly window when switching to absolute
-                          ...(v === "absolute" && p.window === "daily" ? { window: "monthly" } : {}),
+                          // reset window to a sensible default when switching modes
+                          window: v === "absolute" ? (p.window === "daily" ? "monthly" : p.window) : (p.window === "monthly" || p.window === "none" ? "daily" : p.window),
                         }));
                       }}
                     >
-                      <option value="incremental">Incremental — each log adds to total</option>
-                      <option value="absolute">Absolute — 1 reading/day, latest value counts</option>
+                      <option value="incremental">Incremental (logs add up)</option>
+                      <option value="absolute">Absolute (1 reading/day)</option>
                     </select>
                     {formData.progress_mode === "absolute" && (
                       <p className="mt-1.5 text-[11px] text-violet-600 font-medium">
@@ -1137,21 +1151,21 @@ export default function GoalTemplates() {
                     )}
                   </div>
 
-                  {/* Window — only shown for absolute mode */}
-                  {formData.progress_mode === "absolute" && (
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Window</label>
-                      <select
-                        className="mt-1.5 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition"
-                        value={formData.window || "monthly"}
-                        onChange={(e) => setFormData((p) => ({ ...p, window: e.target.value }))}
-                      >
-                        <option value="weekly">Weekly — resets each week</option>
-                        <option value="monthly">Monthly — resets each month</option>
-                        <option value="none">No reset — track until permanently met</option>
-                      </select>
-                    </div>
-                  )}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Window</label>
+                    <select
+                      className="mt-1.5 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition"
+                      value={formData.window || (formData.progress_mode === "absolute" ? "monthly" : "daily")}
+                      onChange={(e) => setFormData((p) => ({ ...p, window: e.target.value }))}
+                    >
+                      {formData.progress_mode === "incremental" && (
+                        <option value="daily">Daily</option>
+                      )}
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="none">{formData.progress_mode === "absolute" ? "No reset (track until met)" : "No reset (cumulative)"}</option>
+                    </select>
+                  </div>
                 </div>
 
                 {/* Direction */}
