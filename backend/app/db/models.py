@@ -167,54 +167,14 @@ class RolePermission(Base):
 
 
 
-class Device(Base):
-    __tablename__ = "devices"
-
-    device_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"))
-    device_fingerprint: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    device_name: Mapped[str | None] = mapped_column(Text)
-    platform: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    last_seen_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-    trusted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-    revoked_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-
-
 class Session(Base):
     __tablename__ = "sessions"
 
     session_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"))
-    device_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("devices.device_id", ondelete="SET NULL"))
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     expired_at: Mapped[str] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     mfa_verified_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-
-
-class MFAMethod(Base):
-    __tablename__ = "mfa_methods"
-
-    mfa_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"))
-    type: Mapped[str] = mapped_column(Text, nullable=False)
-    secret_or_ref: Mapped[str] = mapped_column(Text, nullable=False)
-    enabled_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-    last_used_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-
-
-class MFAChallenge(Base):
-    __tablename__ = "mfa_challenges"
-
-    challenge_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    session_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"))
-    mfa_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("mfa_methods.mfa_id", ondelete="CASCADE"))
-    status: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    verified_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-    attempts: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
-
-
 
 
 class ParticipantProfile(Base):
@@ -506,18 +466,6 @@ class Report(Base):
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 
 
-class ReportFile(Base):
-    __tablename__ = "report_files"
-
-    file_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    report_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("reports.report_id"))
-    file_type: Mapped[str | None] = mapped_column(Text)
-    storage_path: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
-
-
-
-
 class Backup(Base):
     __tablename__ = "backups"
 
@@ -757,16 +705,3 @@ class ParticipantConsent(Base):
 
     participant: Mapped["ParticipantProfile"] = relationship("ParticipantProfile", back_populates="consents")
     template: Mapped["ConsentFormTemplate"] = relationship("ConsentFormTemplate", back_populates="consents")
-
-
-class Reminder(Base):
-    __tablename__ = "reminders"
-
-    reminder_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id"))
-    label: Mapped[str | None] = mapped_column(Text)
-    schedule_type: Mapped[str | None] = mapped_column(Text)
-    schedule_json: Mapped[dict | None] = mapped_column(JSONB)
-    enabled: Mapped[bool | None] = mapped_column(Boolean, server_default=text("TRUE"))
-    next_run_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-    created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))

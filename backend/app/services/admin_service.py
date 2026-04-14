@@ -19,13 +19,13 @@ from zoneinfo import ZoneInfo
 
 from app.db.models import (
     AdminProfile, AuditLog, Backup, BackupScheduleSettings, CaretakerFeedback, CaretakerProfile,
-    DataElement, Device, FieldElementMap, FieldOption, FormDeployment,
+    DataElement, FieldElementMap, FieldOption, FormDeployment,
     FormField, FormSubmission, GoalTemplate, Group, GroupMember,
-    HealthDataPoint, HealthGoal, MFAChallenge, MFAMethod, Notification,
+    HealthDataPoint, HealthGoal, Notification,
     SystemFeedback, SystemMaintenanceSettings,
     ParticipantConsent, ConsentFormTemplate, BackgroundInfoTemplate,
-    ParticipantProfile, Permission, Report, ReportFile,
-    Reminder, ResearcherProfile, RestoreEvent, Role, RolePermission, Session,
+    ParticipantProfile, Permission, Report,
+    ResearcherProfile, RestoreEvent, Role, RolePermission, Session,
     SignupInvite, SubmissionAnswer, SurveyForm, User, UserRole,
 )
 from app.schemas.admin_schema import (
@@ -336,10 +336,7 @@ TABLE_ORDER = [
     ("users",               User),
     ("user_roles",          UserRole),
     ("role_permissions",    RolePermission),
-    ("devices",             Device),
     ("sessions",            Session),
-    ("mfa_methods",         MFAMethod),
-    ("mfa_challenges",      MFAChallenge),
     ("consent_form_template", ConsentFormTemplate),
     ("background_info_template", BackgroundInfoTemplate),
     ("participant_profile", ParticipantProfile),
@@ -363,10 +360,8 @@ TABLE_ORDER = [
     ("caretaker_feedback",  CaretakerFeedback),
     ("health_data_points",  HealthDataPoint),
     ("reports",             Report),
-    ("report_files",        ReportFile),
     ("notifications",       Notification),
     ("system_feedback",     SystemFeedback),
-    ("reminders",           Reminder),
     ("audit_log",           AuditLog),
     ("backup_schedule_settings", BackupScheduleSettings),
     ("backups",             Backup),
@@ -2286,16 +2281,7 @@ async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession
             sa_delete(Notification).where(Notification.user_id == user_id)
         )
         await db.execute(
-            sa_delete(Reminder).where(Reminder.user_id == user_id)
-        )
-        await db.execute(
             sa_delete(Session).where(Session.user_id == user_id)
-        )
-        await db.execute(
-            sa_delete(Device).where(Device.user_id == user_id)
-        )
-        await db.execute(
-            sa_delete(MFAMethod).where(MFAMethod.user_id == user_id)
         )
 
         nullable_user_fk_updates = (
@@ -2308,7 +2294,6 @@ async def delete_user(user_id: UUID, mode: str, actor_id: UUID, db: AsyncSession
             (RestoreEvent, RestoreEvent.restored_by),
             (AuditLog, AuditLog.actor_user_id),
             (Notification, Notification.user_id),
-            (Reminder, Reminder.user_id),
             (SystemFeedback, SystemFeedback.user_id),
             (SystemFeedback, SystemFeedback.reviewed_by),
             (ConsentFormTemplate, ConsentFormTemplate.created_by),
