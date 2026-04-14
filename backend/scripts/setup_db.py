@@ -42,7 +42,9 @@ ROLE_PERMISSION_MAP = {
     },
     "caretaker": {
         permission_constants.CARETAKER_READ,
+        permission_constants.CARETAKER_WRITE,
         permission_constants.GROUP_READ,
+        permission_constants.GOAL_VIEW_ALL,
         permission_constants.STATS_VIEW,
         permission_constants.SEND_INVITE,
     },
