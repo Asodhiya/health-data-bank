@@ -1083,15 +1083,16 @@ export default function GoalTemplates() {
                   <div className="mt-1.5 flex items-center gap-2">
                     <input
                       required
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="any"
                       placeholder="e.g. 10000"
                       className="flex-1 px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition placeholder-slate-300"
                       value={formData.default_target === 0 ? "" : formData.default_target}
                       onChange={(e) => {
-                        const val = e.target.value.replace(/[^0-9]/g, "");
-                        setFormData({ ...formData, default_target: val === "" ? 0 : parseInt(val) });
+                        const val = e.target.value;
+                        setFormData({ ...formData, default_target: val === "" ? 0 : parseFloat(val) });
                       }}
                     />
                     {(() => {
