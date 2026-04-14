@@ -1297,7 +1297,7 @@ class StatsQuery:
         self.db = db
 
     def _current_survey_element_ids_subquery(self, participant_id: uuid.UUID):
-        return (
+        survey_element_ids = (
             select(FieldElementMap.element_id)
             .distinct()
             .join(FormField, FormField.field_id == FieldElementMap.field_id)
@@ -1311,6 +1311,18 @@ class StatsQuery:
             .where(FormField.profile_field.is_(None))
             .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
         )
+
+        goal_element_ids = (
+            select(HealthGoal.element_id)
+            .distinct()
+            .join(DataElement, DataElement.element_id == HealthGoal.element_id)
+            .where(HealthGoal.participant_id == participant_id)
+            .where(HealthGoal.status == "active")
+            .where(HealthGoal.element_id.is_not(None))
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
+        )
+
+        return survey_element_ids.union(goal_element_ids)
 
     def _current_survey_field_meta_subquery(self, participant_id: uuid.UUID):
         return (
