@@ -1660,6 +1660,124 @@ class StatsQuery:
 
         return list(series_by_element.values())
 
+    async def get_participant_vs_group_comparison(
+        self,
+        participant_id: uuid.UUID,
+        group_id: uuid.UUID,
+        element_ids: list[uuid.UUID] | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> dict:
+        visible_element_ids = self._current_survey_element_ids_subquery(participant_id)
+
+        subject_stmt = (
+            select(
+                HealthDataPoint.element_id.label("element_id"),
+                func.avg(HealthDataPoint.value_number).label("avg"),
+                func.min(HealthDataPoint.value_number).label("min"),
+                func.max(HealthDataPoint.value_number).label("max"),
+                func.count(HealthDataPoint.data_id).label("count"),
+            )
+            .where(HealthDataPoint.participant_id == participant_id)
+            .where(HealthDataPoint.element_id.in_(visible_element_ids))
+            .where(HealthDataPoint.value_number.is_not(None))
+            .group_by(HealthDataPoint.element_id)
+        )
+
+        comparison_participants = (
+            select(GroupMember.participant_id)
+            .where(GroupMember.group_id == group_id)
+            .where(GroupMember.left_at == None)
+        )
+        comparison_stmt = (
+            select(
+                HealthDataPoint.element_id.label("element_id"),
+                func.avg(HealthDataPoint.value_number).label("avg"),
+                func.min(HealthDataPoint.value_number).label("min"),
+                func.max(HealthDataPoint.value_number).label("max"),
+                func.count(HealthDataPoint.data_id).label("count"),
+            )
+            .where(HealthDataPoint.participant_id.in_(comparison_participants))
+            .where(HealthDataPoint.element_id.in_(visible_element_ids))
+            .where(HealthDataPoint.value_number.is_not(None))
+            .group_by(HealthDataPoint.element_id)
+        )
+
+        if element_ids:
+            subject_stmt = subject_stmt.where(HealthDataPoint.element_id.in_(element_ids))
+            comparison_stmt = comparison_stmt.where(HealthDataPoint.element_id.in_(element_ids))
+        if date_from:
+            start = datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc)
+            subject_stmt = subject_stmt.where(HealthDataPoint.observed_at >= start)
+            comparison_stmt = comparison_stmt.where(HealthDataPoint.observed_at >= start)
+        if date_to:
+            end = datetime.combine(date_to + timedelta(days=1), time.min).replace(tzinfo=timezone.utc)
+            subject_stmt = subject_stmt.where(HealthDataPoint.observed_at < end)
+            comparison_stmt = comparison_stmt.where(HealthDataPoint.observed_at < end)
+
+        subject_sq = subject_stmt.subquery()
+        comparison_sq = comparison_stmt.subquery()
+
+        stmt = (
+            select(
+                DataElement.element_id,
+                DataElement.code,
+                DataElement.label,
+                DataElement.unit,
+                subject_sq.c.avg.label("subject_avg"),
+                subject_sq.c.min.label("subject_min"),
+                subject_sq.c.max.label("subject_max"),
+                subject_sq.c.count.label("subject_count"),
+                comparison_sq.c.avg.label("comparison_avg"),
+                comparison_sq.c.min.label("comparison_min"),
+                comparison_sq.c.max.label("comparison_max"),
+                comparison_sq.c.count.label("comparison_count"),
+            )
+            .outerjoin(subject_sq, subject_sq.c.element_id == DataElement.element_id)
+            .outerjoin(comparison_sq, comparison_sq.c.element_id == DataElement.element_id)
+            .where(
+                or_(
+                    subject_sq.c.element_id != None,
+                    comparison_sq.c.element_id != None,
+                )
+            )
+            .where(DataElement.element_id.in_(visible_element_ids))
+            .where(~_caretaker_message_element_expr(DataElement.code, DataElement.label, DataElement.description))
+            .order_by(DataElement.label)
+        )
+        if element_ids:
+            stmt = stmt.where(DataElement.element_id.in_(element_ids))
+
+        rows = (await self.db.execute(stmt)).all()
+
+        def fmt(value):
+            return round(float(value), 2) if value is not None else None
+
+        return {
+            "compare_with": "group",
+            "elements": [
+                {
+                    "element_id": str(row.element_id),
+                    "code": row.code,
+                    "label": row.label,
+                    "unit": row.unit,
+                    "subject": {
+                        "avg": fmt(row.subject_avg),
+                        "min": fmt(row.subject_min),
+                        "max": fmt(row.subject_max),
+                        "count": row.subject_count,
+                    },
+                    "comparison": {
+                        "avg": fmt(row.comparison_avg),
+                        "min": fmt(row.comparison_min),
+                        "max": fmt(row.comparison_max),
+                        "count": row.comparison_count,
+                    },
+                }
+                for row in rows
+            ],
+        }
+
     
 
 
