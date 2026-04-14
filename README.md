@@ -5,7 +5,7 @@ A secure web application for community health programs supporting Participants, 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)
 ![React](https://img.shields.io/badge/React-18+-61DAFB.svg)
-![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E.svg)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)
 
 ## 📋 Overview
 
@@ -24,8 +24,8 @@ Health Data Bank enables multiple stakeholder roles to interact with health info
 |-------|------------|
 | **Frontend** | React 18, Tailwind CSS |
 | **Backend** | Python 3.11+, FastAPI, Uvicorn |
-| **Database** | Supabase (PostgreSQL) |
-| **Auth** | Supabase Auth + MFA |
+| **Database** | PostgreSQL |
+| **Auth** | Backend-managed JWT + session-based auth |
 | **Runtime** | Docker, Docker Compose |
 
 ## 📁 Project Structure
@@ -48,9 +48,8 @@ health-data-bank/
 │       ├── schemas/        # Pydantic schemas
 │       └── services/       # Business logic
 │
-├── supabase/               # Supabase configuration
-│   ├── migrations/         # SQL migrations
-│   └── seed/               # Seed data
+├── backend/alembic/        # Database migrations
+├── backend/scripts/        # Database setup and maintenance scripts
 │
 ├── docs/                   # Documentation
 └── .github/                # CI/CD & templates
@@ -63,7 +62,7 @@ health-data-bank/
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - [Node.js 18+](https://nodejs.org/)
 - [Python 3.11+](https://www.python.org/)
-- [Supabase CLI](https://supabase.com/docs/guides/cli)
+- [PostgreSQL 15+](https://www.postgresql.org/)
 
 ### Installation
 
@@ -73,15 +72,17 @@ health-data-bank/
    cd health-data-bank
    ```
 
-2. **Set up environment variables**
+2. **Set up backend environment variables**
    ```bash
-   cp .env.example .env
-   # Edit .env with your Supabase credentials
+   # Configure backend/.env with your PostgreSQL and app credentials
    ```
 
-3. **Start local Supabase**
+   Required values are documented in [docs/architecture/environment_variables_checklist.md](docs/architecture/environment_variables_checklist.md).
+
+3. **Initialize the database**
    ```bash
-   supabase start
+   cd backend
+   python scripts/setup_db.py
    ```
 
 4. **Start with Docker**
@@ -95,7 +96,6 @@ health-data-bank/
    | Frontend | http://localhost:3000 |
    | Backend API | http://localhost:8000 |
    | API Docs | http://localhost:8000/docs |
-   | Supabase Studio | http://localhost:54323 |
 
 ### Manual Setup (Without Docker)
 
@@ -105,6 +105,7 @@ cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+python scripts/setup_db.py
 uvicorn app.main:app --reload
 ```
 
@@ -112,8 +113,14 @@ uvicorn app.main:app --reload
 ```bash
 cd frontend
 npm install
-npm start
+npm run dev
 ```
+
+## 🗄 Database Notes
+
+The application talks directly to PostgreSQL through SQLAlchemy and asyncpg. It does not require the Supabase frontend SDK.
+
+For migration guidance from Supabase-hosted PostgreSQL to another PostgreSQL server, see [docs/architecture/postgresql-migration-from-supabase.md](docs/architecture/postgresql-migration-from-supabase.md).
 
 ## 💻 Development Workflow
 

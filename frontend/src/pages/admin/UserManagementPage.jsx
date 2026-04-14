@@ -1338,15 +1338,44 @@ export default function UserManagementPage() {
     }
   };
   const handleChangeRole = async (user, newRole) => {
+    const previousRole = user.role;
     try {
       await api.adminUpdateUser(user.id, { role: newRole });
-      await fetchData();
+
+      let refreshedUser = { ...user, role: newRole };
+      try {
+        const latestUser = await api.adminGetUserById(user.id);
+        refreshedUser = transformUser(latestUser);
+      } catch {
+        refreshedUser = { ...user, role: newRole };
+      }
+
+      setUsers((prev) => prev.map((entry) => (entry.id === user.id ? { ...entry, ...refreshedUser } : entry)));
+      if (detailUser?.id === user.id) {
+        setDetailUser((prev) => (prev ? { ...prev, ...refreshedUser } : prev));
+      }
+      setRoleTotals((prev) => {
+        if (typeof prev[previousRole] !== "number" && typeof prev[newRole] !== "number") {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          ...(typeof prev[previousRole] === "number"
+            ? { [previousRole]: Math.max(0, prev[previousRole] - 1) }
+            : {}),
+          ...(typeof prev[newRole] === "number"
+            ? { [newRole]: prev[newRole] + 1 }
+            : {}),
+        };
+      });
     } catch (err) {
       msg(err.message || "Failed to change role.", "error");
       return;
     }
     setChangeRoleTarget(null);
     msg(`${user.firstName} is now a ${newRole}.`);
+    void fetchData();
   };
   const handleEditGroup = async (group, newName, newDesc) => {
     try { await api.adminUpdateGroup(group.group_id, { name: newName, description: newDesc }); } catch {}

@@ -196,7 +196,7 @@ export default function SystemSettingsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {[
             { key: "api", label: "API Server",  desc: "FastAPI application server" },
-            { key: "db",  label: "Database",    desc: "PostgreSQL via Supabase" },
+            { key: "db",  label: "Database",    desc: "PostgreSQL database server" },
           ].map(svc => {
             const s = health[svc.key] ? hc(health[svc.key]) : { dot: "bg-slate-300", bg: "bg-slate-50", text: "text-slate-400", label: "Checking…" };
             return (
@@ -219,7 +219,7 @@ export default function SystemSettingsPage() {
           <InfoRow label="Application"   value="Health Data Bank v1.0.0" />
           <InfoRow label="Environment"   value="Development" />
           <InfoRow label="API Framework" value="FastAPI (Python 3.12)" />
-          <InfoRow label="Database"      value="PostgreSQL 15 (Supabase)" />
+          <InfoRow label="Database"      value="PostgreSQL 15" />
           <InfoRow label="Frontend"      value="React 18 + Vite 5" />
         </div>
 
