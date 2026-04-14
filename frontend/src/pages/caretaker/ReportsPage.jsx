@@ -2,10 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useOutletContext, useSearchParams } from "react-router-dom";
 import { api } from "../../services/api";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Legend } from "recharts";
-
-// ─── Utilities ──────────────────────────────────────────────────────────────────
-
-function fmt(d) { if (!d) return "—"; return new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" }); }
+import { fmt } from "../../utils/dateFormatters";
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const CHART_TT = { borderRadius: "10px", border: "none", boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)", fontSize: "12px" };
 

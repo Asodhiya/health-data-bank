@@ -3,6 +3,7 @@ import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
 import NotificationsPanel from "../../components/NotificationsPanel";
 import GuideTooltip from "../../components/GuideTooltip";
+import { formatDateTime } from "../../utils/dateFormatters";
 
 const BellIco = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -11,15 +12,6 @@ const BellIco = () => (
 );
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-const formatDate = (iso) =>
-  new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
 const groupByDate = (items) => {
   const groups = {};
   items.forEach((item) => {
@@ -247,7 +239,7 @@ export default function ParticipantFeedback() {
 
                                   <p className="text-sm text-slate-700 leading-relaxed">{fb.message}</p>
 
-                                  <p className="text-xs text-slate-400">{formatDate(fb.created_at)}</p>
+                                  <p className="text-xs text-slate-400">{formatDateTime(fb.created_at)}</p>
                                 </div>
                               </div>
                             );

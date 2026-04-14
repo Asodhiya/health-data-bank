@@ -180,7 +180,7 @@ async def list_group_elements(
 @router.get("/forms", response_model=list[GroupDeployedFormItem])
 async def list_group_forms(
     group_id: Optional[UUID] = Query(default=None),
-    limit: Optional[int] = Query(default=None, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
@@ -259,7 +259,7 @@ async def list_participants(
     submission_date_to: Optional[date] = Query(default=None),
     sort_by: Optional[Literal["name", "age", "status", "gender", "surveys", "goals", "last_active", "enrolled", "submission_date"]] = Query(default=None),
     sort_dir: Literal["asc", "desc"] = Query(default="asc"),
-    limit: Optional[int] = Query(default=None, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(CARETAKER_READ)),
@@ -842,7 +842,7 @@ async def mark_notification_read(
 
 @router.get("/invites", response_model=list[InviteListItem])
 async def list_my_invites(
-    limit: Optional[int] = Query(default=None, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permissions(SEND_INVITE)),

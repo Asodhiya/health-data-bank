@@ -20,10 +20,14 @@ router = APIRouter()
 
 
 @router.get("")
-async def list_goal_templates(db: AsyncSession = Depends(get_rls_db),
-                               _=Depends(require_permissions(GOAL_TEMPLATE_VIEW))):
-    """List all active goal templates with their linked data element."""
-    return await GoalTemplateQuery(db).list_templates()
+async def list_goal_templates(
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_rls_db),
+    _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
+):
+    """List active goal templates with linked data element. Pass limit/offset to paginate."""
+    return await GoalTemplateQuery(db).list_templates(limit=limit, offset=offset)
 
 
 @router.post("")
@@ -49,11 +53,13 @@ async def update_goal_template(
 
 @router.get("/deleted")
 async def list_deleted_templates(
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_rls_db),
     _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
 ):
-    """List all soft-deleted goal templates."""
-    return await GoalTemplateQuery(db).list_deleted_templates()
+    """List soft-deleted goal templates. Pass limit/offset to paginate."""
+    return await GoalTemplateQuery(db).list_deleted_templates(limit=limit, offset=offset)
 
 
 @router.post("/{template_id}/restore")

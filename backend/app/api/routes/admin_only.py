@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import psutil
 from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from app.schemas.schemas import Role_schema, Permissions_schema, Role_user_link, Link_role_permission_schema
 from app.schemas.admin_schema import AssignCaretakerRequest, AssignCaretakerResponse, UnassignCaretakerResponse, CaretakerItem, DeleteGroupResponse, RestoreResponse, BackupPreviewResponse, AdminProfileUpdate, AdminProfileOut, MaintenanceSettingsOut, MaintenanceSettingsPayload, UserListItem, UserListPage, AdminUserUpdate, UserStatusUpdate, UserReactivateRequest, UserDeleteRequest, MoveParticipantRequest, InviteListItem, BackupListItem, BackupScheduleSettingsOut, BackupScheduleSettingsPayload
 from app.schemas.caretaker_response_schema import GroupCreateRequest, GroupItem, GroupUpdateRequest, GroupMemberItem
@@ -347,8 +347,13 @@ async def backup_endpoint(
     """Export the full database as a downloadable JSON snapshot."""
     content, snapshot_name = await backup_database(current_user.user_id, db)
     filename = f"{snapshot_name}.json"
-    return Response(
-        content=content,
+
+    def _iter_chunks(data: str, size: int = 64 * 1024):
+        for i in range(0, len(data), size):
+            yield data[i : i + size].encode() if isinstance(data, str) else data[i : i + size]
+
+    return StreamingResponse(
+        _iter_chunks(content),
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
@@ -445,8 +450,12 @@ async def update_admin_profile(
 # ── User Management ──────────────────────────────────────────────────────────
 
 @router.get("/users", response_model=list[UserListItem], dependencies=[Depends(require_permissions(USER_READ))])
-async def get_users(db: AsyncSession = Depends(get_db)):
-    return await list_users(db)
+async def get_users(
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_users(db, limit=limit, offset=offset)
 
 
 @router.get("/users/by-id/{user_id}", response_model=UserListItem, dependencies=[Depends(require_permissions(USER_READ))])

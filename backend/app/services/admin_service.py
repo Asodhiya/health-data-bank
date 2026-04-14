@@ -171,12 +171,12 @@ async def _unassign_groups_for_caretaker_user(db: AsyncSession, user_id: UUID) -
     if not caretaker_id:
         return 0
 
-    groups = (
-        await db.execute(select(Group).where(Group.caretaker_id == caretaker_id))
-    ).scalars().all()
-    for group in groups:
-        group.caretaker_id = None
-    return len(groups)
+    result = await db.execute(
+        update(Group)
+        .where(Group.caretaker_id == caretaker_id)
+        .values(caretaker_id=None)
+    )
+    return result.rowcount or 0
 
 
 async def _deactivate_participant_group_memberships(db: AsyncSession, user_id: UUID) -> int:
@@ -1061,30 +1061,45 @@ async def backup_database(
     source: str = "manual",
 ) -> tuple[str, str]:
     """Export all tables to a JSON string and record the snapshot (with checksum) in the backups table.
+
+    Serialises one table at a time so only one table's rows are in memory
+    simultaneously, then joins the chunks once for checksum + DB storage.
     Returns (json_content, snapshot_name).
     """
 
     snapshot_name = f"backup_{datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M-%S')}"
-    tables = {}
-    row_counts = {}
+    row_counts: dict[str, int] = {}
+    hasher = hashlib.sha256()
+    chunks: list[bytes] = []
 
-    for table_name, model_class in TABLE_ORDER:
+    def _push(s: str) -> None:
+        b = s.encode()
+        hasher.update(b)
+        chunks.append(b)
+
+    _push('{"snapshot_name":')
+    _push(json.dumps(snapshot_name))
+    _push(',"created_at":')
+    _push(json.dumps(datetime.now(timezone.utc).isoformat()))
+    _push(',"auth_fields_sanitized":true,"tables":{')
+
+    for idx, (table_name, model_class) in enumerate(TABLE_ORDER):
         result = await db.execute(select(model_class))
         rows = result.scalars().all()
         serialized = [_serialize_row(row, model_class) for row in rows]
-        tables[table_name] = serialized
         row_counts[table_name] = len(serialized)
+        if idx:
+            _push(",")
+        _push(json.dumps(table_name) + ":" + json.dumps(serialized, default=str))
+        del serialized, rows
 
-    data = {
-        "snapshot_name": snapshot_name,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "auth_fields_sanitized": True,
-        "table_row_counts": row_counts,
-        "tables": tables,
-    }
+    _push('},"table_row_counts":')
+    _push(json.dumps(row_counts))
+    _push("}")
 
-    content = json.dumps(data, indent=2, default=str)
-    checksum = hashlib.sha256(content.encode()).hexdigest()
+    content = b"".join(chunks).decode()
+    del chunks
+    checksum = hasher.hexdigest()
 
     record = Backup(
         created_by=created_by,
