@@ -516,6 +516,13 @@ export const api = {
   // Admin Profile (requires backend changes)
   adminGetProfile: () => request("/admin_only/profile"),
   adminGetSystemStats: () => request("/admin_only/system-stats"),
+  // ── System feedback (any logged-in user can submit) ──
+  submitSystemFeedback: (payload) =>
+    request("/feedback", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   adminListSystemFeedback: () => request("/feedback"),
   adminUpdateSystemFeedbackStatus: (feedbackId, status) =>
     request(`/feedback/${feedbackId}`, {

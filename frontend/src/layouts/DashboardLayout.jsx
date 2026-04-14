@@ -204,10 +204,19 @@ export default function DashboardLayout({ role }) {
           </nav>
         </aside>
 
-        {/* Main Content */}
-        <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-slate-50 p-6">
-          <Outlet context={{ user }} />
-        </main>
+        {/* Main Content + Footer */}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-slate-50 p-6">
+            <Outlet context={{ user }} />
+          </main>
+          <footer className="shrink-0 border-t border-slate-200 bg-white px-6 py-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+            <Link to="/feedback/send" className="hover:text-slate-600 transition-colors">Send feedback</Link>
+            <span>·</span>
+            <Link to="/terms" className="hover:text-slate-600 transition-colors">Terms and conditions</Link>
+            <span>·</span>
+            <span>© 2026 University of Prince Edward Island</span>
+          </footer>
+        </div>
       </div>
     </div>
   );
