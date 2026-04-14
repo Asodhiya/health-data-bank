@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useParams, useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 import { api } from "../../services/api";
+import { usePolling } from "../../hooks/usePolling";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
@@ -981,9 +982,11 @@ export default function ParticipantDetailPage() {
   // Each sub-fetch still has its own try/catch (or settled-state check) so
   // a single broken endpoint doesn't blank the whole page.
   // ──────────────────────────────────────────────────────────────────────────────
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const fetchData = useCallback(async ({ background = false } = {}) => {
+    if (!background) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       // Phase 1: fire all 5 caretaker-scoped fetches in parallel.
       const [groupsResult, listResult, subsResult, fbResult, notesResult] = await Promise.allSettled([
@@ -999,8 +1002,10 @@ export default function ParticipantDetailPage() {
         : [];
       const firstGroup = groups.length > 0 ? groups[0] : null;
       if (!firstGroup) {
-        setError("You are not assigned to any groups.");
-        setLoading(false);
+        if (!background) {
+          setError("You are not assigned to any groups.");
+          setLoading(false);
+        }
         return;
       }
 
@@ -1012,8 +1017,10 @@ export default function ParticipantDetailPage() {
         : [];
       const thisParticipant = allParticipants.find(p => p.participant_id === participantId) || null;
       if (!thisParticipant) {
-        setError("Participant not found.");
-        setLoading(false);
+        if (!background) {
+          setError("Participant not found.");
+          setLoading(false);
+        }
         return;
       }
 
@@ -1054,36 +1061,37 @@ export default function ParticipantDetailPage() {
       );
     } catch (err) {
       console.error("Failed to load participant data:", err);
-      setError("Something went wrong loading participant data.");
+      if (!background) setError("Something went wrong loading participant data.");
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   }, [participantId]);
 
   // Fetch goals (non-blocking, separate loading state)
-  const fetchGoals = useCallback(async () => {
-    setGoalsLoading(true);
+  const fetchGoals = useCallback(async ({ background = false } = {}) => {
+    if (!background) setGoalsLoading(true);
     try {
       const data = await api.caretakerGetGoals(participantId);
       setGoals(Array.isArray(data) ? data : []);
     } catch {
-      setGoals([]);
+      // Leave existing goals in place on background refresh errors.
+      if (!background) setGoals([]);
     } finally {
-      setGoalsLoading(false);
+      if (!background) setGoalsLoading(false);
     }
   }, [participantId]);
 
   // Fetch trends (non-blocking, separate loading state)
-  const fetchTrends = useCallback(async () => {
-    setTrendsLoading(true);
+  const fetchTrends = useCallback(async ({ background = false } = {}) => {
+    if (!background) setTrendsLoading(true);
     try {
       const data = await api.caretakerGetHealthTrends(participantId);
       // Filter out elements with no data points
       setTrends(Array.isArray(data) ? data.filter(t => t.points && t.points.length > 0) : []);
     } catch {
-      setTrends([]);
+      if (!background) setTrends([]);
     } finally {
-      setTrendsLoading(false);
+      if (!background) setTrendsLoading(false);
     }
   }, [participantId]);
 
@@ -1092,6 +1100,24 @@ export default function ParticipantDetailPage() {
     fetchGoals();
     fetchTrends();
   }, [fetchData, fetchGoals, fetchTrends]);
+
+  // ── Auto-refresh ────────────────────────────────────────────────────────────
+  //
+  // Re-pulls participant data, goals, and trends every 30s in the background.
+  // Skips the very first call (initial fetch is handled by the useEffect
+  // above). Sub-components like NotesTab re-sync their internal state from
+  // props via their own useEffects, so new data flows through without
+  // remounting and without clobbering any draft/modal state inside them.
+  const backgroundRefresh = useCallback(async ({ background = false } = {}) => {
+    if (!background) return;
+    await Promise.all([
+      fetchData({ background: true }),
+      fetchGoals({ background: true }),
+      fetchTrends({ background: true }),
+    ]);
+  }, [fetchData, fetchGoals, fetchTrends]);
+
+  usePolling(backgroundRefresh, 30_000);
 
   useEffect(() => {
     if (!requestedTab) return;

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { usePolling } from "../../hooks/usePolling";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
@@ -266,24 +267,26 @@ export default function CaretakerDashboard() {
   // then re-fired. Net result: every page load fired
   // caretakerListParticipants and caretakerGetActivityCounts twice. Splitting
   // the groups-once fetch into its own effect breaks the cycle.
-  useEffect(() => {
-    let cancelled = false;
-    api.caretakerGetGroups()
-      .then(data => {
-        if (cancelled) return;
-        const transformed = Array.isArray(data)
-          ? data.map(g => ({ id: g.group_id, name: g.name, description: g.description || "" }))
-          : [];
-        setGroups(transformed);
-      })
-      .catch(() => { if (!cancelled) setGroups([]); });
-    return () => { cancelled = true; };
+  const loadGroups = useCallback(async () => {
+    try {
+      const data = await api.caretakerGetGroups();
+      const transformed = Array.isArray(data)
+        ? data.map(g => ({ id: g.group_id, name: g.name, description: g.description || "" }))
+        : [];
+      setGroups(transformed);
+    } catch {
+      setGroups([]);
+    }
   }, []);
 
   // Activity counts + participants — refetched whenever the selected group
   // changes, but not when groups.length flips from 0 to N.
-  const loadDashboard = useCallback(async (signal) => {
-    setLoading(true);
+  //
+  // `background` is passed by the polling hook on refreshes after the first.
+  // When true we skip the loading spinner so the UI doesn't flash on every
+  // auto-refresh.
+  const loadDashboard = useCallback(async ({ signal, background = false } = {}) => {
+    if (!background) setLoading(true);
     try {
       const [countsData, participantsData] = await Promise.all([
         api.caretakerGetActivityCounts(selectedGroupQuery).catch(() => ({
@@ -311,15 +314,33 @@ export default function CaretakerDashboard() {
     } catch (err) {
       if (!signal?.aborted) console.error("Failed to load dashboard data:", err);
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted && !background) setLoading(false);
     }
   }, [selectedGroupQuery]);
 
+  // Filter-change effect: when the user picks a different group from the
+  // dropdown, we want the spinner to show (background = false).
   useEffect(() => {
     const controller = new AbortController();
-    loadDashboard(controller.signal);
+    loadDashboard({ signal: controller.signal, background: false });
     return () => controller.abort();
   }, [loadDashboard]);
+
+  // Auto-refresh: combined background poll for both groups and dashboard data.
+  // Pauses when the tab is hidden, refetches when the tab regains focus, and
+  // also refetches immediately when a new notification fires (in case the
+  // event reflects a change a caretaker cares about — e.g. new submission).
+  const backgroundRefresh = useCallback(async ({ background = false } = {}) => {
+    // Skip the very first call — both fetches already ran via their own
+    // initial effects. Only do work on true background refreshes.
+    if (!background) return;
+    await Promise.all([
+      loadGroups(),
+      loadDashboard({ background: true }),
+    ]);
+  }, [loadGroups, loadDashboard]);
+
+  usePolling(backgroundRefresh, 30_000);
 
   const filteredParticipants = useMemo(() => participants, [participants]);
 
