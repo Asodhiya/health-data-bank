@@ -1165,6 +1165,40 @@ async def _build_backup_preview(
     )
 
 
+async def _send_post_restore_reset_emails(db: AsyncSession) -> None:
+    """After a restore, generate a password-reset link for every active user
+    and email it so they can set a new password. Uses a 24-hour expiry."""
+    import logging
+    _logger = logging.getLogger(__name__)
+
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    result = await db.execute(select(User).where(User.status == True))  # noqa: E712
+    users = result.scalars().all()
+    sent, failed = 0, 0
+    email_queue: list[tuple[str, str]] = []
+
+    for user in users:
+        if not user.email:
+            continue
+        raw_token = generate_reset_token()
+        user.reset_token_hash = hash_reset_token(raw_token)
+        user.reset_token_expires_at = reset_token_expiry(minutes=1440)
+        reset_link = f"{frontend_url}/reset-password?token={raw_token}"
+        email_queue.append((user.email, reset_link))
+
+    await db.commit()
+
+    for email, link in email_queue:
+        try:
+            send_reset_email(email, link)
+            sent += 1
+        except Exception as exc:
+            _logger.warning("Post-restore reset email failed for %s: %s", email, exc)
+            failed += 1
+
+    _logger.info("Post-restore password reset emails: %d sent, %d failed", sent, failed)
+
+
 async def _restore_backup_payload(
     backup_data: dict,
     uploaded_checksum: str,
@@ -1223,6 +1257,8 @@ async def _restore_backup_payload(
     )
     db.add(restore_record)
     await db.commit()
+
+    await _send_post_restore_reset_emails(db)
 
     return RestoreResponse(
         restored_from=snapshot_name,
