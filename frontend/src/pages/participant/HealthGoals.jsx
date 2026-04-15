@@ -98,6 +98,9 @@ export default function HealthGoals() {
   const [addErrors, setAddErrors]         = useState({});
   const [customTargets, setCustomTargets] = useState({});
   const [customWindows, setCustomWindows] = useState({});
+  const [drawerSearch, setDrawerSearch]   = useState("");
+  const [drawerPage, setDrawerPage]       = useState(1);
+  const DRAWER_PAGE_SIZE = 5;
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [logModalGoal, setLogModalGoal]   = useState(null); // goal being logged via modal
   const [goalOrder, setGoalOrder]         = useState(() => {
@@ -590,7 +593,7 @@ export default function HealthGoals() {
 
       {/* ── Browse Goals Drawer ─────────────────────────────────────────── */}
       {isDrawerOpen && (
-        <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40" onClick={() => setIsDrawerOpen(false)} />
+        <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40" onClick={() => { setIsDrawerOpen(false); setDrawerSearch(""); setDrawerPage(1); }} />
       )}
       <div className={`fixed inset-y-0 right-0 w-full max-w-md bg-slate-50 shadow-2xl z-50 transform transition-transform duration-300 ease-out flex flex-col rounded-l-2xl border-l border-slate-200 ${isDrawerOpen ? "translate-x-0" : "translate-x-full"}`}>
         <div className="px-6 py-5 flex items-center justify-between bg-white rounded-tl-2xl border-b border-slate-100">
@@ -599,11 +602,35 @@ export default function HealthGoals() {
             <p className="text-sm text-slate-500 mt-0.5">Select habits to track</p>
           </div>
           <button
-            onClick={() => setIsDrawerOpen(false)}
+            onClick={() => { setIsDrawerOpen(false); setDrawerSearch(""); setDrawerPage(1); }}
             className="w-8 h-8 bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-800 rounded-full flex items-center justify-center transition-all"
           >
             <CloseIco size={18} />
           </button>
+        </div>
+
+        {/* Search bar */}
+        <div className="px-6 py-3 bg-white border-b border-slate-100">
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input
+              type="text"
+              placeholder="Search goals..."
+              value={drawerSearch}
+              onChange={(e) => { setDrawerSearch(e.target.value); setDrawerPage(1); }}
+              className="w-full pl-8 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
+            />
+            {drawerSearch && (
+              <button
+                onClick={() => { setDrawerSearch(""); setDrawerPage(1); }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <CloseIco size={14} />
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -732,8 +759,48 @@ export default function HealthGoals() {
                   </button>
                 </div>
               );
-            })
-          )}
+            })}
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-2">
+                    <p className="text-[10px] text-slate-400 font-medium">
+                      {(safePage - 1) * DRAWER_PAGE_SIZE + 1}–{Math.min(safePage * DRAWER_PAGE_SIZE, filteredTemplates.length)} of {filteredTemplates.length}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setDrawerPage((p) => Math.max(1, p - 1))}
+                        disabled={safePage === 1}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-xs font-bold"
+                      >
+                        ‹
+                      </button>
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
+                        <button
+                          key={pg}
+                          onClick={() => setDrawerPage(pg)}
+                          className={`w-7 h-7 flex items-center justify-center rounded-lg text-xs font-bold transition-all ${
+                            pg === safePage
+                              ? "bg-blue-600 text-white border border-blue-600"
+                              : "border border-slate-200 text-slate-500 hover:bg-slate-100"
+                          }`}
+                        >
+                          {pg}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setDrawerPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={safePage === totalPages}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-xs font-bold"
+                      >
+                        ›
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
     </div>
