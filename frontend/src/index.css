@@ -1,2 +1,54 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+
+/* react-phone-number-input — match Tailwind input styling used elsewhere */
+.hdb-phone-input {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0 1rem;
+  background-color: rgb(248 250 252);
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.75rem;
+  transition: box-shadow 0.15s ease;
+}
+.hdb-phone-input:focus-within {
+  outline: none;
+  border-color: transparent;
+  box-shadow: 0 0 0 2px rgb(59 130 246);
+}
+.hdb-phone-input .PhoneInputInput {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 0.875rem;
+  padding: 0.75rem 0;
+}
+.hdb-phone-input .PhoneInputCountry {
+  margin-right: 0.25rem;
+}
+
+.hdb-phone-input-compact {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0 0.75rem;
+  background-color: rgb(248 250 252);
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.5rem;
+  transition: box-shadow 0.15s ease;
+}
+.hdb-phone-input-compact:focus-within {
+  outline: none;
+  border-color: transparent;
+  box-shadow: 0 0 0 2px rgb(59 130 246);
+}
+.hdb-phone-input-compact .PhoneInputInput {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 0.875rem;
+  padding: 0.625rem 0;
+}

@@ -19,7 +19,7 @@ from app.services.auth_service import (
     validate_signup_invite_token,
 )
 from app.schemas.schemas import LoginRequest, UserResponse, ForgotPasswordIn, ResetPasswordIn
-from app.core.dependency import check_current_user, require_permissions
+from app.core.dependency import check_current_user, require_permissions, set_rls_context
 from app.core.permissions import SEND_INVITE
 from app.services.email_sender import send_reset_email, send_invite_email
 from app.core.security import InviteTokenGenerator
@@ -47,13 +47,13 @@ async def _login_identifier_key(request: Request) -> str:
     return identifier or "unknown-identifier"
 
 
-async def _email_key(request: Request) -> str:
+async def _forgot_password_identifier_key(request: Request) -> str:
     try:
         body = await request.json()
     except Exception:
         body = {}
-    email = str(body.get("email", "")).strip().lower()
-    return email or "unknown-email"
+    identifier = str(body.get("identifier", "")).strip().lower()
+    return identifier or "unknown-identifier"
 
 
 login_ip_rate_limit = rate_limit(
@@ -76,12 +76,12 @@ forgot_password_rate_limit = rate_limit(
     window_seconds=300,
     key_kind="ip",
 )
-forgot_password_email_rate_limit = rate_limit(
-    scope="auth:forgot-password:email",
+forgot_password_identifier_rate_limit = rate_limit(
+    scope="auth:forgot-password:identifier",
     limit=5,
     window_seconds=1800,
-    key_func=_email_key,
-    key_kind="email",
+    key_func=_forgot_password_identifier_key,
+    key_kind="identifier",
 )
 reset_password_rate_limit = rate_limit(scope="auth:reset-password", limit=10, window_seconds=300)
 invite_rate_limit = rate_limit(scope="auth:signup_invite", limit=20, window_seconds=3600)
@@ -153,6 +153,7 @@ async def login(
 ):
     """Authenticates user by checking email and hashed password."""
     ip = _get_client_ip(request)
+    await set_rls_context(db, role="system")
 
     try:
         user = await authenticate_user(data.identifier, data.password, db)
@@ -163,7 +164,7 @@ async def login(
             ip_address=ip,
             actor_user_id=None,
             entity_type="user",
-            details={"identifier_attempted": data.identifier},
+            details={"identifier_attempted": data.identifier, "user_agent": request.headers.get("User-Agent")},
         )
 
         if exc.status_code == status.HTTP_423_LOCKED:
@@ -232,7 +233,7 @@ async def login(
         actor_user_id=user.user_id,
         entity_type="user",
         entity_id=user.user_id,
-        details={"email": user.email},
+        details={"email": user.email, "user_agent": request.headers.get("User-Agent")},
     )
 
     session = await create_user_session(user.user_id, db)
@@ -245,6 +246,42 @@ async def login(
         token,
         max_age_seconds=get_session_token_expiry_minutes() * 60,
     )
+
+    user_role_rows = await db.execute(
+        select(Role.role_name)
+        .join(UserRole, UserRole.role_id == Role.role_id)
+        .where(UserRole.user_id == user.user_id)
+    )
+    user_role_names = {str(r[0]).lower() for r in user_role_rows.all()}
+
+    if "participant" in user_role_names:
+        from app.services.onboarding_service import process_pending_onboarding_reset
+
+        await set_rls_context(db, user_id=user.user_id, role="participant")
+        reset_target = await process_pending_onboarding_reset(user.user_id, db)
+        if reset_target:
+            reset_link = (
+                "/onboarding/background"
+                if reset_target == "PENDING"
+                else "/onboarding/consent"
+                if reset_target == "BACKGROUND_READ"
+                else "/onboarding/intake"
+            )
+            await create_notification(
+                db=db,
+                user_id=user.user_id,
+                notification_type="info",
+                title="Onboarding pages updated",
+                message=(
+                    "An admin updated the onboarding pages while you were "
+                    "away. Please complete them again to continue."
+                ),
+                link=reset_link,
+                role_target="participant",
+                source_type="onboarding_reset",
+            )
+        await db.commit()
+
     return {"detail": "Login successful"}
 
 
@@ -257,6 +294,7 @@ async def register(
 ):
     """User registration via invite link."""
     ip = _get_client_ip(request)
+    await set_rls_context(db, role="system")
     return await register_user_from_invite(token, payload, ip, db)
 
 
@@ -293,7 +331,7 @@ async def logout(
         actor_user_id=user.user_id,
         entity_type="user",
         entity_id=user.user_id,
-        details={"email": user.email},
+        details={"email": user.email, "user_agent": request.headers.get("User-Agent")},
     )
 
     response.delete_cookie("token")
@@ -357,6 +395,7 @@ async def self_deactivate_account(
             for group in groups:
                 group.caretaker_id = None
 
+    await set_rls_context(db, role="system")
     admin_rows = await db.execute(
         select(User.user_id)
         .join(UserRole, UserRole.user_id == User.user_id)
@@ -443,7 +482,7 @@ async def get_current_user(
 
 @router.post(
     "/forgot-password",
-    dependencies=[Depends(forgot_password_rate_limit), Depends(forgot_password_email_rate_limit)],
+    dependencies=[Depends(forgot_password_rate_limit), Depends(forgot_password_identifier_rate_limit)],
 )
 async def forgot_password(
     payload: ForgotPasswordIn,
@@ -452,6 +491,7 @@ async def forgot_password(
     db: AsyncSession = Depends(get_db),
 ):
     ip = _get_client_ip(request)
+    await set_rls_context(db, role="system")
 
     await reset_forgot_password(payload, background, db)
 
@@ -461,10 +501,10 @@ async def forgot_password(
         ip_address=ip,
         actor_user_id=None,
         entity_type="user",
-        details={"email_attempted": payload.email},
+        details={"identifier_attempted": payload.identifier},
     )
 
-    return {"message": "If the email exists, a reset link has been sent."}
+    return {"message": "If the account exists, a reset link has been sent."}
 
 
 @router.post("/reset-password", dependencies=[Depends(reset_password_rate_limit)])
@@ -475,6 +515,7 @@ async def reset_password_endpoint(
 ):
     """Validates the reset token and updates the user's password."""
     ip = _get_client_ip(request)
+    await set_rls_context(db, role="system")
 
     await reset_password(payload, db)
 
@@ -523,6 +564,7 @@ async def signup_invite(
         target_email=Payload.email,
         group_id=Payload.group_id,
     )
+    await set_rls_context(db, role="system")
     result = await generator.save(db)
     send_invite_email(Payload.email, result["invite_url"])
 
@@ -555,7 +597,7 @@ async def signup_invite(
             notification_type="invite",
             title="New invite sent",
             message=f"{Payload.email} was invited as {target_role}.",
-            link="/admin/users",
+            link="/users",
             role_target="admin",
             source_type="invite_sent",
             source_id=None,

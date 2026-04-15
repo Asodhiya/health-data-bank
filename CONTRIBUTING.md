@@ -3,7 +3,7 @@
 ## Getting Started
 
 1. Clone the repo and set up your environment (see README.md)
-2. Create a feature branch from `develop`
+2. Create a feature branch from `main`
 3. Make your changes
 4. Test locally
 5. Submit a Pull Request

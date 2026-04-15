@@ -11,6 +11,7 @@ from sqlalchemy import (
     TIMESTAMP,
     UniqueConstraint,
     PrimaryKeyConstraint,
+    Index,
     text,
 
 )
@@ -166,54 +167,14 @@ class RolePermission(Base):
 
 
 
-class Device(Base):
-    __tablename__ = "devices"
-
-    device_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"))
-    device_fingerprint: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    device_name: Mapped[str | None] = mapped_column(Text)
-    platform: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    last_seen_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-    trusted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-    revoked_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-
-
 class Session(Base):
     __tablename__ = "sessions"
 
     session_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"))
-    device_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("devices.device_id", ondelete="SET NULL"))
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     expired_at: Mapped[str] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     mfa_verified_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-
-
-class MFAMethod(Base):
-    __tablename__ = "mfa_methods"
-
-    mfa_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"))
-    type: Mapped[str] = mapped_column(Text, nullable=False)
-    secret_or_ref: Mapped[str] = mapped_column(Text, nullable=False)
-    enabled_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-    last_used_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-
-
-class MFAChallenge(Base):
-    __tablename__ = "mfa_challenges"
-
-    challenge_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    session_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"))
-    mfa_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("mfa_methods.mfa_id", ondelete="CASCADE"))
-    status: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
-    verified_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-    attempts: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
-
-
 
 
 class ParticipantProfile(Base):
@@ -235,9 +196,9 @@ class ParticipantProfile(Base):
     dependents: Mapped[int | None] = mapped_column(Integer)
     marital_status: Mapped[str | None] = mapped_column(Text)
     country_of_origin: Mapped[str | None] = mapped_column(Text)
-    address: Mapped[str | None] = mapped_column(Text)
     program_enrolled_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
     onboarding_status: Mapped[str | None] = mapped_column(Text, server_default=text("'PENDING'"))
+    onboarding_reset_to: Mapped[str | None] = mapped_column(Text, nullable=True)
     user = relationship("User", back_populates="participant_profile")
     consents: Mapped[list["ParticipantConsent"]] = relationship(
         "ParticipantConsent", back_populates="participant", cascade="all, delete-orphan"
@@ -325,6 +286,8 @@ class SurveyForm(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False)
+    cadence: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'once'"))
+    cadence_anchor_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     version: Mapped[int | None] = mapped_column(Integer, server_default=text("1"))
     parent_form_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id"), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id"))
@@ -340,10 +303,14 @@ class FormField(Base):
     form_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id", ondelete="CASCADE"))
     label: Mapped[str] = mapped_column(Text, nullable=False)
     field_type: Mapped[str] = mapped_column(Text, nullable=False)
+    profile_field: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_required: Mapped[bool | None] = mapped_column(Boolean, server_default=text("FALSE"))
     display_order: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
+    config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    show_on_profile: Mapped[bool | None] = mapped_column(Boolean, server_default=text("FALSE"))
     parent_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("form_fields.field_id"))
     options: Mapped[List["FieldOption"]] = relationship("FieldOption", back_populates="field", cascade="all, delete-orphan", foreign_keys="[FieldOption.field_id]")
+    element_maps: Mapped[List["FieldElementMap"]] = relationship("FieldElementMap", foreign_keys="[FieldElementMap.field_id]", cascade="all, delete-orphan")
     form: Mapped["SurveyForm"] = relationship("SurveyForm", back_populates="fields")
 
 class FieldOption(Base):
@@ -361,9 +328,11 @@ class FormDeployment(Base):
     __tablename__ = "form_deployments"
 
     deployment_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    form_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id"))
+    form_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id", ondelete="SET NULL"))
     group_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("groups.group_id"))
     deployed_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id"))
+    cadence: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'once'"))
+    cadence_anchor_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     deployed_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     revoked_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
 
@@ -375,6 +344,7 @@ class FormSubmission(Base):
     form_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("survey_forms.form_id"))
     participant_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("participant_profile.participant_id"))
     group_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("groups.group_id"))
+    cycle_key: Mapped[str | None] = mapped_column(Text, server_default=text("'once'"))
     submitted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     #submitted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()")) #what it used to be
     is_valid: Mapped[bool | None] = mapped_column(Boolean, server_default=text("TRUE"))
@@ -410,6 +380,12 @@ class GoalTemplate(Base):
             "\"window\" IN ('daily', 'weekly', 'monthly', 'none')",
             name="ck_goal_templates_window",
         ),
+        Index(
+            "ux_goal_templates_active_element",
+            "element_id",
+            unique=True,
+            postgresql_where=text("is_active = TRUE AND element_id IS NOT NULL"),
+        ),
     )
 
     template_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -427,11 +403,20 @@ class GoalTemplate(Base):
 
 class HealthGoal(Base):
     __tablename__ = "health_goals"
+    __table_args__ = (
+        Index(
+            "ux_health_goals_active_participant_element",
+            "participant_id",
+            "element_id",
+            unique=True,
+            postgresql_where=text("status = 'active' AND participant_id IS NOT NULL AND element_id IS NOT NULL"),
+        ),
+    )
 
     goal_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     participant_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("participant_profile.participant_id"))
     template_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("goal_templates.template_id"))
-    element_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("data_elements.element_id"))
+    element_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("data_elements.element_id", ondelete="SET NULL"))
     target_value: Mapped[float | None] = mapped_column(Numeric)
     progress_mode: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'incremental'"))
     direction: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'at_least'"))
@@ -479,18 +464,6 @@ class Report(Base):
     group_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("groups.group_id"))
     parameters: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
-
-
-class ReportFile(Base):
-    __tablename__ = "report_files"
-
-    file_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    report_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("reports.report_id"))
-    file_type: Mapped[str | None] = mapped_column(Text)
-    storage_path: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
-
-
 
 
 class Backup(Base):
@@ -597,6 +570,7 @@ class FieldElementMap(Base):
     __tablename__ = "field_element_map"
     __table_args__ = (
         PrimaryKeyConstraint("field_id", "element_id", name="pk_field_element_map"),
+        UniqueConstraint("field_id", name="uq_field_element_map_field_id"),
     )
 
     field_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("form_fields.field_id"))
@@ -731,16 +705,3 @@ class ParticipantConsent(Base):
 
     participant: Mapped["ParticipantProfile"] = relationship("ParticipantProfile", back_populates="consents")
     template: Mapped["ConsentFormTemplate"] = relationship("ConsentFormTemplate", back_populates="consents")
-
-
-class Reminder(Base):
-    __tablename__ = "reminders"
-
-    reminder_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    user_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id"))
-    label: Mapped[str | None] = mapped_column(Text)
-    schedule_type: Mapped[str | None] = mapped_column(Text)
-    schedule_json: Mapped[dict | None] = mapped_column(JSONB)
-    enabled: Mapped[bool | None] = mapped_column(Boolean, server_default=text("TRUE"))
-    next_run_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
-    created_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))

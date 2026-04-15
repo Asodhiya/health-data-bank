@@ -33,13 +33,20 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
     const labels = field.likertLabels || [];
 
     return (
-      <div className="overflow-x-auto -mx-1">
+      <div className="overflow-x-auto -mx-1" role="radiogroup" aria-label={ariaLabel} aria-required={ariaRequired}>
         <div className="flex items-stretch gap-1.5 min-w-fit px-1">
           {Array.from({ length: max - min + 1 }, (_, i) => {
             const val = min + i;
             const selected = value === val;
             return (
-              <label key={val}
+              <button
+                key={val}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                aria-label={`${ariaLabel} — ${labels[i] || val}`}
+                disabled={disabled}
+                onClick={() => !disabled && onChange(val)}
                 className={`flex flex-col items-center gap-2 px-2.5 py-3 rounded-xl cursor-pointer
                   transition-all flex-1 min-w-[60px] text-center border
                   ${selected
@@ -54,10 +61,7 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
                   {selected && <div className="w-2 h-2 rounded-full bg-white" />}
                 </div>
                 <span className="text-xs font-mono text-slate-400">{val}</span>
-                <input type="radio" name={`field-${field.id}`} value={val}
-                  checked={selected} onChange={() => onChange(val)} className="sr-only"
-                  aria-label={`${ariaLabel} — ${labels[i] || val}`} aria-required={ariaRequired} />
-              </label>
+              </button>
             );
           })}
         </div>
@@ -68,11 +72,18 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
   /* ── Single Select (radio) ── */
   if (t === 'single_select') {
     return (
-      <div className="space-y-2">
+      <div className="space-y-2" role="radiogroup" aria-label={ariaLabel} aria-required={ariaRequired}>
         {(field.options || []).map((opt) => {
           const selected = value === opt.value;
           return (
-            <label key={opt.id || opt.value}
+            <button
+              key={opt.id || opt.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={`${ariaLabel} — ${opt.label}`}
+              disabled={disabled}
+              onClick={() => !disabled && onChange(opt.value)}
               className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-all
                 ${selected
                   ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-200'
@@ -83,10 +94,7 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
                 {selected && <div className="w-2 h-2 rounded-full bg-white" />}
               </div>
               <span className="text-sm text-slate-700">{opt.label}</span>
-              <input type="radio" name={`field-${field.id}`} value={opt.value}
-                checked={selected} onChange={() => onChange(opt.value)} className="sr-only"
-                aria-label={`${ariaLabel} — ${opt.label}`} aria-required={ariaRequired} />
-            </label>
+            </button>
           );
         })}
       </div>
@@ -97,11 +105,18 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
   if (t === 'multi_select') {
     const arr = value || [];
     return (
-      <div className="space-y-2">
+      <div className="space-y-2" role="group" aria-label={ariaLabel} aria-required={ariaRequired}>
         {(field.options || []).map((opt) => {
           const checked = arr.includes(opt.value);
           return (
-            <label key={opt.id || opt.value}
+            <button
+              key={opt.id || opt.value}
+              type="button"
+              role="checkbox"
+              aria-checked={checked}
+              aria-label={`${ariaLabel} — ${opt.label}`}
+              disabled={disabled}
+              onClick={() => !disabled && onToggleMulti(opt.value)}
               className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-all
                 ${checked
                   ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-200'
@@ -112,10 +127,7 @@ export default function FieldInput({ field, value, onChange, onToggleMulti, disa
                 {checked && <Svg size={12} sw={3} d="M20 6L9 17l-5-5" stroke="white" />}
               </div>
               <span className="text-sm text-slate-700">{opt.label}</span>
-              <input type="checkbox" checked={checked}
-                onChange={() => onToggleMulti(opt.value)} className="sr-only"
-                aria-label={`${ariaLabel} — ${opt.label}`} />
-            </label>
+            </button>
           );
         })}
       </div>

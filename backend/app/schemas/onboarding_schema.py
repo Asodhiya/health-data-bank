@@ -2,22 +2,30 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
 
-class IntakeProfileData(BaseModel):
-    dob: Optional[str] = None
-    gender: Optional[str] = None            # frontend field is "sex"
-    pronouns: Optional[str] = None
-    primary_language: Optional[str] = None  # frontend field is "language"
-    country_of_origin: Optional[str] = None
-    marital_status: Optional[str] = None
-    highest_education_level: Optional[str] = None
-    living_arrangement: Optional[str] = None  # Q1: who do you live with
-    dependents: Optional[int] = None         # Q2: number of dependents (0 = none)
-    occupation_status: Optional[str] = None # Q4
+class IntakeAnswerIn(BaseModel):
+    field_id: str
+    value: Any = None
 
 
 class IntakeSubmission(BaseModel):
-    profile: IntakeProfileData
-    answers: List[Dict[str, Any]]  # [{"field_id": "...", "value": ...}]
+    answers: List[IntakeAnswerIn]
+
+
+class IntakeFieldOptionOut(BaseModel):
+    label: Optional[str] = None
+    value: Optional[int] = None
+    display_order: Optional[int] = None
+
+
+class IntakeFieldOut(BaseModel):
+    field_id: str
+    label: str
+    field_type: str
+    is_required: Optional[bool] = None
+    display_order: Optional[int] = None
+    profile_field: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    options: List[IntakeFieldOptionOut] = []
 
 
 class ConsentSubmitIn(BaseModel):
@@ -38,4 +46,4 @@ class BackgroundInfoUpdateIn(BaseModel):
 
 
 class IntakeFormUpdateIn(BaseModel):
-    fields: List[Dict[str, Any]]  # [{label, field_type, is_required, display_order, options: [...]}]
+    fields: List[Dict[str, Any]]  # [{label, field_type, is_required, display_order, profile_field, options: [...]}]

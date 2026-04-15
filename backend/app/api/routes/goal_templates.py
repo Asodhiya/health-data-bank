@@ -9,27 +9,31 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
-from app.db.session import get_db
 from app.db.models import User
-from app.core.dependency import require_permissions
+from app.core.dependency import get_rls_db, require_permissions
 from app.core.permissions import GOAL_TEMPLATE_VIEW, GOAL_TEMPLATE_CREATE, GOAL_TEMPLATE_EDIT
 from app.db.queries.Queries import GoalTemplateQuery
 from app.schemas.schemas import GoalTemplateCreate, GoalTemplateUpdate
+from app.services.notification_service import create_notifications_bulk
 
 router = APIRouter()
 
 
 @router.get("")
-async def list_goal_templates(db: AsyncSession = Depends(get_db),
-                               _=Depends(require_permissions(GOAL_TEMPLATE_VIEW))):
-    """List all active goal templates with their linked data element."""
-    return await GoalTemplateQuery(db).list_templates()
+async def list_goal_templates(
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_rls_db),
+    _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
+):
+    """List active goal templates with linked data element. Pass limit/offset to paginate."""
+    return await GoalTemplateQuery(db).list_templates(limit=limit, offset=offset)
 
 
 @router.post("")
 async def create_goal_template(
     payload: GoalTemplateCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GOAL_TEMPLATE_CREATE)),
 ):
     """Create a new goal template linked to a data element."""
@@ -40,7 +44,7 @@ async def create_goal_template(
 async def update_goal_template(
     template_id: UUID,
     payload: GoalTemplateUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     _=Depends(require_permissions(GOAL_TEMPLATE_EDIT)),
 ):
     """Update name, description, default target, or active status of a template."""
@@ -49,17 +53,19 @@ async def update_goal_template(
 
 @router.get("/deleted")
 async def list_deleted_templates(
-    db: AsyncSession = Depends(get_db),
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_rls_db),
     _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
 ):
-    """List all soft-deleted goal templates."""
-    return await GoalTemplateQuery(db).list_deleted_templates()
+    """List soft-deleted goal templates. Pass limit/offset to paginate."""
+    return await GoalTemplateQuery(db).list_deleted_templates(limit=limit, offset=offset)
 
 
 @router.post("/{template_id}/restore")
 async def restore_goal_template(
     template_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     _=Depends(require_permissions(GOAL_TEMPLATE_EDIT)),
 ):
     """Restore a soft-deleted goal template."""
@@ -70,7 +76,7 @@ async def restore_goal_template(
 async def get_goal_template_stats(
     template_id: UUID,
     granularity: str = Query(default="month", pattern="^(week|month|year)$"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
 ):
     """Return participant tracking stats and chart data for a goal template."""
@@ -80,7 +86,7 @@ async def get_goal_template_stats(
 @router.get("/{template_id}/raw")
 async def get_raw_datapoints(
     template_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
 ):
     """Return raw individual data points for this template's metric."""
@@ -91,7 +97,7 @@ async def get_raw_datapoints(
 async def export_summary(
     template_id: UUID,
     granularity: str = Query(default="month", pattern="^(week|month|year)$"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
 ):
     """Download progress-over-time chart data as CSV."""
@@ -106,7 +112,7 @@ async def export_summary(
 @router.get("/{template_id}/export/raw")
 async def export_raw(
     template_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     _=Depends(require_permissions(GOAL_TEMPLATE_VIEW)),
 ):
     """Download all individual data points for this template's metric as CSV."""
@@ -121,8 +127,29 @@ async def export_raw(
 @router.delete("/{template_id}")
 async def deactivate_goal_template(
     template_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     _=Depends(require_permissions(GOAL_TEMPLATE_EDIT)),
 ):
     """Soft-delete a goal template (sets is_active=False)."""
-    await GoalTemplateQuery(db).delete_template(template_id)
+    result = await GoalTemplateQuery(db).delete_template(template_id)
+
+    participant_user_ids = result.get("affected_participant_user_ids") or []
+    if participant_user_ids:
+        template_name = result.get("template_name") or "A goal template"
+        await create_notifications_bulk(
+            db=db,
+            user_ids=participant_user_ids,
+            notification_type="goal",
+            title="Goal template retired",
+            message=(
+                f'The goal template "{template_name}" is no longer available for new use. '
+                "Your existing goal will stay on your dashboard."
+            ),
+            link="/participant/healthgoals",
+            role_target="participant",
+            source_type="goal_template_deleted",
+            source_id=template_id,
+        )
+        await db.commit()
+
+    return {"detail": result.get("msg", "Template deleted")}

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input';
+import 'react-phone-number-input/style.css';
 import { api } from '../../services/api';
 
 const PASSWORD_RULES = [
@@ -10,21 +12,10 @@ const PASSWORD_RULES = [
   { label: 'special character',test: (p) => /[^A-Za-z0-9]/.test(p) },
 ];
 
-function digitsOnly(value) {
-  return value.replace(/\D/g, '');
-}
-
-function formatPhone(digits) {
-  if (digits.length <= 3) return digits;
-  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
-}
-
-function getPhoneHint(digits) {
-  if (digits.length === 0) return null;
-  if (digits.length < 10)  return { text: `${10 - digits.length} more digit${10 - digits.length === 1 ? '' : 's'} needed`, valid: false };
-  if (digits.length === 10) return { text: 'Valid phone number', valid: true };
-  return { text: 'Too many digits (10 required)', valid: false };
+function getPhoneHint(value) {
+  if (!value) return null;
+  if (isValidPhoneNumber(value)) return { text: 'Valid phone number', valid: true };
+  return { text: 'Enter a valid phone number with country code', valid: false };
 }
 
 export default function RegisterPage() {
@@ -43,8 +34,7 @@ export default function RegisterPage() {
     last_name:        '',
     email:            '',          // pre-filled from invite, read-only
     username:         '',
-    phone:            '',
-    phoneDisplay:     '',
+    phone:            '',          // stored as E.164 (e.g. +19025550147)
     address:          '',
     password:         '',
     confirm_password: '',
@@ -52,6 +42,8 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm,  setShowConfirm]  = useState(false);
   const [error,        setError]        = useState('');
+  const [fieldError,   setFieldError]   = useState(''); // 'username' | 'email' | ''
+  const [fieldErrorMessage, setFieldErrorMessage] = useState('');
   const [loading,      setLoading]      = useState(false);
 
   // ── Validate token on mount ──
@@ -74,16 +66,18 @@ export default function RegisterPage() {
       });
   }, [token]);
 
-  const set = (field) => (e) => setForm({ ...form, [field]: e.target.value });
+  const set = (field) => (e) =>
+    setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
-  const handlePhoneChange = (e) => {
-    const digits = digitsOnly(e.target.value).slice(0, 10);
-    setForm({ ...form, phone: digits, phoneDisplay: formatPhone(digits) });
+  const handlePhoneChange = (value) => {
+    setForm((prev) => ({ ...prev, phone: value || '' }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setFieldError('');
+    setFieldErrorMessage('');
 
     const failedRules = PASSWORD_RULES.filter((r) => !r.test(form.password));
     if (failedRules.length > 0) {
@@ -94,8 +88,8 @@ export default function RegisterPage() {
       setError('Passwords do not match');
       return;
     }
-    if (form.phone.length !== 10) {
-      setError('Phone number must be exactly 10 digits');
+    if (!form.phone || !isValidPhoneNumber(form.phone)) {
+      setError('Please enter a valid phone number including country code');
       return;
     }
     if (!form.address.trim()) {
@@ -118,7 +112,23 @@ export default function RegisterPage() {
       // Registration successful — send to login with a success flag
       navigate('/login', { state: { registered: true } });
     } catch (err) {
-      setError(err.message || 'Registration failed');
+      const msg = err.message || 'Registration failed';
+      setError(msg);
+      const normalizedMsg = msg.toLowerCase();
+
+      if (normalizedMsg.includes('username')) {
+        setFieldError('username');
+        if (normalizedMsg.includes('already taken')) {
+          setFieldErrorMessage('This username is already taken. Please choose a different one.');
+        } else if (normalizedMsg.includes('alphanumeric characters and underscores')) {
+          setFieldErrorMessage('Username can only contain letters, numbers, and underscores.');
+        } else {
+          setFieldErrorMessage(msg);
+        }
+      } else if (normalizedMsg.includes('email')) {
+        setFieldError('email');
+        setFieldErrorMessage(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -236,22 +246,19 @@ export default function RegisterPage() {
 
         {/* Phone */}
         <div>
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-              </svg>
-            </span>
-            <input
-              type="tel"
-              className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
-              placeholder="Phone Number"
-              value={form.phoneDisplay}
-              onChange={handlePhoneChange}
-              required
-              inputMode="numeric"
-            />
-          </div>
+          <PhoneInput
+            international
+            defaultCountry="CA"
+            countryCallingCodeEditable={false}
+            value={form.phone}
+            onChange={handlePhoneChange}
+            className="hdb-phone-input"
+            numberInputProps={{
+              className: 'w-full py-3 pl-2 pr-4 bg-transparent text-sm focus:outline-none',
+              placeholder: 'Phone Number',
+              required: true,
+            }}
+          />
           {phoneHint && (
             <p className={`text-xs mt-1.5 ml-1 font-medium ${phoneHint.valid ? 'text-emerald-600' : 'text-rose-500'}`}>
               {phoneHint.text}
@@ -291,14 +298,17 @@ export default function RegisterPage() {
             </svg>
           </span>
           <input
-            className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+            className={`w-full pl-12 pr-4 py-3 bg-slate-50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-shadow ${fieldError === 'username' ? 'border-2 border-rose-400 focus:ring-rose-300' : 'border border-slate-200 focus:ring-blue-500'}`}
             placeholder="Username"
             value={form.username}
-            onChange={set('username')}
+            onChange={(e) => { setFieldError(''); setFieldErrorMessage(''); set('username')(e); }}
             required
             autoComplete="username"
           />
         </div>
+        {fieldError === 'username' && (
+          <p className="text-xs text-rose-500 mt-1 ml-1">{fieldErrorMessage || 'Please check your username and try again.'}</p>
+        )}
 
         {/* Password */}
         <div className="relative">

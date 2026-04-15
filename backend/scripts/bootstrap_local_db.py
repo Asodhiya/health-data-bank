@@ -9,6 +9,7 @@ from app.db.base import Base
 from app.db.db import engine
 from app.db.models import Permission, Role, RolePermission
 from app.db.session import AsyncSessionLocal
+from app.seeds.data_element_seed import seed_profile_data_elements
 from app.seeds.onboarding_seed import seed_onboarding_data
 
 import app.db.models  # noqa: F401
@@ -27,12 +28,17 @@ ROLE_PERMISSION_MAP = {
         permission_constants.GOAL_TEMPLATE_VIEW,
         permission_constants.GOAL_TEMPLATE_CREATE,
         permission_constants.GOAL_TEMPLATE_EDIT,
+        permission_constants.ELEMENT_VIEW,
+        permission_constants.ELEMENT_CREATE,
+        permission_constants.ELEMENT_DELETE,
+        permission_constants.ELEMENT_MAP,
         permission_constants.STATS_VIEW,
     },
     "caretaker": {
         permission_constants.CARETAKER_READ,
         permission_constants.GROUP_READ,
         permission_constants.STATS_VIEW,
+        permission_constants.SEND_INVITE,
     },
     "participant": {
         permission_constants.GOAL_VIEW_ALL,
@@ -131,6 +137,7 @@ async def _seed_roles_and_permissions() -> None:
         await db.commit()
 
         await seed_onboarding_data(db)
+        await seed_profile_data_elements(db)
 
 
 async def _stamp_head() -> None:

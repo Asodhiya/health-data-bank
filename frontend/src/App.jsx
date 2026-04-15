@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./contexts/AuthContext";
 import DashboardLayout from "./layouts/DashboardLayout";
@@ -7,63 +8,75 @@ import AdminRoute from "./components/AdminRoute";
 import CaretakerRoute from "./components/CaretakerRoute";
 import ResearcherRoute from "./components/ResearcherRoute";
 import DefaultRoute from "./components/DefaultRoute";
-import ParticipantDashboard from "./pages/participant/ParticipantDashboard";
-import AdminDashboard from "./pages/admin/AdminDashboard";
-import CaretakerDashboard from "./pages/caretaker/CaretakerDashboard";
-import ResearcherDashboard from "./pages/researcher/ResearcherDashboard";
+const ParticipantDashboard = lazy(() => import("./pages/participant/ParticipantDashboard"));
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const CaretakerDashboard = lazy(() => import("./pages/caretaker/CaretakerDashboard"));
+const ResearcherDashboard = lazy(() => import("./pages/researcher/ResearcherDashboard"));
 
 // ── Auth & Onboarding ──
 import AuthLayout from "./layouts/AuthLayout";
 import OnboardingLayout from "./layouts/OnboardingLayout";
-import LoginPage from "./pages/auth/LoginPage";
-import RegisterPage from "./pages/auth/RegisterPage";
-import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
-import BackgroundInfoPage from "./pages/onboarding/BackgroundInfoPage";
-import ResetPasswordPage from "./pages/auth/ResetPasswordPage";
-import ConsentPage from "./pages/onboarding/ConsentPage";
-import IntakePage from "./pages/onboarding/IntakePage";
+const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
+const RegisterPage = lazy(() => import("./pages/auth/RegisterPage"));
+const ForgotPasswordPage = lazy(() => import("./pages/auth/ForgotPasswordPage"));
+const BackgroundInfoPage = lazy(() => import("./pages/onboarding/BackgroundInfoPage"));
+const ResetPasswordPage = lazy(() => import("./pages/auth/ResetPasswordPage"));
+const ConsentPage = lazy(() => import("./pages/onboarding/ConsentPage"));
+const IntakePage = lazy(() => import("./pages/onboarding/IntakePage"));
+const SendFeedbackPage = lazy(() => import("./pages/shared/SendFeedbackPage"));
+const TermsPage = lazy(() => import("./pages/shared/TermsPage"));
 
 // ── Shared pages ──
-import ProfilePage from "./pages/shared/ProfilePage";
-import SurveyBuilderPage from "./pages/shared/SurveyBuilderPage";
-import MaintenancePage from "./pages/shared/MaintenancePage";
+const ProfilePage = lazy(() => import("./pages/shared/ProfilePage"));
+const SurveyBuilderPage = lazy(() => import("./pages/shared/SurveyBuilderPage"));
+const MaintenancePage = lazy(() => import("./pages/shared/MaintenancePage"));
 
 // ── Participant pages ──
-import FormListPage from "./pages/participant/FormListPage";
-import SurveyFillPage from "./pages/participant/SurveyFillPage";
-import HealthGoals from "./pages/participant/HealthGoals";
-import ParticipantFeedback from "./pages/participant/ParticipantFeedback";
-import ParticipantHealthSummary from "./pages/participant/ParticipantHealthSummary";
+const FormListPage = lazy(() => import("./pages/participant/FormListPage"));
+const SurveyFillPage = lazy(() => import("./pages/participant/SurveyFillPage"));
+const HealthGoals = lazy(() => import("./pages/participant/HealthGoals"));
+const ParticipantFeedback = lazy(() => import("./pages/participant/ParticipantFeedback"));
+const ParticipantHealthSummary = lazy(() => import("./pages/participant/ParticipantHealthSummary"));
 
 // ── Admin pages ──
-import UserManagementPage from "./pages/admin/UserManagementPage";
-import UserDetailPage from "./pages/admin/UserDetailPage";
-import AuditLogPage from "./pages/admin/AuditLogPage";
-import BackupRestorePage from "./pages/admin/BackupRestorePage";
-import SystemSettingsPage from "./pages/admin/SystemSettingsPage";
-import AdminOnboardingPage from "./pages/admin/AdminOnboardingPage";
-import AdminInsightsPage from "./pages/admin/AdminInsightsPage";
-import AdminMessagesPage from "./pages/admin/AdminMessagesPage";
-import OnboardingManagementPage from "./pages/admin/OnboardingManagementPage";
+const UserManagementPage = lazy(() => import("./pages/admin/UserManagementPage"));
+const UserDetailPage = lazy(() => import("./pages/admin/UserDetailPage"));
+const AuditLogPage = lazy(() => import("./pages/admin/AuditLogPage"));
+const BackupRestorePage = lazy(() => import("./pages/admin/BackupRestorePage"));
+const SystemSettingsPage = lazy(() => import("./pages/admin/SystemSettingsPage"));
+const AdminOnboardingPage = lazy(() => import("./pages/admin/AdminOnboardingPage"));
+const AdminInsightsPage = lazy(() => import("./pages/admin/AdminInsightsPage"));
+const AdminMessagesPage = lazy(() => import("./pages/admin/AdminMessagesPage"));
+const OnboardingManagementPage = lazy(() => import("./pages/admin/OnboardingManagementPage"));
 
 // --- Researcher pages ---
-import ResearcherOnboardingPage from "./pages/researcher/ResearcherOnboardingPage";
-import DataElementManager from "./pages/researcher/DataElementManager";
-import Groups from "./pages/researcher/Group_Chorts";
-import GoalTemplates from "./pages/researcher/GoalTemplates";
+const ResearcherOnboardingPage = lazy(() => import("./pages/researcher/ResearcherOnboardingPage"));
+const DataElementManager = lazy(() => import("./pages/researcher/DataElementManager"));
+const Groups = lazy(() => import("./pages/researcher/Group_Chorts"));
+const GoalTemplates = lazy(() => import("./pages/researcher/GoalTemplates"));
+const ResearcherSubmissionDetailPage = lazy(() => import("./pages/researcher/ResearcherSubmissionDetailPage"));
 
 // ── Caretaker pages ──
-import CaretakerOnboardingPage from "./pages/caretaker/CaretakerOnboardingPage";
-import MyParticipantsPage from "./pages/caretaker/MyParticipantsPage";
-import ParticipantDetailPage from "./pages/caretaker/ParticipantDetailPage";
-import ReportsPage from "./pages/caretaker/ReportsPage";
+const CaretakerOnboardingPage = lazy(() => import("./pages/caretaker/CaretakerOnboardingPage"));
+const MyParticipantsPage = lazy(() => import("./pages/caretaker/MyParticipantsPage"));
+const ParticipantDetailPage = lazy(() => import("./pages/caretaker/ParticipantDetailPage"));
+const ReportsPage = lazy(() => import("./pages/caretaker/ReportsPage"));
+
+function RouteFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500 text-sm font-medium">
+      Loading...
+    </div>
+  );
+}
 
 function App() {
   const { role } = useAuth();
 
   return (
     <BrowserRouter>
-      <Routes>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
         {/* ── Auth routes (public) ── */}
         <Route element={<AuthLayout />}>
           <Route path="/login" element={<LoginPage />} />
@@ -88,6 +101,8 @@ function App() {
         <Route path="/dashboard" element={<DefaultRoute />} />
         <Route path="/logout" element={<Navigate to="/login" replace />} />
         <Route path="/maintenance" element={<MaintenancePage />} />
+        <Route path="/feedback/send" element={<SendFeedbackPage />} />
+        <Route path="/terms" element={<TermsPage />} />
 
         {/* ── Admin ── */}
         <Route element={<AdminRoute />}>
@@ -99,9 +114,8 @@ function App() {
               element={<ProfilePage role="admin" />}
             />
             <Route path="/admin/insights" element={<AdminInsightsPage />} />
-            <Route path="/admin/system-insights" element={<AdminInsightsPage />} />
             <Route path="/admin/messages" element={<AdminMessagesPage />} />
-            <Route path="/admin/feedback" element={<AdminMessagesPage />} />
+            <Route path="/admin/goals" element={<GoalTemplates />} />
             <Route path="/surveys" element={<SurveyBuilderPage />} />
             <Route path="/users" element={<UserManagementPage />} />
             <Route path="/admin/users/:id" element={<UserDetailPage />} />
@@ -171,11 +185,15 @@ function App() {
               path="/researcher/data-elements"
               element={<DataElementManager />}
             />
+            <Route
+              path="/researcher/submissions/:participantId/:submissionId"
+              element={<ResearcherSubmissionDetailPage />}
+            />
             <Route path="/groups" element={<Groups />} />
-            <Route path="/researcher/goals" element={<GoalTemplates />} />
           </Route>
         </Route>
-      </Routes>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

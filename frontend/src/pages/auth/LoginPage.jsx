@@ -201,16 +201,6 @@ export default function LoginPage() {
         </button>
       </form>
 
-      {/* Register link */}
-      <p className="text-center mt-6 text-sm text-slate-500">
-        Not a member yet?{" "}
-        <Link
-          to="/register"
-          className="font-semibold text-blue-600 hover:underline italic"
-        >
-          Register!
-        </Link>
-      </p>
     </>
   );
 }

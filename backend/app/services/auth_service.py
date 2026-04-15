@@ -6,7 +6,7 @@ from app.core.security import PasswordHash, verify_password_async, generate_rese
 from app.schemas.schemas import UserSignup
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.db.models import User, Role, GroupMember, ParticipantProfile, UserRole
+from app.db.models import User, Role, GroupMember, ParticipantProfile, CaretakerProfile, Group, UserRole
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone, timedelta
 from app.schemas.schemas import ForgotPasswordIn,Role_user_link
@@ -78,6 +78,17 @@ async def register_user_from_invite(
                     participant_id=participant_profile.participant_id,
                 )
             )
+
+    elif role.role_name == "caretaker" and invite.group_id:
+        caretaker_profile = await db.scalar(
+            select(CaretakerProfile).where(CaretakerProfile.user_id == new_user.user_id)
+        )
+        if caretaker_profile:
+            group = await db.scalar(
+                select(Group).where(Group.group_id == invite.group_id)
+            )
+            if group:
+                group.caretaker_id = caretaker_profile.caretaker_id
 
     await db.commit()
 
@@ -214,7 +225,11 @@ async def create_user_with_role(payload: UserSignup, role_name: str, db: AsyncSe
 
     user = await user_query.get_user(payload.username)
     if user:
-        raise HTTPException(status_code=409, detail="User already exists")
+        raise HTTPException(status_code=409, detail="Username is already taken. Please choose a different one.")
+
+    existing_email = await db.scalar(select(User).where(User.email == payload.email))
+    if existing_email:
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
 
     role = await role_query.get_role(role_name)
     if not role:
@@ -251,11 +266,16 @@ async def get_user_by_id(user_id: str, db: AsyncSession):
 
 
 async def reset_forgot_password( payload: ForgotPasswordIn, background: BackgroundTasks,db: AsyncSession ):
-    result = await db.execute(select(User).where(User.email == payload.email))
+    identifier = payload.identifier.strip()
+    result = await db.execute(
+        select(User).where(
+            (User.email == identifier) | (User.username == identifier)
+        )
+    )
     user = result.scalar_one_or_none()
 
     if not user:
-        return {"message": "If the email exists, a reset link has been sent."}
+        return {"message": "If the account exists, a reset link has been sent."}
 
     raw_token = generate_reset_token()
     user.reset_token_hash = hash_reset_token(raw_token)
@@ -267,7 +287,7 @@ async def reset_forgot_password( payload: ForgotPasswordIn, background: Backgrou
     send_reset_email(user.email, reset_link)
     # background.add_task(send_reset_email, user.email, reset_link)
 
-    return {"message": "If the email exists, a reset link has been sent."}
+    return {"message": "If the account exists, a reset link has been sent."}
 
 async def reset_password(payload, db: AsyncSession):
     """Validates reset token and updates the user's password."""

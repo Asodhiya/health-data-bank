@@ -31,8 +31,8 @@ function formatRateLimitMessage(detail, retryAfter) {
     return `Too many login attempts from this network.${waitSuffix}`;
   }
 
-  if (detail.includes("auth:forgot-password:email")) {
-    return `Too many password reset requests for this email.${waitSuffix}`;
+  if (detail.includes("auth:forgot-password:identifier")) {
+    return `Too many password reset requests for this account.${waitSuffix}`;
   }
 
   if (detail.includes("auth:forgot-password:ip")) {
@@ -141,10 +141,10 @@ export const api = {
 
   me: () => request("/auth/me"),
 
-  forgotPassword: (email) =>
+  forgotPassword: (identifier) =>
     request("/auth/forgot-password", {
       method: "POST",
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ identifier }),
     }),
 
   resetPassword: (token, new_password) =>
@@ -161,6 +161,30 @@ export const api = {
 
   // ── Form Management (researcher/admin) ──
   listForms: () => request("/form_management/list"),
+
+  listFormsPaged: ({
+    page = 1,
+    pageSize = 10,
+    search,
+    statusFilter,
+    sort,
+    groupId,
+    dateFrom,
+    dateTo,
+    ownershipFilter,
+  } = {}) => {
+    const params = new URLSearchParams();
+    params.set("page", String(page));
+    params.set("page_size", String(pageSize));
+    if (search) params.set("search", search);
+    if (statusFilter) params.set("status_filter", statusFilter);
+    if (sort) params.set("sort", sort);
+    if (groupId && groupId !== "ALL") params.set("group_id", String(groupId));
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
+    if (ownershipFilter) params.set("ownership_filter", ownershipFilter);
+    return request(`/form_management/list-paged?${params.toString()}`);
+  },
 
   getFormDetail: (formId) => request(`/form_management/detail/${formId}`),
 
@@ -189,9 +213,13 @@ export const api = {
   listGroups: () => request("/form_management/groups"),
   getGroupSurveys: (groupId) => request(`/form_management/groups/${groupId}/surveys`),
 
-  publishForm: (formId, groupId) =>
-    request(`/form_management/${formId}/publish?group_id=${groupId}`, {
+  publishForm: (formId, { groupId, cadence = "once" }) =>
+    request(`/form_management/${formId}/publish`, {
       method: "POST",
+      body: JSON.stringify({
+        group_id: groupId,
+        cadence,
+      }),
     }),
 
   unpublishForm: (formId) =>
@@ -215,11 +243,35 @@ export const api = {
   archiveForm: (formId) =>
     request(`/form_management/${formId}/archive`, { method: "POST" }),
 
+  listElementsPaged: ({
+    deleted = false,
+    page = 1,
+    pageSize = 15,
+    search,
+    typeFilter,
+    mappingFilter,
+    sort,
+  } = {}) => {
+    const params = new URLSearchParams();
+    params.set("deleted", String(deleted));
+    params.set("page", String(page));
+    params.set("page_size", String(pageSize));
+    if (search) params.set("search", search);
+    if (typeFilter) params.set("type_filter", typeFilter);
+    if (mappingFilter) params.set("mapping_filter", mappingFilter);
+    if (sort) params.set("sort", sort);
+    return request(`/data-elements/elements-paged?${params.toString()}`);
+  },
+
 // ── Admin: Audit Logs ──
-  getAuditLogs: ({ limit = 20, offset = 0, action, user_id } = {}) => {
+  getAuditLogs: ({ limit = 20, offset = 0, action, user_id, search, date_from, date_to, actor_role } = {}) => {
     const params = new URLSearchParams({ limit, offset });
     if (action) params.set("action", action);
     if (user_id) params.set("user_id", user_id);
+    if (search?.trim()) params.set("search", search.trim());
+    if (date_from) params.set("date_from", date_from);
+    if (date_to) params.set("date_to", date_to);
+    if (actor_role && actor_role !== "all") params.set("actor_role", actor_role);
     return request(`/admin_only/audit-logs?${params.toString()}`);
   },
 
@@ -348,6 +400,9 @@ export const api = {
   adminGetUserGoals: (userId) =>
     request(`/admin_only/users/${userId}/goals`),
 
+  adminGetGroupGoals: (groupId) =>
+    request(`/admin_only/groups/${groupId}/goals`),
+
   // ── Admin: Invites ──
   adminListInvites: (limit, offset = 0) => {
     const params = new URLSearchParams();
@@ -361,9 +416,8 @@ export const api = {
     request(`/admin_only/invites/${inviteId}`, { method: "DELETE" }),
 
   // ── Admin: User Management ──
-  adminListUsers: () => request("/admin_only/users"),
   adminGetUserById: (userId) => request(`/admin_only/users/by-id/${userId}`),
-  adminListUsersPaged: async (limit = 50, offset = 0, search = "", sortField = "joined", sortDir = "desc") => {
+  adminListUsersPaged: async (limit = 50, offset = 0, search = "", sortField = "joined", sortDir = "desc", role = null, excludeGroupId = null, activeOnly = false) => {
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
@@ -373,12 +427,16 @@ export const api = {
     if (String(search || "").trim()) {
       params.set("search", String(search).trim());
     }
+    if (role) params.set("role", role);
+    if (excludeGroupId != null) params.set("exclude_group_id", String(excludeGroupId));
+    if (activeOnly) params.set("active_only", "true");
 
     try {
       return await request(`/admin_only/users/paged?${params.toString()}`);
     } catch (error) {
       // Backward-compatible fallback for environments that only expose /users.
-      const full = await request("/admin_only/users");
+      // Cap at 500 to avoid loading entire dataset if the flat endpoint predates pagination.
+      const full = await request("/admin_only/users?limit=500");
       const normalizedSearch = String(search || "").trim().toLowerCase();
       const list = Array.isArray(full) ? full : [];
       const filtered = normalizedSearch
@@ -458,6 +516,13 @@ export const api = {
   // Admin Profile (requires backend changes)
   adminGetProfile: () => request("/admin_only/profile"),
   adminGetSystemStats: () => request("/admin_only/system-stats"),
+  // ── System feedback (any logged-in user can submit) ──
+  submitSystemFeedback: (payload) =>
+    request("/feedback", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   adminListSystemFeedback: () => request("/feedback"),
   adminUpdateSystemFeedbackStatus: (feedbackId, status) =>
     request(`/feedback/${feedbackId}`, {
@@ -488,6 +553,7 @@ export const api = {
 
   // ── Intake (onboarding) ──
   getIntakeForm: () => request('/onboarding/form'),
+  getProfileIntakeFields: () => request('/onboarding/profile-fields'),
 
   submitIntake: (payload) =>
     request('/onboarding', {
@@ -529,6 +595,8 @@ export const api = {
 
   getAdminIntakeForm: () => request('/onboarding/admin/intake-form'),
 
+  getIntakeAffectedCount: () => request('/onboarding/admin/intake-form/affected-count'),
+
   updateIntakeForm: (payload) =>
     request('/onboarding/admin/intake-form', {
       method: 'PUT',
@@ -558,8 +626,11 @@ export const api = {
 
   // ── Data Elements (researcher) ──
 
-  listElements: () =>
-    request(`/data-elements/elements?t=${new Date().getTime()}`),
+  listElements: ({ includeInactive = false, excludeProfile = false } = {}) =>
+    request(`/data-elements/elements?t=${new Date().getTime()}${includeInactive ? "&include_inactive=true" : ""}${excludeProfile ? "&exclude_profile=true" : ""}`),
+
+  listDeletedElements: () =>
+    request("/data-elements/deleted"),
 
   createDataElement: (payload) =>
     request("/data-elements/data_element", {
@@ -567,8 +638,17 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  updateElement: (element_id, payload) =>
+    request(`/data-elements/${element_id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
   deleteElement: (element_id) =>
     request(`/data-elements/${element_id}`, { method: "DELETE" }),
+
+  restoreElement: (element_id) =>
+    request(`/data-elements/${element_id}/restore`, { method: "POST" }),
 
   getAllMappings: () =>
     request(`/data-elements/all-mappings`),
@@ -607,6 +687,9 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  researcherGetSubmissionDetail: (participantId, submissionId) =>
+    request(`/researcher/participants/${participantId}/submissions/${submissionId}`),
+
   // Groups
   caretakerGetGroups: () => request("/caretaker/groups"),
 
@@ -617,6 +700,12 @@ export const api = {
 
   caretakerGetGroupElements: (groupId) =>
     request(`/caretaker/groups/${groupId}/elements`),
+
+  // Reports v2: data elements relevant to a specific participant. Returns
+  // the union of currently-deployed elements and elements with historical
+  // data points for that participant, each with a per-participant count.
+  caretakerGetParticipantDataElements: (participantId) =>
+    request(`/caretaker/participants/${participantId}/data-elements`),
 
   caretakerListForms: (groupId, options = {}) => {
     const params = new URLSearchParams();
@@ -692,9 +781,22 @@ export const api = {
 
   // Health Trends
   caretakerGetHealthTrends: (participantId, params = {}) => {
-    const qs = new URLSearchParams(params).toString();
+    // Build the query string manually so array params (like element_ids) become
+    // repeated keys (?element_ids=uuid1&element_ids=uuid2) instead of being
+    // joined with commas (?element_ids=uuid1,uuid2). FastAPI's Query(list[UUID])
+    // expects the repeated-key form and 422s on the comma-joined form.
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null || value === "") continue;
+      if (Array.isArray(value)) {
+        value.forEach(v => qs.append(key, String(v)));
+      } else {
+        qs.append(key, String(value));
+      }
+    }
+    const queryString = qs.toString();
     return request(
-      `/caretaker/participants/${participantId}/health-trends${qs ? `?${qs}` : ""}`,
+      `/caretaker/participants/${participantId}/health-trends${queryString ? `?${queryString}` : ""}`,
     );
   },
 
@@ -732,12 +834,6 @@ export const api = {
     });
   },
 
-  caretakerGenerateParticipantReport: (participantId, payload) =>
-    request(`/caretaker/reports/participant?participant_id=${participantId}`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
   caretakerGetReport: (reportId) => request(`/caretaker/reports/${reportId}`),
 
   caretakerListReports: () => request("/caretaker/reports"),
@@ -772,29 +868,34 @@ export const api = {
   // ── Researcher Analytics ──
 
   getAvailableSurveys: () => request("/researcher/query/available-surveys"),
+  getResearcherQueryConfig: () => request("/researcher/query/config"),
 
-  getResearcherResults: (params = {}) => {
-    const sp = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        value.forEach((v) => sp.append(key, v));
-      } else {
-        sp.append(key, value);
-      }
-    });
-    const qs = sp.toString();
-    return request(`/researcher/query/results${qs ? `?${qs}` : ""}`);
-  },
+  getResearcherResults: (payload = {}) =>
+    request("/researcher/query/results", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getResearcherResultsGrouped: (payload = {}) =>
+    request("/researcher/query/results/grouped", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   // 3. Generate the CSV file download URL
   // We don't use the standard request() here because we need to handle a file Blob, not JSON!
-  downloadResearcherResults: async (params = {}, excludeColumns = []) => {
-    const allParams = { ...params };
-    if (excludeColumns.length > 0) allParams.exclude_columns = excludeColumns.join(",");
-    const qs = new URLSearchParams(allParams).toString();
+  downloadResearcherResults: async (payload = {}, excludeColumns = [], filename = null) => {
     const res = await fetch(
-      `${API_BASE}/researcher/query/results/download${qs ? `?${qs}` : ""}`,
-      { credentials: "include" },
+      `${API_BASE}/researcher/query/results/download`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          exclude_columns: excludeColumns,
+        }),
+      },
     );
 
     if (!res.ok) throw new Error("Failed to download CSV");
@@ -803,7 +904,88 @@ export const api = {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `research_export_${new Date().toISOString().split("T")[0]}.csv`;
+    a.download = filename || `research_export_${new Date().toISOString().split("T")[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  downloadResearcherResultsExcel: async (payload = {}, excludeColumns = [], filename = null) => {
+    const res = await fetch(
+      `${API_BASE}/researcher/query/results/download.xlsx`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          exclude_columns: excludeColumns,
+        }),
+      },
+    );
+
+    if (!res.ok) throw new Error("Failed to download Excel file");
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename || `research_export_${new Date().toISOString().split("T")[0]}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  downloadResearcherResultsGrouped: async (payload = {}, excludeColumns = [], filename = null) => {
+    const res = await fetch(
+      `${API_BASE}/researcher/query/results/grouped/download`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          exclude_columns: excludeColumns,
+        }),
+      },
+    );
+
+    if (!res.ok) throw new Error("Failed to download grouped CSV");
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename || `research_grouped_export_${new Date().toISOString().split("T")[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  downloadResearcherResultsGroupedExcel: async (payload = {}, excludeColumns = [], filename = null) => {
+    const res = await fetch(
+      `${API_BASE}/researcher/query/results/grouped/download.xlsx`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          exclude_columns: excludeColumns,
+        }),
+      },
+    );
+
+    if (!res.ok) throw new Error("Failed to download grouped Excel file");
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename || `research_grouped_export_${new Date().toISOString().split("T")[0]}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -883,6 +1065,7 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+  participantGetCareTeam: () => request("/participant/my-care-team"),
 
   // ── Participant: Surveys ──
   getAssignedSurveys: () => request("/participant/surveys/assigned"),

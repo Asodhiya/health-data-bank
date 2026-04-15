@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.dependency import set_rls_context
 from app.core.security import decode_access_token
 from app.api.routes import router as api_router
 from app.db.models import Role, UserRole
@@ -19,6 +20,8 @@ from app.services.admin_service import get_maintenance_settings
 from app.services.session_service import get_active_session
 from app.seeds.onboarding_seed import seed_onboarding_data
 from app.seeds.rbac_seed import seed_rbac
+from app.seeds.data_element_seed import seed_profile_data_elements
+from app.seeds.admin_seed import seed_first_admin
 from app.services.notification_scheduler import (
     start_notification_scheduler,
     stop_notification_scheduler,
@@ -93,8 +96,11 @@ async def lifespan(app: FastAPI):
     try:
         async for db in get_db():
             try:
+                await set_rls_context(db, role="admin")
                 await seed_rbac(db)
+                await seed_first_admin(db)
                 await seed_onboarding_data(db)
+                await seed_profile_data_elements(db)
             except Exception as exc:
                 logger.warning("Startup onboarding seed skipped: %s", exc)
             break

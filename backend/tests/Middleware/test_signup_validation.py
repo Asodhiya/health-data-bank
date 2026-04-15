@@ -17,13 +17,13 @@ def valid_signup_data():
         "email": "john@example.com",
         "password": "StrongP@ss1",
         "confirm_password": "StrongP@ss1",
-        "phone": "(555) 555-5555",
+        "phone": "+19025550147",
     }
 
 
 def test_valid_signup_passes():
     user = UserSignup(**valid_signup_data())
-    assert user.phone == "5555555555"
+    assert user.phone == "+19025550147"
 
 
 def test_whitespace_is_stripped():

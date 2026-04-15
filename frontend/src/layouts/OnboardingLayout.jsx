@@ -1,4 +1,5 @@
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
+import HDBLogo from '../components/HDBLogo';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -101,9 +102,7 @@ export default function OnboardingLayout() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-slate-100 flex justify-center p-4 sm:p-8">
       <div className="w-full max-w-2xl flex flex-col items-center">
         <div className="w-full mb-5 flex items-start justify-between gap-3">
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-800 tracking-tight text-center sm:text-left">
-            Health Data Bank
-          </h1>
+          <HDBLogo size="lg" />
           <button
             type="button"
             className="shrink-0 rounded-xl border border-slate-200 bg-white/80 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
@@ -122,13 +121,11 @@ export default function OnboardingLayout() {
           <Outlet />
         </div>
 
-        {/* Footer — same as AuthLayout */}
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs text-slate-400">
-          <a href="#" className="hover:text-slate-500 transition-colors">Terms &amp; Conditions</a>
-          <span>|</span>
-          <a href="#" className="hover:text-slate-500 transition-colors">About Us</a>
-          <span>|</span>
-          <a href="#" className="hover:text-slate-500 transition-colors">Copyright</a>
+        {/* Footer */}
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+          <Link to="/terms" className="hover:text-slate-500 transition-colors">Terms and conditions</Link>
+          <span>·</span>
+          <span>© 2026 University of Prince Edward Island</span>
         </div>
       </div>
     </div>

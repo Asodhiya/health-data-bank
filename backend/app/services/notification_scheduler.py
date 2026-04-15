@@ -8,10 +8,12 @@ from sqlalchemy.exc import ProgrammingError
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
+from app.core.dependency import set_rls_context
 from app.db.models import (
     Backup,
     BackupScheduleSettings,
     CaretakerProfile,
+    FormDeployment,
     FormSubmission,
     GoalTemplate,
     Group,
@@ -19,6 +21,7 @@ from app.db.models import (
     HealthGoal,
     ParticipantProfile,
     Role,
+    SurveyForm,
     User,
     UserRole,
 )
@@ -28,6 +31,7 @@ from app.services.notification_service import (
     create_notification,
     notification_exists_recent,
 )
+from app.services.survey_cadence import get_cycle_key, get_cycle_label, normalize_cadence
 
 _scheduler: AsyncIOScheduler | None = None
 
@@ -175,7 +179,7 @@ async def _notify_admins_of_scheduled_backup(db, *, success: bool, message: str)
             notification_type=notification_type,
             title=title,
             message=message,
-            link="/admin/backup",
+            link="/backup",
             role_target="admin",
             source_type=source_type,
         )
@@ -208,6 +212,7 @@ async def refresh_backup_schedule_job(schedule: BackupScheduleSettings | dict | 
 
 async def _notify_backup_overdue() -> None:
     async with AsyncSessionLocal() as db:
+        await set_rls_context(db, role="admin")
         now = datetime.now(timezone.utc)
         latest_backup = _as_utc(await db.scalar(select(func.max(Backup.created_at))))
         overdue = not latest_backup or latest_backup < (now - timedelta(days=7))
@@ -246,6 +251,7 @@ async def _notify_backup_overdue() -> None:
 
 async def _run_scheduled_backup() -> None:
     async with AsyncSessionLocal() as db:
+        await set_rls_context(db, role="admin")
         schedule = await _load_backup_schedule(db)
         if not _get_schedule_attr(schedule, "enabled"):
             return
@@ -293,6 +299,7 @@ async def _run_scheduled_backup() -> None:
 
 async def _notify_goal_deadlines() -> None:
     async with AsyncSessionLocal() as db:
+        await set_rls_context(db, role="admin")
         now = datetime.now(timezone.utc)
         soon = now + timedelta(days=3)
 
@@ -339,6 +346,7 @@ async def _notify_goal_deadlines() -> None:
 
 async def _notify_inactivity() -> None:
     async with AsyncSessionLocal() as db:
+        await set_rls_context(db, role="admin")
         now = datetime.now(timezone.utc)
         threshold = now - timedelta(days=7)
 
@@ -424,12 +432,127 @@ async def _notify_inactivity() -> None:
         await db.commit()
 
 
+async def _notify_recurring_surveys() -> None:
+    async with AsyncSessionLocal() as db:
+        await set_rls_context(db, role="admin")
+        now = datetime.now(timezone.utc)
+        rows = await db.execute(
+            select(
+                ParticipantProfile.participant_id,
+                ParticipantProfile.user_id,
+                SurveyForm.form_id,
+                SurveyForm.title,
+                FormDeployment.deployment_id,
+                FormDeployment.cadence,
+                FormDeployment.cadence_anchor_at,
+                GroupMember.group_id,
+            )
+            .join(GroupMember, GroupMember.participant_id == ParticipantProfile.participant_id)
+            .join(FormDeployment, FormDeployment.group_id == GroupMember.group_id)
+            .join(SurveyForm, SurveyForm.form_id == FormDeployment.form_id)
+            .where(GroupMember.left_at.is_(None))
+            .where(FormDeployment.revoked_at.is_(None))
+            .where(SurveyForm.status == "PUBLISHED")
+        )
+
+        # Track which (caretaker, deployment, cycle_key) combos we've already notified
+        # to avoid duplicate caretaker notifications across participants in same group
+        notified_caretaker_cycles: set = set()
+
+        seen_pairs = set()
+        for participant_id, user_id, form_id, form_title, deployment_id, cadence, cadence_anchor_at, group_id in rows.all():
+            normalized_cadence = normalize_cadence(cadence)
+            if normalized_cadence == "once":
+                continue
+
+            key = (participant_id, deployment_id)
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+
+            anchor = _as_utc(cadence_anchor_at) or now
+            cycle_key = get_cycle_key(normalized_cadence, now, anchor)
+            cycle_label = get_cycle_label(normalized_cadence).lower()
+
+            completed_submission = await db.scalar(
+                select(FormSubmission.submission_id)
+                .where(FormSubmission.participant_id == participant_id)
+                .where(FormSubmission.form_id == form_id)
+                .where(FormSubmission.cycle_key == cycle_key)
+                .where(FormSubmission.submitted_at.is_not(None))
+                .limit(1)
+            )
+            if completed_submission:
+                continue
+
+            # Notify participant
+            reminder_source_type = f"survey_cycle_reminder:{cycle_key}"
+            exists = await notification_exists_recent(
+                db,
+                user_id=user_id,
+                notification_type="submission",
+                source_type=reminder_source_type,
+                source_id=deployment_id,
+                within_hours=24 * 90,
+            )
+            if not exists:
+                await create_notification(
+                    db=db,
+                    user_id=user_id,
+                    notification_type="submission",
+                    title="Survey check-in available",
+                    message=f"Your {cycle_label} survey '{form_title}' is ready to complete.",
+                    link="/participant/survey",
+                    role_target="participant",
+                    source_type=reminder_source_type,
+                    source_id=deployment_id,
+                    deployment_id=deployment_id,
+                )
+
+            # Notify caretaker of this group (once per deployment+cycle, not per participant)
+            caretaker_cycle_key = (group_id, deployment_id, cycle_key)
+            if caretaker_cycle_key not in notified_caretaker_cycles:
+                notified_caretaker_cycles.add(caretaker_cycle_key)
+                caretaker_row = await db.execute(
+                    select(CaretakerProfile.user_id)
+                    .join(Group, Group.caretaker_id == CaretakerProfile.caretaker_id)
+                    .where(Group.group_id == group_id)
+                )
+                caretaker_user_id = caretaker_row.scalar_one_or_none()
+                if caretaker_user_id:
+                    caretaker_source_type = f"survey_cycle_caretaker:{cycle_key}"
+                    ct_exists = await notification_exists_recent(
+                        db,
+                        user_id=caretaker_user_id,
+                        notification_type="summary",
+                        source_type=caretaker_source_type,
+                        source_id=deployment_id,
+                        within_hours=24 * 90,
+                    )
+                    if not ct_exists:
+                        await create_notification(
+                            db=db,
+                            user_id=caretaker_user_id,
+                            notification_type="summary",
+                            title="New survey cycle started",
+                            message=f"A new {cycle_label} cycle for '{form_title}' is now available for your group.",
+                            link="/caretaker/reports",
+                            role_target="caretaker",
+                            source_type=caretaker_source_type,
+                            source_id=deployment_id,
+                            deployment_id=deployment_id,
+                        )
+
+        await db.commit()
+
+
 async def start_notification_scheduler() -> None:
     global _scheduler
     if _scheduler and _scheduler.running:
         return
 
     _scheduler = AsyncIOScheduler(timezone="UTC")
+    _scheduler.add_job(_notify_recurring_surveys, "cron", hour=2, minute=5, id="notify_recurring_surveys", replace_existing=True)
     _scheduler.add_job(_notify_inactivity, "cron", hour=2, minute=10, id="notify_inactivity", replace_existing=True)
     _scheduler.add_job(_notify_goal_deadlines, "cron", hour=2, minute=20, id="notify_goal_deadlines", replace_existing=True)
     _scheduler.add_job(_notify_backup_overdue, "cron", hour=2, minute=30, id="notify_backup_overdue", replace_existing=True)
@@ -442,4 +565,3 @@ def stop_notification_scheduler() -> None:
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
     _scheduler = None
-

@@ -2,7 +2,7 @@
 Onboarding Service
 """
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, or_
 from uuid import UUID
 from typing import Optional
 
@@ -16,6 +16,16 @@ from app.db.models import (
 )
 
 INTAKE_FORM_TITLE = "Intake Form"
+ONBOARDING_RESET_TARGETS = {"PENDING", "BACKGROUND_READ", "CONSENT_GIVEN"}
+
+
+def _normalize_reset_target(reset_to: str | None) -> str | None:
+    if reset_to is None:
+        return None
+    normalized = str(reset_to).strip().upper()
+    if normalized in ONBOARDING_RESET_TARGETS:
+        return normalized
+    return None
 
 
 async def check_intake_completed(user_id: UUID, db: AsyncSession) -> bool:
@@ -83,9 +93,9 @@ async def submit_consent(
         raise ValueError("Consent template not found.")
 
     for item in template.items:
-        if item.get("required") and answers.get(item["id"]) != "yes":
+        if answers.get(item["id"]) != "yes":
             raise ValueError(
-                f"Required consent item '{item['id']}' must be answered 'yes'."
+                f"Consent item '{item['id']}' must be agreed to."
             )
 
     consent = ParticipantConsent(
@@ -149,6 +159,101 @@ async def complete_onboarding(user_id: UUID, db: AsyncSession) -> None:
         .values(onboarding_status="COMPLETED")
     )
     await db.commit()
+
+
+async def queue_onboarding_reset_for_completed_participants(
+    reset_to: str,
+    db: AsyncSession,
+) -> int:
+    """
+    Queue an onboarding reset for completed participants to be applied at login.
+
+    reset_to:
+      - PENDING          -> restart at background page
+      - BACKGROUND_READ  -> restart at consent page
+      - CONSENT_GIVEN    -> restart at intake page
+
+    If participants already have a pending reset, the earlier step wins
+    (PENDING < BACKGROUND_READ < CONSENT_GIVEN).
+    """
+    normalized_target = _normalize_reset_target(reset_to)
+    if not normalized_target:
+        raise ValueError(f"Invalid onboarding reset target: {reset_to}")
+
+    stmt = update(ParticipantProfile).where(
+        ParticipantProfile.onboarding_status == "COMPLETED"
+    )
+
+    if normalized_target == "PENDING":
+        stmt = stmt.where(
+            or_(
+                ParticipantProfile.onboarding_reset_to.is_(None),
+                ParticipantProfile.onboarding_reset_to != "PENDING",
+            )
+        )
+    elif normalized_target == "BACKGROUND_READ":
+        stmt = stmt.where(
+            or_(
+                ParticipantProfile.onboarding_reset_to.is_(None),
+                ParticipantProfile.onboarding_reset_to == "CONSENT_GIVEN",
+            )
+        )
+    else:  # CONSENT_GIVEN
+        stmt = stmt.where(ParticipantProfile.onboarding_reset_to.is_(None))
+
+    result = await db.execute(stmt.values(onboarding_reset_to=normalized_target))
+    return int(result.rowcount or 0)
+
+
+async def process_pending_onboarding_reset(user_id: UUID, db: AsyncSession) -> str | None:
+    """
+    Apply a queued onboarding reset for this participant at login.
+
+    Returns the reset target when a reset was applied, otherwise None.
+    """
+    profile_result = await db.execute(
+        select(ParticipantProfile).where(ParticipantProfile.user_id == user_id)
+    )
+    profile = profile_result.scalar_one_or_none()
+    if not profile:
+        return None
+
+    reset_target = _normalize_reset_target(profile.onboarding_reset_to)
+    if not reset_target:
+        if profile.onboarding_reset_to:
+            await db.execute(
+                update(ParticipantProfile)
+                .where(ParticipantProfile.participant_id == profile.participant_id)
+                .values(onboarding_reset_to=None)
+            )
+        return None
+
+    intake_form_result = await db.execute(
+        select(SurveyForm).where(SurveyForm.title == INTAKE_FORM_TITLE)
+    )
+    intake_form = intake_form_result.scalar_one_or_none()
+
+    await db.execute(
+        update(ParticipantProfile)
+        .where(ParticipantProfile.participant_id == profile.participant_id)
+        .values(
+            onboarding_status=reset_target,
+            onboarding_reset_to=None,
+        )
+    )
+
+    if intake_form:
+        await db.execute(
+            update(FormSubmission)
+            .where(
+                FormSubmission.form_id == intake_form.form_id,
+                FormSubmission.participant_id == profile.participant_id,
+                FormSubmission.submitted_at.isnot(None),
+            )
+            .values(submitted_at=None)
+        )
+
+    return reset_target
 
 
 async def get_onboarding_status(user_id: UUID, db: AsyncSession) -> str:

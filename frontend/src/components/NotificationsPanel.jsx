@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
+import { usePolling } from "../hooks/usePolling";
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
 
@@ -11,6 +12,20 @@ function timeAgo(dateStr) {
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
   return new Date(dateStr).toLocaleDateString("en-CA", { month: "short", day: "numeric" });
+}
+
+function normalizeNotificationLink(link) {
+  const normalized = String(link || "").trim();
+  if (!normalized) return "";
+
+  const legacyMap = {
+    "/admin/system-insights": "/admin/insights",
+    "/admin/backup": "/backup",
+    "/admin/users": "/users",
+    "/admin/feedback": "/admin/messages",
+  };
+
+  return legacyMap[normalized] || normalized;
 }
 
 const TYPE_STYLES = {
@@ -61,7 +76,9 @@ export default function NotificationsPanel({ role }) {
     }
   }, [role]);
 
-  useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
+  usePolling(() => {
+    fetchNotifications();
+  }, 60000);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
@@ -88,13 +105,14 @@ export default function NotificationsPanel({ role }) {
 
   function handleClick(n) {
     if (!n.is_read) handleMarkRead(n.id);
-    if (n.link) navigate(n.link);
+    const destination = normalizeNotificationLink(n.link);
+    if (destination) navigate(destination);
   }
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+      <div className="px-5 py-4 border-b border-slate-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 8a6 6 0 0112 0c0 7 3 9 3 9H3s3-2 3-9" />
@@ -104,7 +122,7 @@ export default function NotificationsPanel({ role }) {
           {unreadCount > 0 && <span className="text-xs font-bold bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-full">{unreadCount} unread</span>}
         </div>
         {unreadCount > 0 && (
-          <button onClick={handleMarkAllRead} className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">Mark all read</button>
+          <button onClick={handleMarkAllRead} className="self-start text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors sm:self-auto">Mark all read</button>
         )}
       </div>
 

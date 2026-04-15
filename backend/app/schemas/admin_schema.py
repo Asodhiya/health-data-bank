@@ -123,6 +123,7 @@ class UserListItem(BaseModel):
     status: bool
     locked_until: Optional[datetime] = None
     joined_at: Optional[datetime] = None
+    last_login_at: Optional[datetime] = None
     group_id: Optional[UUID] = None
     group: Optional[str] = None
     caretaker_id: Optional[UUID] = None
@@ -170,6 +171,7 @@ class AdminUserUpdate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     role: Optional[str] = None
+    password: Optional[str] = None
 
 
 class UserStatusUpdate(BaseModel):

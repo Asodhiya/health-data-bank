@@ -1,438 +1,700 @@
-import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { sanitizeText } from '../../utils/sanitize';
-import { api } from '../../services/api';
-import { useAuth } from '../../contexts/AuthContext';
-import { LANGUAGES, COUNTRIES } from '../../utils/formOptions';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { api } from "../../services/api";
+import { useAuth } from "../../contexts/AuthContext";
+import { sanitizeText } from "../../utils/sanitize";
+import { COUNTRIES, PREDEFINED_LISTS } from "../../utils/formOptions";
 
-/* ── Reusable chip selector (single or multi select) ── */
-function ChipSelect({ options, value, onChange, multi = false }) {
-  const toggle = (opt) => {
-    if (multi) {
-      const arr = value || [];
-      onChange(arr.includes(opt) ? arr.filter((v) => v !== opt) : [...arr, opt]);
-    } else {
-      onChange(opt);
-    }
-  };
+const EMPTY_ANSWERS = {};
 
-  return (
-    <div className="flex flex-wrap gap-2">
-      {options.map((opt) => {
-        const selected = multi ? (value || []).includes(opt) : value === opt;
-        return (
-          <button
-            key={opt}
-            type="button"
-            className={`px-3.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
-              selected
-                ? 'bg-blue-50 text-blue-700 border-blue-200'
-                : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-            }`}
-            onClick={() => toggle(opt)}
-          >
-            {opt}
-          </button>
-        );
-      })}
-    </div>
-  );
+function normalizeFieldValue(field, value) {
+  if (field.field_type === "multi_select") {
+    return Array.isArray(value) ? value : [];
+  }
+  if (field.config?.conditional) {
+    return value ?? null;
+  }
+  return value ?? "";
 }
 
-/* ── Typeahead dropdown — supports single or multi select ──
-   multi mode: value is an array, shows chips, allows adding custom entries
-   single mode: value is a string, shows one chip when selected              */
-function Autocomplete({ options, value, onChange, placeholder = 'Search...', allowCustom = false, multi = false, inputClass = '' }) {
-  const [query, setQuery] = useState('');
+function isAnswered(field, value) {
+  if (field.field_type === "multi_select") {
+    return Array.isArray(value) && value.length > 0;
+  }
+  if (field.config?.conditional) {
+    // null = unanswered, 0 = "No", "" = "Yes" awaiting number, number = "Yes" + value
+    return value !== null && value !== undefined;
+  }
+  return value !== null && value !== undefined && String(value).trim() !== "";
+}
+
+function minimumAdultDob() {
+  const today = new Date();
+  const min = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
+  return min.toISOString().split("T")[0];
+}
+
+function buildInitialAnswers(fields) {
+  return fields.reduce((acc, field) => {
+    if (field.field_type === "multi_select") {
+      acc[field.field_id] = [];
+    } else if (field.config?.conditional) {
+      acc[field.field_id] = null;
+    } else {
+      acc[field.field_id] = "";
+    }
+    return acc;
+  }, {});
+}
+
+function renderFieldError(error) {
+  if (!error) return null;
+  return <p className="mt-1.5 text-xs font-medium text-rose-600">{error}</p>;
+}
+
+/* ── Shared styles ─────────────────────────────────────────── */
+
+const inputClass =
+  "w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 transition-shadow focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200";
+
+const chipClass = (selected) =>
+  `rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors ${
+    selected
+      ? "border-blue-200 bg-blue-50 text-blue-700"
+      : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+  }`;
+
+/* ── SearchableSelect (single value, e.g. country) ────────── */
+
+function SearchableSelect({ value, onChange, options, placeholder = "Start typing to search..." }) {
+  const [query, setQuery] = useState(value || "");
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
 
   useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+    setQuery(value || "");
+  }, [value]);
 
-  const selected = multi ? (value || []) : (value ? [value] : []);
-  const filtered = options.filter(
-    (o) => o.toLowerCase().includes(query.toLowerCase()) && !selected.includes(o),
+  const filtered = options.filter((option) =>
+    option.toLowerCase().includes(query.toLowerCase()),
   );
-  const trimmed = query.trim();
-  const showAddCustom = allowCustom && trimmed && !options.some((o) => o.toLowerCase() === trimmed.toLowerCase()) && !selected.some((s) => s.toLowerCase() === trimmed.toLowerCase());
-
-  const add = (val) => {
-    if (multi) { onChange([...selected, val]); }
-    else { onChange(val); }
-    setQuery('');
-    setOpen(false);
-  };
-
-  const remove = (val) => {
-    if (multi) { onChange(selected.filter((s) => s !== val)); }
-    else { onChange(''); }
-  };
 
   return (
-    <div ref={ref} className="relative">
-      {/* Selected chips + inline input */}
-      <div className={`${inputClass} flex flex-wrap gap-1.5 min-h-[44px] items-center !py-2`}>
-        {selected.map((s) => (
-          <span key={s} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-xs font-medium whitespace-nowrap">
-            {s}
-            <button type="button" className="ml-0.5 hover:text-blue-900 text-base leading-none" onClick={() => remove(s)}>&times;</button>
-          </span>
-        ))}
-        {(multi || !value) && (
-          <input
-            type="text"
-            className="flex-1 min-w-[120px] bg-transparent outline-none text-sm"
-            placeholder={selected.length ? '' : placeholder}
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-            onFocus={() => setOpen(true)}
-          />
-        )}
-      </div>
-
-      {/* Dropdown */}
-      {open && (filtered.length > 0 || showAddCustom) && (
-        <ul className="absolute z-20 w-full mt-1 max-h-48 overflow-auto bg-white border border-slate-200 rounded-xl shadow-lg text-sm">
-          {filtered.map((opt) => (
-            <li key={opt} className="px-4 py-2 hover:bg-blue-50 cursor-pointer" onClick={() => add(opt)}>{opt}</li>
-          ))}
-          {showAddCustom && (
-            <li className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-blue-600 font-medium border-t border-slate-100" onClick={() => add(trimmed)}>
-              Add &ldquo;<strong>{trimmed}</strong>&rdquo;
-            </li>
+    <div className="relative">
+      <input
+        type="text"
+        value={query}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+          if (!event.target.value.trim()) onChange("");
+        }}
+        className={inputClass}
+        placeholder={placeholder}
+      />
+      {open && (
+        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+          {filtered.length === 0 ? (
+            <p className="px-4 py-2 text-sm text-slate-400">No results found.</p>
+          ) : (
+            filtered.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onChange(option);
+                  setQuery(option);
+                  setOpen(false);
+                }}
+                className={`block w-full px-4 py-2 text-left text-sm transition-colors ${
+                  value === option ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {option}
+              </button>
+            ))
           )}
-        </ul>
+        </div>
       )}
     </div>
   );
 }
 
-/* ── Question card wrapper ── */
-function Q({ num, label, required = true, children }) {
+/* ── SearchableMultiSelect (multi value, e.g. languages) ──── */
+
+function SearchableMultiSelect({ value, onChange, options, placeholder = "Start typing to search...", creatable = false }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef(null);
+  const selectedValues = Array.isArray(value) ? value : [];
+
+  const filtered = options.filter(
+    (option) =>
+      option.toLowerCase().includes(query.toLowerCase()) && !selectedValues.includes(option),
+  );
+
+  const handleSelect = (option) => {
+    if (!selectedValues.includes(option)) {
+      onChange([...selectedValues, option]);
+    }
+    setQuery("");
+    inputRef.current?.focus();
+  };
+
+  const handleRemove = (option) => {
+    onChange(selectedValues.filter((v) => v !== option));
+  };
+
+  const handleKeyDown = (event) => {
+    if (event.key === "Enter" && query.trim()) {
+      event.preventDefault();
+      // If creatable and no exact match in options, add custom entry
+      const exactMatch = options.find((o) => o.toLowerCase() === query.trim().toLowerCase());
+      if (exactMatch) {
+        handleSelect(exactMatch);
+      } else if (creatable && !selectedValues.includes(query.trim())) {
+        onChange([...selectedValues, query.trim()]);
+        setQuery("");
+      }
+    }
+    if (event.key === "Backspace" && !query && selectedValues.length > 0) {
+      onChange(selectedValues.slice(0, -1));
+    }
+  };
+
   return (
-    <div className="border border-slate-100 rounded-xl p-4 mb-4">
-      <p className="text-sm font-medium text-slate-700 mb-2">
-        <span className="text-blue-600 font-bold mr-1">{num}.</span>
-        {label}
-        {required && <span className="text-rose-500 ml-0.5">*</span>}
-      </p>
-      {children}
+    <div className="relative">
+      {/* Selected chips */}
+      <div
+        className="flex min-h-[48px] flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 transition-shadow focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-200"
+        onClick={() => inputRef.current?.focus()}
+      >
+        {selectedValues.map((item) => (
+          <span
+            key={item}
+            className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700"
+          >
+            {item}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRemove(item);
+              }}
+              className="ml-0.5 text-blue-400 hover:text-blue-600"
+              aria-label={`Remove ${item}`}
+            >
+              &times;
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onKeyDown={handleKeyDown}
+          className="min-w-[120px] flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+          placeholder={selectedValues.length === 0 ? placeholder : ""}
+        />
+      </div>
+
+      {/* Dropdown */}
+      {open && (
+        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+          {filtered.length === 0 && !creatable && (
+            <p className="px-4 py-2 text-sm text-slate-400">No results found.</p>
+          )}
+          {filtered.length === 0 && creatable && query.trim() && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelect(query.trim())}
+              className="block w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-blue-50"
+            >
+              Add &ldquo;{query.trim()}&rdquo;
+            </button>
+          )}
+          {filtered.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelect(option)}
+              className="block w-full px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
+
+/* ── ConditionalField (Yes/No + sub-input) ────────────────── */
+
+function ConditionalField({ field, value, onChange }) {
+  const cond = field.config.conditional;
+  const triggerValue = cond.trigger_value || "Yes";
+  const noValue = triggerValue === "Yes" ? "No" : "Yes";
+  const subConfig = cond.sub_config || {};
+
+  // Derive toggle state from value
+  // null = unanswered, 0 = "No", "" = "Yes" awaiting number, number = "Yes" + value
+  const isTriggered = value !== null && value !== 0 && value !== "0";
+  const toggleState = value === null ? null : isTriggered ? triggerValue : noValue;
+  const numberValue = (isTriggered && value !== "") ? value : "";
+
+  const handleToggle = (selected) => {
+    if (selected === triggerValue) {
+      onChange(field, "");
+    } else {
+      onChange(field, 0);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        {[triggerValue, noValue].map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => handleToggle(opt)}
+            className={chipClass(toggleState === opt)}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+      {toggleState === triggerValue && (
+        <input
+          type="number"
+          min={subConfig.min ?? undefined}
+          max={subConfig.max ?? undefined}
+          step="1"
+          value={numberValue}
+          onChange={(e) => {
+            const raw = e.target.value;
+            if (raw === "") {
+              onChange(field, "");
+            } else {
+              onChange(field, Number(raw));
+            }
+          }}
+          className={inputClass}
+          placeholder={`Enter a number${subConfig.min != null ? ` (min ${subConfig.min}` : ""}${subConfig.max != null ? `${subConfig.min != null ? ", " : " ("}max ${subConfig.max})` : subConfig.min != null ? ")" : ""}`}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── QuestionCard ──────────────────────────────────────────── */
+
+function QuestionCard({ index, field, value, onChange, error, maxDob }) {
+  const config = field.config || {};
+  const options = field.options || [];
+  const isCountryOfOrigin = field.profile_field === "country_of_origin";
+  const isPrimaryLanguage = field.profile_field === "primary_language";
+  const usesForcedSelector = isCountryOfOrigin || isPrimaryLanguage;
+  const forcedPredefinedList = isPrimaryLanguage
+    ? PREDEFINED_LISTS.languages
+    : isCountryOfOrigin
+      ? COUNTRIES
+      : null;
+
+  // Determine rendering mode using config with profile_field fallbacks (backward compat)
+  const isSearchable = config.searchable || !!forcedPredefinedList;
+  const predefinedList = forcedPredefinedList || (config.predefined_list
+    ? PREDEFINED_LISTS[config.predefined_list]
+    : null);
+  const isCreatable = isPrimaryLanguage ? true : (config.creatable || false);
+  const isConditional = !!config.conditional;
+  const dateMax =
+    config.max_date_rule === "adult_18" || field.profile_field === "dob" ? maxDob : undefined;
+  const numberMin =
+    config.min ?? (field.profile_field === "dependents" ? 0 : undefined);
+  const numberMax = config.max ?? undefined;
+
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+      <p className="mb-2 text-sm font-medium text-slate-700">
+        <span className="mr-1 font-bold text-blue-600">{index + 1}.</span>
+        {field.label}
+        {field.is_required && <span className="ml-0.5 text-rose-500">*</span>}
+      </p>
+
+      {field.profile_field && (
+        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+          Saves to profile: {field.profile_field.replaceAll("_", " ")}
+        </p>
+      )}
+
+      {/* Conditional single_select (e.g. Dependents Yes/No + number) */}
+      {field.field_type === "single_select" && isConditional && (
+        <ConditionalField field={field} value={value} onChange={onChange} />
+      )}
+
+      {/* Searchable multi-select with predefined list (e.g. Languages) */}
+      {(isPrimaryLanguage || (field.field_type === "multi_select" && predefinedList && isSearchable)) && (
+        <SearchableMultiSelect
+          value={value}
+          onChange={(next) => onChange(field, next)}
+          options={isPrimaryLanguage ? PREDEFINED_LISTS.languages : predefinedList}
+          creatable={isCreatable}
+          placeholder={isPrimaryLanguage ? "Start typing to search languages..." : `Start typing to search ${config.predefined_list || "options"}...`}
+        />
+      )}
+
+      {/* Searchable single-select dropdown with predefined list (e.g. Country) */}
+      {(isCountryOfOrigin || (field.field_type === "dropdown" && predefinedList && isSearchable)) && (
+        <SearchableSelect
+          value={value}
+          onChange={(next) => onChange(field, next)}
+          options={isCountryOfOrigin ? COUNTRIES : predefinedList}
+          placeholder={isCountryOfOrigin ? "Start typing to search countries..." : `Start typing to search ${config.predefined_list || "options"}...`}
+        />
+      )}
+
+      {/* Regular dropdown (no predefined list, not searchable) */}
+      {field.field_type === "dropdown" && !(predefinedList && isSearchable) && !usesForcedSelector && (
+        <select
+          value={value}
+          onChange={(event) => onChange(field, event.target.value)}
+          className={inputClass}
+        >
+          <option value="">Select an option</option>
+          {options.map((option, optionIndex) => (
+            <option key={`${field.field_id}-${optionIndex}`} value={option.label || option.value || ""}>
+              {option.label || `Option ${optionIndex + 1}`}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {/* Single select chips (non-conditional) */}
+      {field.field_type === "single_select" && !isConditional && !usesForcedSelector && (
+        <div className="flex flex-wrap gap-2">
+          {options.map((option, optionIndex) => {
+            const optionValue = option.label || option.value || "";
+            const selected = value === optionValue;
+            return (
+              <button
+                key={`${field.field_id}-${optionIndex}`}
+                type="button"
+                onClick={() => onChange(field, optionValue)}
+                className={chipClass(selected)}
+              >
+                {option.label || `Option ${optionIndex + 1}`}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Multi-select chips (no predefined list) */}
+      {field.field_type === "multi_select" && !(predefinedList && isSearchable) && !isPrimaryLanguage && (
+        <div className="flex flex-wrap gap-2">
+          {options.map((option, optionIndex) => {
+            const optionValue = option.label || option.value || "";
+            const selectedValues = Array.isArray(value) ? value : [];
+            const selected = selectedValues.includes(optionValue);
+            return (
+              <button
+                key={`${field.field_id}-${optionIndex}`}
+                type="button"
+                onClick={() => {
+                  const next = selected
+                    ? selectedValues.filter((v) => v !== optionValue)
+                    : [...selectedValues, optionValue];
+                  onChange(field, next);
+                }}
+                className={chipClass(selected)}
+              >
+                {option.label || `Option ${optionIndex + 1}`}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Textarea */}
+      {field.field_type === "textarea" && !usesForcedSelector && (
+        <textarea
+          value={value}
+          onChange={(event) => onChange(field, sanitizeText(event.target.value, 1000))}
+          className={`${inputClass} min-h-[120px] resize-y`}
+        />
+      )}
+
+      {/* Text */}
+      {field.field_type === "text" && !usesForcedSelector && (
+        <input
+          type="text"
+          value={value}
+          onChange={(event) => onChange(field, sanitizeText(event.target.value, 200))}
+          className={inputClass}
+        />
+      )}
+
+      {/* Number */}
+      {field.field_type === "number" && !usesForcedSelector && (
+        <input
+          type="number"
+          min={numberMin}
+          max={numberMax}
+          step="1"
+          value={value}
+          onChange={(event) => onChange(field, event.target.value)}
+          className={inputClass}
+        />
+      )}
+
+      {/* Date */}
+      {field.field_type === "date" && !usesForcedSelector && (
+        <input
+          type="date"
+          max={dateMax}
+          value={value}
+          onChange={(event) => onChange(field, event.target.value)}
+          className={inputClass}
+        />
+      )}
+
+      {renderFieldError(error)}
+    </div>
+  );
+}
+
+/* ── Main IntakePage ──────────────────────────────────────── */
 
 export default function IntakePage() {
   const navigate = useNavigate();
   const { refetch } = useAuth();
-  // ── Demographics ──
-  const [dob, setDob] = useState('');
-  const [sex, setSex] = useState('');
-  const [pronouns, setPronouns] = useState('');
-  const [pronounsOther, setPronounsOther] = useState('');
-  const [languages, setLanguages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [fetchError, setFetchError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [fields, setFields] = useState([]);
+  const [answers, setAnswers] = useState(EMPTY_ANSWERS);
 
-  // ── Lifestyle questions ──
-  const [maritalStatus, setMaritalStatus] = useState('');
-  const [highestEducation, setHighestEducation] = useState('');
+  const maxDob = useMemo(() => minimumAdultDob(), []);
 
-  const [q1, setQ1] = useState('');
-  const [q1Other, setQ1Other] = useState('');
-  const [q2, setQ2] = useState('');
-  const [q2Count, setQ2Count] = useState('');
-  const [q4, setQ4] = useState('');
+  useEffect(() => {
+    let cancelled = false;
 
-  const [countryOfOrigin, setCountryOfOrigin] = useState('');
+    (async () => {
+      try {
+        setLoading(true);
+        const data = await api.getIntakeForm();
+        if (cancelled) return;
+        const nextFields = Array.isArray(data?.fields) ? data.fields : [];
+        setFields(nextFields);
 
-  const [error, setError] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+        // Pre-fill with previous answers when available (e.g. after form update)
+        const initial = buildInitialAnswers(nextFields);
+        if (data.previous_answers) {
+          for (const field of nextFields) {
+            const prev = data.previous_answers[field.field_id];
+            if (prev !== undefined && prev !== null) {
+              initial[field.field_id] = prev;
+            }
+          }
+        }
+        setAnswers(initial);
+      } catch (error) {
+        if (!cancelled) {
+          setFetchError(error.message || "Form not configured. Please contact an administrator.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
 
-  /* ── DOB constraints: must be ≥ 18 years old, no future dates ── */
-  const today = new Date();
-  const maxDob = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate())
-    .toISOString().split('T')[0];
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const dobError = dob && dob > maxDob
-    ? 'You must be at least 18 years old.'
-    : '';
+  const fieldErrors = useMemo(() => {
+    const next = {};
 
-  /*
-    Helper: wrap every text onChange with sanitizeText.
-    maxLen parameter controls field-specific limits.
-  */
-  const onText = (setter, maxLen = 200) => (e) => {
-    setter(sanitizeText(e.target.value, maxLen));
-  };
+    fields.forEach((field) => {
+      const value = normalizeFieldValue(field, answers[field.field_id]);
+      const config = field.config || {};
 
-  /*
-    Pronouns: valid if a preset is selected, OR "Other" is
-    selected AND the custom text field is filled.
-  */
-  const pronounsValid =
-    pronouns && (pronouns !== 'Other' || pronounsOther.trim().length > 0);
+      if (field.is_required && !isAnswered(field, value)) {
+        next[field.field_id] = "This field is required.";
+        return;
+      }
 
-  /*
-    Validation — every required field must be filled.
-    "Other" / conditional text fields must also be filled
-    when their parent option is selected.
-  */
-  const isValid = () => {
-    if (!dob || dobError || !sex || !pronounsValid || languages.length === 0) return false;
-    if (!countryOfOrigin) return false;
-    if (!maritalStatus || !highestEducation) return false;
-    if (!q1) return false;
-    if (q1 === 'Other' && !q1Other.trim()) return false;
-    if (!q2) return false;
-    if (q2 === 'Yes' && (!q2Count || parseInt(q2Count, 10) < 1)) return false;
-    if (!q4) return false;
-    return true;
+      // Date validation: config-driven or profile_field fallback
+      if (field.field_type === "date" && value) {
+        if (config.max_date_rule === "adult_18" || field.profile_field === "dob") {
+          if (value > maxDob) {
+            next[field.field_id] = "Participant must be at least 18 years old.";
+          }
+        }
+      }
+
+      // Conditional field validation
+      if (config.conditional && value !== null && value !== 0 && value !== "0") {
+        if (value === "") {
+          next[field.field_id] = "Please enter a number.";
+        } else {
+          const sub = config.conditional.sub_config || {};
+          const num = Number(value);
+          if (!Number.isInteger(num) || (sub.min != null && num < sub.min) || (sub.max != null && num > sub.max)) {
+            next[field.field_id] = `Must be a whole number${sub.min != null ? ` (min ${sub.min}` : ""}${sub.max != null ? `${sub.min != null ? ", " : " ("}max ${sub.max})` : sub.min != null ? ")" : ""}.`;
+          }
+        }
+      }
+
+      // Number field validation: config-driven or profile_field fallback
+      if (field.field_type === "number" && value !== "") {
+        const parsed = Number(value);
+        const min = config.min ?? (field.profile_field === "dependents" ? 0 : undefined);
+        const max = config.max ?? undefined;
+        if (!Number.isFinite(parsed)) {
+          next[field.field_id] = "Must be a valid number.";
+        } else if (min != null && parsed < min) {
+          next[field.field_id] = `Must be at least ${min}.`;
+        } else if (max != null && parsed > max) {
+          next[field.field_id] = `Must be at most ${max}.`;
+        }
+      }
+    });
+
+    return next;
+  }, [answers, fields, maxDob]);
+
+  const handleChange = (field, nextValue) => {
+    setSubmitError("");
+    setAnswers((previous) => ({
+      ...previous,
+      [field.field_id]: nextValue,
+    }));
   };
 
   const handleSubmit = async () => {
-    if (!isValid() || isSubmitting) {
-      setError('Please complete all required fields before submitting.');
+    if (Object.keys(fieldErrors).length > 0 || submitting) {
+      setSubmitError("Please complete all required fields before submitting.");
       return;
     }
-    setError('');
-    setIsSubmitting(true);
 
-    const profile = {
-      dob,
-      gender: sex,
-      pronouns: pronouns === 'Other' ? pronounsOther : pronouns,
-      primary_language: languages.join(', '),
-      country_of_origin: countryOfOrigin,
-      living_arrangement: q1 === 'Other' ? q1Other : q1,
-      dependents: q2 === 'Yes' ? parseInt(q2Count, 10) : 0,
-      occupation_status: q4,
-      marital_status: maritalStatus,
-      highest_education_level: highestEducation,
+    setSubmitting(true);
+    setSubmitError("");
+
+    const payload = {
+      answers: fields
+        .map((field) => ({
+          field_id: field.field_id,
+          value: normalizeFieldValue(field, answers[field.field_id]),
+        }))
+        .filter(({ value }) =>
+          Array.isArray(value) ? value.length > 0 : value !== null && value !== undefined && String(value).trim() !== "",
+        ),
     };
 
-    const answers = [];
-
     try {
-      await api.submitIntake({ profile, answers });
+      await api.submitIntake(payload);
       await api.completeOnboarding();
-      sessionStorage.removeItem('consent_answers');
-      sessionStorage.removeItem('consent_signature');
-      await refetch(); // refresh auth context so intake_completed becomes true
-      navigate('/participant');
-    } catch (err) {
-      if (err?.status === 409) {
-        setError('This intake form was already submitted for your account. Please sign out and back in if the page did not update.');
+      sessionStorage.removeItem("consent_answers");
+      sessionStorage.removeItem("consent_signature");
+      await refetch();
+      navigate("/participant");
+    } catch (error) {
+      if (error?.status === 409) {
+        setSubmitError("This intake form was already submitted for your account. Please sign out and back in if the page did not update.");
       } else {
-        setError(err.message || 'Failed to submit. Please try again.');
+        setSubmitError(error.message || "Failed to submit. Please try again.");
       }
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
     }
   };
 
-  /* Shared Tailwind input classes */
-  const inputClass = 'w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow';
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-10">
+        <div className="flex items-center justify-center py-20">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+        </div>
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-10">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+          <h2 className="text-lg font-bold text-rose-700">Unable to load intake form</h2>
+          <p className="mt-2 text-sm text-rose-600">{fetchError}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (fields.length === 0) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-10">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+          <h2 className="text-lg font-bold text-slate-800">Intake form not configured</h2>
+          <p className="mt-2 text-sm text-slate-500">There are no intake fields available yet. Please contact an administrator.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <>
-      {/* Page heading */}
-      <div className="text-center mb-5">
-        <h2 className="text-2xl font-bold text-slate-800 mb-1">
-          Intake Questionnaire
-        </h2>
-        <p className="text-sm text-slate-400">
-          Appendix D — Connections for Healthy Living
-        </p>
+    <div className="mx-auto max-w-3xl px-4 py-8">
+      <div className="mb-6 text-center">
+        <h2 className="text-2xl font-bold text-slate-800">Intake Questionnaire</h2>
+        <p className="mt-1 text-sm text-slate-400">Please complete the following information before entering the participant dashboard.</p>
       </div>
 
-      {/* Error */}
-      {error && (
-        <div className="bg-rose-50 border border-rose-100 text-rose-700 text-sm px-4 py-2.5 rounded-lg mb-4">
-          {error}
+      {submitError && (
+        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {submitError}
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════
-          SECTION 1: DEMOGRAPHICS
-      ═══════════════════════════════════════════════ */}
-      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-        Personal Information
-      </p>
-
-      {/* Name — auto-filled from registration, read-only */}
-      <div className="mb-3.5">
-        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-          Name
-        </label>
-        <input
-          type="text"
-          className={`${inputClass} bg-slate-100 cursor-not-allowed text-slate-400`}
-          value="Auto-filled from registration"
-          readOnly
-        />
-        <p className="text-xs text-slate-400 mt-1">Auto-filled from your account</p>
-      </div>
-
-      {/* Row: DOB + Sex */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
-        <div>
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-            Date of Birth <span className="text-rose-500">*</span>
-          </label>
-          <input
-            type="date"
-            className={inputClass}
-            value={dob}
-            max={maxDob}
-            onChange={(e) => setDob(e.target.value)}
+      <div className="space-y-4">
+        {fields.map((field, index) => (
+          <QuestionCard
+            key={field.field_id}
+            index={index}
+            field={field}
+            value={normalizeFieldValue(field, answers[field.field_id])}
+            onChange={handleChange}
+            error={fieldErrors[field.field_id]}
+            maxDob={maxDob}
           />
-          {dobError && (
-            <p className="text-xs text-rose-500 mt-1">{dobError}</p>
-          )}
-        </div>
-        <div>
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-            Sex <span className="text-rose-500">*</span>
-          </label>
-          <ChipSelect options={['Male', 'Female']} value={sex} onChange={setSex} />
-        </div>
+        ))}
       </div>
 
-      {/* Pronouns — "Other" reveals a text input */}
-      <div className="mb-3.5">
-        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-          Preferred Pronouns <span className="text-rose-500">*</span>
-        </label>
-        <ChipSelect
-          options={['He/Him', 'She/Her', 'They/Them', 'Ze/Zir', 'Other']}
-          value={pronouns}
-          onChange={setPronouns}
-        />
-        {pronouns === 'Other' && (
-          <input
-            type="text"
-            className={`${inputClass} mt-2.5`}
-            placeholder="Enter your pronouns..."
-            maxLength={50}
-            value={pronounsOther}
-            onChange={onText(setPronounsOther, 50)}
-          />
-        )}
-      </div>
-
-      {/* Language */}
-      <div className="mb-3.5">
-        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-          Language Spoken at Home <span className="text-rose-500">*</span>
-        </label>
-        <Autocomplete
-          options={LANGUAGES}
-          value={languages}
-          onChange={setLanguages}
-          placeholder="Start typing to search languages..."
-          allowCustom
-          multi
-          inputClass={inputClass}
-        />
-      </div>
-
-      {/* Country of Origin */}
-      <div className="mb-3.5">
-        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-          Country of Origin <span className="text-rose-500">*</span>
-        </label>
-        <Autocomplete
-          options={COUNTRIES}
-          value={countryOfOrigin}
-          onChange={setCountryOfOrigin}
-          placeholder="Start typing to search countries..."
-          inputClass={inputClass}
-        />
-      </div>
-
-      {/* Marital Status */}
-      <div className="mb-3.5">
-        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-          Marital Status <span className="text-rose-500">*</span>
-        </label>
-        <ChipSelect
-          options={['Single', 'Married', 'Common-law', 'Separated', 'Divorced', 'Widowed']}
-          value={maritalStatus}
-          onChange={setMaritalStatus}
-        />
-      </div>
-
-      {/* Highest Education Level */}
-      <div>
-        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-          Highest Education Level <span className="text-rose-500">*</span>
-        </label>
-        <ChipSelect
-          options={['High school', 'Some college/university', "Bachelor's degree", "Master's degree", 'Doctoral degree', 'Trade/vocational']}
-          value={highestEducation}
-          onChange={setHighestEducation}
-        />
-      </div>
-
-      <hr className="border-slate-100 my-5" />
-
-      {/* ═══════════════════════════════════════════════
-          SECTION 2: LIFESTYLE QUESTIONS (1–13)
-      ═══════════════════════════════════════════════ */}
-      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-        Lifestyle &amp; Wellness Questions
-      </p>
-
-      {/* Q1 */}
-      <Q num={1} label="Who do you live with?">
-        <ChipSelect options={['Alone', 'With Family', 'With Friends', 'With Partner', 'With Roommates', 'Other']} value={q1} onChange={setQ1} />
-        {q1 === 'Other' && (
-          <input type="text" className={`${inputClass} mt-2.5`} placeholder="Please specify..." maxLength={200} value={q1Other} onChange={onText(setQ1Other, 200)} />
-        )}
-      </Q>
-
-      {/* Q2 */}
-      <Q num={2} label="Do you have any dependents?">
-        <ChipSelect options={['No', 'Yes']} value={q2} onChange={(v) => { setQ2(v); if (v === 'No') setQ2Count(''); }} />
-        {q2 === 'Yes' && (
-          <input type="number" className={`${inputClass} mt-2.5`} placeholder="How many dependents?" min={1} max={10} value={q2Count} onChange={(e) => {
-            const val = e.target.value;
-            if (val === '' || (parseInt(val, 10) >= 1 && parseInt(val, 10) <= 10)) setQ2Count(val);
-          }} />
-        )}
-      </Q>
-
-      {/* Q3 */}
-      <Q num={3} label="What is your employment status?">
-        <ChipSelect options={['Unemployed', 'Part-time', 'Full-time', 'Self-employed', 'Freelance', 'Student', 'Retired']} value={q4} onChange={setQ4} />
-      </Q>
-
-      <hr className="border-slate-100 my-5" />
-
-      {/* ── Navigation ── */}
-      <div className="flex gap-3">
+      <div className="mt-6 flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+        <p className="text-xs text-slate-400">
+          {fields.length - Object.keys(fieldErrors).length} of {fields.length} fields currently valid
+        </p>
         <button
           type="button"
-          className="px-5 py-3 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-          onClick={() => navigate('/onboarding/consent')}
-        >
-          ← Back
-        </button>
-        <button
-          type="button"
-          className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-colors ${
-            isValid() && !isSubmitting
-              ? 'bg-blue-600 hover:bg-blue-700 text-white'
-              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-          }`}
-          disabled={!isValid() || isSubmitting}
           onClick={handleSubmit}
+          disabled={submitting}
+          className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isSubmitting ? 'Submitting...' : 'Submit &amp; Complete Onboarding'}
+          {submitting ? "Submitting..." : "Submit Intake"}
         </button>
       </div>
-    </>
+    </div>
   );
 }

@@ -47,6 +47,8 @@ class SurveyDetailOut(BaseModel):
     form_id: UUID
     title: str
     description: Optional[str] = None
+    cadence: str = "once"
+    cadence_anchor_at: Optional[datetime] = None
     version: int
     parent_form_id: Optional[UUID] = None
     status: Optional[str] = None
@@ -62,8 +64,11 @@ class SurveyListItem(BaseModel):
     form_id: UUID
     title: str
     description: Optional[str] = None
+    cadence: str = "once"
+    cadence_anchor_at: Optional[datetime] = None
     version: Optional[int] = 1
     parent_form_id: Optional[UUID] = None
+    created_by: Optional[UUID] = None
     status: Optional[str] = None
     created_at: Optional[datetime] = None
     modified_at: Optional[datetime] = None
@@ -73,15 +78,28 @@ class SurveyListItem(BaseModel):
     submission_count: int = 0
     deployed_groups: List[str] = []
     deployed_group_ids: List[UUID] = []
+    deployed_group_deployers: Dict[str, Optional[str]] = {}
+    deployed_group_deployed_at: Dict[str, Optional[datetime]] = {}
 
     class Config:
         from_attributes = True
+
+class SurveyListPage(BaseModel):
+    items: List[SurveyListItem] = []
+    total_count: int = 0
+    page: int = 1
+    page_size: int = 10
+    total_pages: int = 1
+    counts: Dict[str, int] = Field(default_factory=dict)
 
 class ParticipantSurveyItem(BaseModel):
     form_id: UUID
     title: str
     description: Optional[str] = None
     status: str # NEW, IN_PROGRESS, COMPLETED
+    cadence: str = "once"
+    cycle_key: Optional[str] = None
+    cycle_label: Optional[str] = None
     version: Optional[int] = 1
     deployed_at: Optional[datetime] = None
     submitted_at: Optional[datetime] = None
@@ -91,3 +109,8 @@ class ParticipantSurveyItem(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PublishSurveyRequest(BaseModel):
+    group_id: UUID
+    cadence: str = "once"

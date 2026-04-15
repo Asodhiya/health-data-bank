@@ -1,13 +1,17 @@
 import { Link, useOutletContext } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
-import { PieChart, Pie, Cell } from "recharts";
+import { PieChart, Pie } from "recharts";
+import MedicalCrossIcon from "../../components/MedicalCrossIcon";
+import GuideTooltip from "../../components/GuideTooltip";
 
 const DonutRing = ({ filled, total, color, label, sublabel, children }) => {
   const remaining = Math.max(0, total - filled);
   const isEmpty = total === 0;
-  const data = isEmpty ? [{ value: 1 }] : [{ value: filled }, { value: remaining }];
-  const ringColors = isEmpty ? ["#e2e8f0"] : [color, "#e2e8f0"];
+  const data = isEmpty
+    ? [{ value: 1, fill: "#DBEAFE" }]
+    : [{ value: filled, fill: color }, { value: remaining, fill: "#DBEAFE" }];
   const pct = total > 0 ? Math.round((filled / total) * 100) : 0;
 
   return (
@@ -24,56 +28,52 @@ const DonutRing = ({ filled, total, color, label, sublabel, children }) => {
             endAngle={-270}
             dataKey="value"
             strokeWidth={3}
-            stroke="#f8fafc"
+            stroke="#F8FAFC"
             animationDuration={900}
-          >
-            {ringColors.map((c, i) => <Cell key={i} fill={c} />)}
-          </Pie>
+          />
         </PieChart>
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="text-4xl font-black text-slate-800 leading-none">
-            {pct}<span className="text-lg font-medium text-slate-400">%</span>
+          <span className="text-4xl font-black leading-none" style={{ color: "#1E3A8A" }}>
+            {pct}<span className="text-lg font-medium" style={{ color: "#3B82F6" }}>%</span>
           </span>
-          <span className="text-sm text-slate-500 mt-1 font-semibold">{filled} / {total}</span>
+          <span className="text-sm mt-1 font-semibold" style={{ color: "#3B82F6" }}>{filled} / {total}</span>
         </div>
       </div>
-      <p className="text-sm font-bold text-slate-700">{label}</p>
-      <p className="text-xs text-slate-400">{sublabel}</p>
+      <p className="text-sm font-bold" style={{ color: "#1E3A8A" }}>{label}</p>
+      <p className="text-xs" style={{ color: "#3B82F6" }}>{sublabel}</p>
       {children && <div className="mt-1 w-full">{children}</div>}
     </div>
   );
 };
 
 export default function ParticipantDashboard() {
-  // For now we are setting up our use mock data here :
-
   const { user } = useOutletContext();
 
   const [surveys, setSurveys] = useState([]);
   const [goals, setGoals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [weather, setWeather] = useState(null);
+  const [careTeam, setCareTeam] = useState(null);
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        setLoading(true);
-        const [surveyData, goalsData] = await Promise.all([
-          api.getAssignedSurveys(),
-          api.listParticipantGoals().catch(() => []),
-        ]);
-
-        setSurveys(surveyData || []);
-        setGoals(Array.isArray(goalsData) ? goalsData : []);
-      } catch (err) {
-        console.error("Dashboard Sync Error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDashboardData();
+  const fetchDashboardData = useCallback(async ({ background = false } = {}) => {
+    try {
+      if (!background) setLoading(true);
+      const [surveyData, goalsData, careTeamData] = await Promise.all([
+        api.getAssignedSurveys(),
+        api.listParticipantGoals().catch(() => []),
+        api.participantGetCareTeam().catch(() => null),
+      ]);
+      setSurveys(surveyData || []);
+      setGoals(Array.isArray(goalsData) ? goalsData : []);
+      setCareTeam(careTeamData);
+    } catch (err) {
+      console.error("Dashboard Sync Error:", err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  usePolling(fetchDashboardData, 30_000);
 
   // Weather — Open-Meteo (free, no API key), falls back to time-of-day if denied
   useEffect(() => {
@@ -124,14 +124,12 @@ export default function ParticipantDashboard() {
     );
   }, []);
 
-  // Current Date:
   const todayFormatted = new Date().toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
 
-  // greetings on time
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return { text: "Good morning", icon: "☀️" };
@@ -141,18 +139,21 @@ export default function ParticipantDashboard() {
 
   const greetings = getGreeting();
 
-  // Per-status breakdown from the rich survey data we already fetch
-  const completedSurveys = surveys.filter((s) => s.status === "COMPLETED").length;
-  const inProgressSurveys = surveys.filter((s) => s.status === "IN_PROGRESS").length;
-  const newSurveys = surveys.filter((s) => s.status === "NEW").length;
+  const { completedSurveys, inProgressSurveys, newSurveys } = surveys.reduce(
+    (acc, s) => {
+      if (s.status === "COMPLETED") acc.completedSurveys++;
+      else if (s.status === "IN_PROGRESS") acc.inProgressSurveys++;
+      else if (s.status === "NEW") acc.newSurveys++;
+      return acc;
+    },
+    { completedSurveys: 0, inProgressSurveys: 0, newSurveys: 0 }
+  );
   const totalSurveys = surveys.length;
 
-  // Goal counts derived from individual goal statuses (accurate for incremental + direction goals)
   const activeGoalsCount = goals.length;
   const goalsMetCount = goals.filter((g) => g.is_completed).length;
   const goalsRemainingCount = activeGoalsCount - goalsMetCount;
 
-  // Daily success card: total assigned surveys vs goals
   const todaySurveyTarget = totalSurveys;
   const totalTarget = todaySurveyTarget + activeGoalsCount;
   const totalDone = completedSurveys + goalsMetCount;
@@ -160,7 +161,6 @@ export default function ParticipantDashboard() {
     totalTarget > 0 ? Math.round((totalDone / totalTarget) * 100) : 0;
   const tasksLeft = totalTarget - totalDone;
 
-  // Daily Success — contextual status label based on progress
   const getDailyStatus = () => {
     if (totalTarget === 0) return null;
     if (dailyPercent === 100) return { label: "All done!", color: "text-emerald-600" };
@@ -171,7 +171,6 @@ export default function ParticipantDashboard() {
   };
   const dailyStatus = getDailyStatus();
 
-  // Health tip pill — survey nudge overrides time-based tip
   const getHealthTip = () => {
     const pendingCount = newSurveys + inProgressSurveys;
     if (!loading && pendingCount > 0) {
@@ -196,7 +195,6 @@ export default function ParticipantDashboard() {
   };
   const healthTip = getHealthTip();
 
-  // Keyword-based survey icon — scans title for health topic keywords
   const getSurveyIcon = (title = "") => {
     const t = title.toLowerCase();
     if (/blood|pressure|heart|cardiac|pulse/.test(t))  return "❤️";
@@ -213,35 +211,30 @@ export default function ParticipantDashboard() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 p-2 md:p-0 bg-slate-50 min-h-screen">
+    <div className="max-w-6xl mx-auto space-y-6 p-2 md:p-0 min-h-screen" style={{ background: "#F8FAFC" }}>
       {/* STEP 1: TOP WELCOME BANNER */}
-      <div className="bg-white rounded-2xl p-6 shadow-md shadow-slate-100 border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-        {/* Left Side: Greeting & Pill */}
+      <div className="rounded-2xl p-6 shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-6" style={{ background: "#fff", border: "1px solid #DBEAFE", boxShadow: "0 4px 16px 0 #DBEAFE" }}>
+        {/* Left: Greeting & tip */}
         <div className="space-y-3">
-          <h1 className="text-2xl md:text-3xl font-bold text-slate-800">
+          <h1 className="text-2xl md:text-3xl font-bold" style={{ color: "#1E3A8A" }}>
             {greetings.text}, {user?.first_name || "there"}! {greetings.icon}
           </h1>
-
-          {/* Dynamic Health Tip Pill */}
           <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-500 ${healthTip.color}`}>
             <span>{healthTip.icon}</span>
             {healthTip.text}
           </div>
         </div>
-
-        {/* Right Side: Weather & Date */}
-        <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100 w-full md:w-auto">
+        {/* Right: Weather & Date */}
+        <div className="flex items-center gap-4 p-4 rounded-xl w-full md:w-auto" style={{ background: "#F8FAFC", border: "1px solid #DBEAFE" }}>
           <div className={`text-4xl leading-none ${weather?.color ?? "text-slate-300"}`}>
             {weather ? weather.icon : "…"}
           </div>
           <div>
-            <p className="text-sm font-medium text-slate-500">
+            <p className="text-sm font-medium" style={{ color: "#3B82F6" }}>
               {weather ? weather.label : "Loading…"}
-              {weather?.temp != null && (
-                <span className="ml-1.5 text-slate-700 font-semibold">{weather.temp}°C</span>
-              )}
+              {weather?.temp != null && <span className="ml-1.5 font-semibold" style={{ color: "#1E3A8A" }}>{weather.temp}°C</span>}
             </p>
-            <p className="text-lg font-bold text-slate-800">{todayFormatted}</p>
+            <p className="text-lg font-bold" style={{ color: "#1E3A8A" }}>{todayFormatted}</p>
           </div>
         </div>
       </div>
@@ -249,68 +242,71 @@ export default function ParticipantDashboard() {
       {/* STEP 2: HEALTH OVERVIEW & PROGRESS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Activity Overview — Donut Rings */}
-        <div className="lg:col-span-2 bg-white rounded-2xl p-6 shadow-md shadow-slate-100 border border-slate-100 flex flex-col">
-          <div className="mb-6">
-            <h2 className="text-lg font-bold text-slate-800">Daily Activity</h2>
-            <p className="text-sm text-slate-400 mt-1">Today's progress at a glance</p>
+        <div className="lg:col-span-2 rounded-2xl p-6 shadow-md flex flex-col" style={{ background: "#fff", border: "1px solid #DBEAFE", boxShadow: "0 4px 16px 0 #DBEAFE" }}>
+          <div className="mb-6 flex items-start justify-between">
+            <div>
+              <h2 className="text-lg font-bold" style={{ color: "#1E3A8A" }}>Daily Activity</h2>
+              <p className="text-sm mt-1" style={{ color: "#3B82F6" }}>Today's progress at a glance</p>
+            </div>
+            <GuideTooltip tip="These rings show how many surveys you've completed and how many health goals you've met today." position="left">
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full cursor-default select-none" style={{ background: "#EFF6FF", color: "#3B82F6" }}>?</span>
+            </GuideTooltip>
           </div>
 
           <div className="flex-1 flex flex-col sm:flex-row items-center justify-around gap-10 py-4">
             {loading ? (
               <div className="flex gap-10 w-full justify-around">
                 <div className="flex flex-col items-center gap-3">
-                  <div className="w-44 h-44 rounded-full bg-slate-100 animate-pulse" />
-                  <div className="h-3 w-24 bg-slate-100 rounded-full animate-pulse" />
+                  <div className="w-44 h-44 rounded-full animate-pulse" style={{ background: "#DBEAFE" }} />
+                  <div className="h-3 w-24 rounded-full animate-pulse" style={{ background: "#DBEAFE" }} />
                 </div>
                 <div className="flex flex-col items-center gap-3">
-                  <div className="w-44 h-44 rounded-full bg-slate-100 animate-pulse" />
-                  <div className="h-3 w-24 bg-slate-100 rounded-full animate-pulse" />
+                  <div className="w-44 h-44 rounded-full animate-pulse" style={{ background: "#DBEAFE" }} />
+                  <div className="h-3 w-24 rounded-full animate-pulse" style={{ background: "#DBEAFE" }} />
                 </div>
               </div>
             ) : (
               <>
-                {/* Survey ring — uses full assigned list for a stable denominator */}
                 <DonutRing
                   filled={completedSurveys}
                   total={totalSurveys}
-                  color="#7dd3fc"
+                  color="#3B82F6"
                   label="Assigned Surveys"
                   sublabel="completed overall"
                 >
                   <div className="flex justify-center gap-3 text-xs mt-1">
-                    <span className="flex items-center gap-1 text-slate-500">
-                      <span className="inline-block w-2 h-2 rounded-full bg-sky-300" />
+                    <span className="flex items-center gap-1" style={{ color: "#3B82F6" }}>
+                      <span className="inline-block w-2 h-2 rounded-full" style={{ background: "#3B82F6" }} />
                       {completedSurveys} Done
                     </span>
-                    <span className="flex items-center gap-1 text-slate-500">
-                      <span className="inline-block w-2 h-2 rounded-full bg-blue-300" />
+                    <span className="flex items-center gap-1" style={{ color: "#3B82F6" }}>
+                      <span className="inline-block w-2 h-2 rounded-full" style={{ background: "#93C5FD" }} />
                       {inProgressSurveys} In Progress
                     </span>
-                    <span className="flex items-center gap-1 text-slate-500">
-                      <span className="inline-block w-2 h-2 rounded-full bg-slate-300" />
+                    <span className="flex items-center gap-1" style={{ color: "#93C5FD" }}>
+                      <span className="inline-block w-2 h-2 rounded-full" style={{ background: "#DBEAFE" }} />
                       {newSurveys} New
                     </span>
                   </div>
                 </DonutRing>
 
-                <div className="hidden sm:block h-32 w-px bg-slate-100" />
-                <div className="block sm:hidden w-32 h-px bg-slate-100" />
+                <div className="hidden sm:block h-32 w-px" style={{ background: "#DBEAFE" }} />
+                <div className="block sm:hidden w-32 h-px" style={{ background: "#DBEAFE" }} />
 
-                {/* Goals ring — today's target vs met */}
                 <DonutRing
                   filled={goalsMetCount}
                   total={activeGoalsCount}
-                  color="#86efac"
+                  color="#1E3A8A"
                   label="Health Goals"
                   sublabel="met today"
                 >
                   <div className="flex justify-center gap-3 text-xs mt-1">
-                    <span className="flex items-center gap-1 text-slate-500">
-                      <span className="inline-block w-2 h-2 rounded-full bg-green-300" />
+                    <span className="flex items-center gap-1" style={{ color: "#1E3A8A" }}>
+                      <span className="inline-block w-2 h-2 rounded-full" style={{ background: "#1E3A8A" }} />
                       {goalsMetCount} Met
                     </span>
-                    <span className="flex items-center gap-1 text-slate-500">
-                      <span className="inline-block w-2 h-2 rounded-full bg-slate-300" />
+                    <span className="flex items-center gap-1" style={{ color: "#3B82F6" }}>
+                      <span className="inline-block w-2 h-2 rounded-full" style={{ background: "#DBEAFE" }} />
                       {goalsRemainingCount} Remaining
                     </span>
                   </div>
@@ -321,20 +317,25 @@ export default function ParticipantDashboard() {
         </div>
 
         {/* Daily Success Card */}
-        <div className={`rounded-2xl p-6 shadow-md border flex flex-col justify-between h-full transition-colors duration-500 ${!loading && totalTarget === 0 ? "bg-emerald-50 border-emerald-100 shadow-emerald-100" : "bg-white border-slate-100 shadow-slate-100"}`}>
-          <div>
-            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Today's Progress</p>
-            <h2 className="text-lg font-bold text-slate-800 mt-0.5">Daily Success</h2>
+        <div className={`rounded-2xl p-6 shadow-md flex flex-col justify-between h-full transition-colors duration-500 ${!loading && totalTarget === 0 ? "bg-emerald-50 border-emerald-100" : ""}`}
+          style={!loading && totalTarget === 0 ? {} : { background: "#fff", border: "1px solid #DBEAFE", boxShadow: "0 4px 16px 0 #DBEAFE" }}>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: "#3B82F6" }}>Today's Progress</p>
+              <h2 className="text-lg font-bold mt-0.5" style={{ color: "#1E3A8A" }}>Daily Success</h2>
+            </div>
+            <GuideTooltip tip="Your overall daily score — combines completed surveys and goals into one percentage." position="left">
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full cursor-default select-none" style={{ background: "#EFF6FF", color: "#3B82F6" }}>?</span>
+            </GuideTooltip>
           </div>
 
           {loading ? (
             <div className="my-6 space-y-4">
-              <div className="h-12 w-24 bg-slate-100 rounded-xl animate-pulse mx-auto" />
-              <div className="h-3 w-40 bg-slate-100 rounded-full animate-pulse mx-auto" />
-              <div className="h-3 w-32 bg-slate-100 rounded-full animate-pulse mx-auto" />
+              <div className="h-12 w-24 rounded-xl animate-pulse mx-auto" style={{ background: "#DBEAFE" }} />
+              <div className="h-3 w-40 rounded-full animate-pulse mx-auto" style={{ background: "#DBEAFE" }} />
+              <div className="h-3 w-32 rounded-full animate-pulse mx-auto" style={{ background: "#DBEAFE" }} />
             </div>
           ) : totalTarget === 0 ? (
-            /* REST DAY / ALL CAUGHT UP EMPTY STATE */
             <div className="my-6 text-center space-y-3">
               <p className="text-2xl font-black text-emerald-600 tracking-tight">
                 You're all caught up!
@@ -347,20 +348,17 @@ export default function ParticipantDashboard() {
             </div>
           ) : (
             <div className="my-6 text-center space-y-2">
-              {/* Contextual status label */}
               <p className={`text-xs font-bold uppercase tracking-widest ${dailyStatus?.color}`}>
                 {dailyStatus?.label}
               </p>
-              {/* Big percentage */}
               <div>
-                <span className="text-6xl font-black text-slate-800 tracking-tighter">
+                <span className="text-6xl font-black tracking-tighter" style={{ color: "#1E3A8A" }}>
                   {dailyPercent}
                 </span>
-                <span className="text-2xl text-slate-400 ml-1">%</span>
+                <span className="text-2xl ml-1" style={{ color: "#3B82F6" }}>%</span>
               </div>
-              {/* Survey / Goal split pills */}
               <div className="flex justify-center gap-3 pt-1">
-                <span className="flex items-center gap-1.5 bg-sky-50 text-sky-700 px-2.5 py-1 rounded-lg text-xs font-semibold border border-sky-100">
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: "#EFF6FF", color: "#1E3A8A", border: "1px solid #DBEAFE" }}>
                   📋 {completedSurveys} / {todaySurveyTarget} surveys
                 </span>
                 <span className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg text-xs font-semibold border border-emerald-100">
@@ -370,24 +368,23 @@ export default function ParticipantDashboard() {
             </div>
           )}
 
-          <div className="space-y-4 pt-6 border-t border-slate-100">
+          <div className="space-y-4 pt-6" style={{ borderTop: "1px solid #DBEAFE" }}>
             {loading ? (
-              <div className="w-full bg-slate-100 h-2 rounded-full animate-pulse" />
+              <div className="w-full h-2 rounded-full animate-pulse" style={{ background: "#DBEAFE" }} />
             ) : totalTarget === 0 ? (
-              /* Full green bar for rest day */
               <div className="w-full bg-emerald-100 h-2.5 rounded-full overflow-hidden shadow-inner">
                 <div className="bg-gradient-to-r from-emerald-400 to-emerald-500 h-full w-full rounded-full shadow-sm" />
               </div>
             ) : (
               <div className="space-y-1.5">
-                <div className="flex justify-between text-xs text-slate-400 font-medium px-0.5">
+                <div className="flex justify-between text-xs font-medium px-0.5" style={{ color: "#3B82F6" }}>
                   <span>{totalDone} done</span>
                   <span>{tasksLeft} left</span>
                 </div>
-                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "#DBEAFE" }}>
                   <div
-                    className="bg-gradient-to-r from-sky-400 to-blue-500 h-full transition-all duration-1000 ease-out rounded-full"
-                    style={{ width: `${dailyPercent}%` }}
+                    className="h-full transition-all duration-1000 ease-out rounded-full"
+                    style={{ width: `${dailyPercent}%`, background: "linear-gradient(to right, #3B82F6, #1E3A8A)" }}
                   />
                 </div>
               </div>
@@ -395,53 +392,118 @@ export default function ParticipantDashboard() {
           </div>
         </div>
       </div>
+
+      {/* STEP 2.5: CARE TEAM */}
+      {careTeam?.groups?.length > 0 && (() => {
+        const group = careTeam.groups[0];
+        const caretaker = group.caretaker;
+        return (
+          <div className="rounded-2xl p-6 shadow-md" style={{ background: "#fff", border: "1px solid #DBEAFE", boxShadow: "0 4px 16px 0 #DBEAFE" }}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              {/* Group info */}
+              <div className="flex items-center gap-4">
+                <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 64 64" fill="none" className="shrink-0">
+                  <defs>
+                    <linearGradient id="ct-bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+                      <stop offset="0%" stopColor="#38bdf8" />
+                      <stop offset="100%" stopColor="#0284c7" />
+                    </linearGradient>
+                    <clipPath id="ct-clip">
+                      <rect x="4" y="4" width="56" height="56" rx="14" />
+                    </clipPath>
+                  </defs>
+                  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#ct-bg)" />
+                  <rect x="4" y="4" width="56" height="28" rx="14" fill="white" fillOpacity="0.08" />
+                  <g clipPath="url(#ct-clip)">
+                    <polyline points="4,30 14,30 18,18 23,40 27,24 31,33 34,28 38,28 42,30 60,30" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.95" />
+                  </g>
+                  <line x1="12" y1="40" x2="52" y2="40" stroke="white" strokeWidth="0.75" strokeOpacity="0.3" />
+                  <text x="32" y="54" textAnchor="middle" fontFamily="'Arial Black', Arial, sans-serif" fontWeight="900" fontSize="13" letterSpacing="1.5" fill="white" fillOpacity="0.97">HDB</text>
+                </svg>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: "#3B82F6" }}>Your Group</p>
+                  <p className="text-base font-bold leading-tight" style={{ color: "#1E3A8A" }}>{group.group_name}</p>
+                  {group.group_description && (
+                    <p className="text-xs mt-0.5 line-clamp-1" style={{ color: "#3B82F6" }}>{group.group_description}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Caretaker */}
+              {caretaker ? (
+                <div className="flex items-center gap-3 rounded-xl px-4 py-2.5 sm:ml-auto" style={{ background: "#F8FAFC", border: "1px solid #DBEAFE" }}>
+                  <MedicalCrossIcon size={36} />
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-widest leading-none mb-0.5" style={{ color: "#3B82F6" }}>Care Lead</p>
+                    <p className="text-sm font-bold leading-tight" style={{ color: "#1E3A8A" }}>{caretaker.name}</p>
+                    {(caretaker.title || caretaker.specialty) && (
+                      <p className="text-xs leading-tight mt-0.5" style={{ color: "#3B82F6" }}>
+                        {[caretaker.title, caretaker.specialty].filter(Boolean).join(" · ")}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 rounded-xl px-4 py-2.5 sm:ml-auto" style={{ background: "#F8FAFC", border: "1px solid #DBEAFE" }}>
+                  <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#DBEAFE", color: "#3B82F6" }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                  </div>
+                  <p className="text-sm font-medium" style={{ color: "#3B82F6" }}>No caretaker assigned yet</p>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* STEP 3: SURVEY TEMPLATES CAROUSEL */}
-      <div className="bg-slate-800 rounded-2xl p-6 md:p-8 shadow-sm relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -translate-y-1/2 translate-x-1/4 pointer-events-none"></div>
-        {/* Section Header & Arrow Buttons */}
-        <div className="flex justify-between items-end mb-6 relative z-10">
+      <div className="rounded-2xl p-6 md:p-8 shadow-sm relative overflow-hidden" style={{ background: "#1E3A8A" }}>
+        <div className="absolute top-0 right-0 w-64 h-64 rounded-full -translate-y-1/2 translate-x-1/4 pointer-events-none" style={{ background: "#3B82F6", opacity: 0.12 }} />
+        <div className="flex justify-between items-start mb-6 relative z-10">
           <div>
-            <h2 className="text-xl font-bold text-white">
-              Daily Health Surveys
-            </h2>
-            <p className="text-slate-400 text-sm mt-1">
+            <h2 className="text-xl font-bold text-white">Daily Health Surveys</h2>
+            <p className="text-sm mt-1" style={{ color: "#DBEAFE" }}>
               Select a template to log your data for today.
             </p>
           </div>
-
+          <GuideTooltip tip="A quick way to fill in and view your daily health surveys assigned by your care team." position="left">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full cursor-default select-none mt-1" style={{ background: "rgba(219,234,254,0.15)", color: "#DBEAFE", border: "1px solid rgba(219,234,254,0.3)" }}>?</span>
+          </GuideTooltip>
         </div>
-        {/* Horizontal Scroll Container */}
         <div className="flex gap-5 overflow-x-auto pb-4 snap-x relative z-10 custom-scrollbar">
           {loading ? (
-            <p className="text-white animate-pulse">
-              Checking for assigned surveys... 🔍
-            </p>
-          ) : surveys && surveys.length > 0 ? ( // 👈 Use 'surveys' here
+            <p className="text-white animate-pulse">Checking for assigned surveys... 🔍</p>
+          ) : surveys && surveys.length > 0 ? (
             surveys.map((survey) => (
               <div
                 key={survey.form_id}
-                className="min-w-[260px] bg-white rounded-xl p-5 shadow-sm snap-start flex flex-col border border-slate-100"
+                className="min-w-[260px] rounded-xl p-5 shadow-sm snap-start flex flex-col"
+                style={{ background: "#fff", border: "1px solid #DBEAFE" }}
               >
-                <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mb-4 text-xl">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center mb-4 text-xl" style={{ background: "#EFF6FF", color: "#3B82F6" }}>
                   {getSurveyIcon(survey.title)}
                 </div>
-                <h3 className="text-lg font-bold text-slate-800">
+                <h3 className="text-lg font-bold" style={{ color: "#1E3A8A" }}>
                   {survey.title}
                 </h3>
-                <p className="text-sm text-slate-500 mt-1 mb-6 flex-1 line-clamp-2">
+                <p className="text-sm mt-1 mb-6 flex-1 line-clamp-2" style={{ color: "#3B82F6" }}>
                   {survey.description || "Daily health tracking survey."}
                 </p>
                 {survey.status === "COMPLETED" ? (
                   <Link
                     to={`/participant/surveys/${survey.form_id}`}
-                    className="w-full text-center bg-sky-400 hover:bg-sky-500 text-white py-2 rounded-lg font-bold transition-colors shadow-sm block"
+                    className="w-full text-center py-2 rounded-lg font-bold transition-colors shadow-sm block text-white"
+                    style={{ background: "#3B82F6" }}
                   >
                     View Entry
                   </Link>
                 ) : (
                   <Link
                     to={`/participant/surveys/${survey.form_id}`}
-                    className="w-full text-center bg-slate-700 hover:bg-slate-800 text-white py-2 rounded-lg font-bold transition-colors shadow-sm block"
+                    className="w-full text-center py-2 rounded-lg font-bold transition-colors shadow-sm block text-white"
+                    style={{ background: "#1E3A8A" }}
                   >
                     Start Entry
                   </Link>
@@ -449,17 +511,13 @@ export default function ParticipantDashboard() {
               </div>
             ))
           ) : (
-            <div className="min-w-[260px] w-full bg-white/10 rounded-xl p-8 text-center border border-white/20 backdrop-blur-sm">
+            <div className="min-w-[260px] w-full rounded-xl p-8 text-center backdrop-blur-sm" style={{ background: "rgba(219,234,254,0.12)", border: "1px solid rgba(219,234,254,0.25)" }}>
               <span className="text-4xl mb-3 block">🎉</span>
-              <h3 className="text-xl font-bold text-white">
-                You're all caught up!
-              </h3>
-              <p className="text-slate-400 mt-2">
-                No surveys assigned today. Enjoy your day off!
-              </p>
+              <h3 className="text-xl font-bold text-white">You're all caught up!</h3>
+              <p className="mt-2" style={{ color: "#DBEAFE" }}>No surveys assigned today. Enjoy your day off!</p>
             </div>
           )}
-        </div>{" "}
+        </div>
       </div>
     </div>
   );

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import User, GroupMember, Group, CaretakerProfile, ParticipantProfile
 from sqlalchemy import select
 from app.db.session import get_db
-from app.core.dependency import require_permissions, check_current_user
+from app.core.dependency import require_permissions, check_current_user, get_rls_db
 from app.core.permissions import GOAL_VIEW_ALL, GOAL_ADD, GOAL_EDIT, GOAL_DELETE
 from app.db.queries.Queries import ParticipantQuery, GoalTemplateQuery, CaretakersQuery, get_participant_id
 from app.schemas.schemas import HealthGoalUpdate, GoalProgressLog, GoalFromTemplateCreate
@@ -32,7 +32,7 @@ router = APIRouter()
 
 @router.get("/profile")
 async def get_participant_profile(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Return the authenticated participant's profile fields."""
@@ -61,7 +61,7 @@ async def get_participant_profile(
 @router.patch("/profile")
 async def update_participant_profile(
     payload: ParticipantProfileUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(check_current_user),
 ):
     """Update the authenticated participant's profile fields."""
@@ -114,7 +114,7 @@ async def browse_goal_templates(
 
 @router.get("/goals")
 async def list_goals(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
 ):
     """
@@ -130,7 +130,7 @@ async def list_goals(
 async def add_goal_from_template(
     template_id: uuid.UUID,
     payload: GoalFromTemplateCreate | None = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GOAL_ADD)),
 ):
     """
@@ -151,7 +151,7 @@ async def add_goal_from_template(
 @router.get("/goals/{goal_id}")
 async def get_goal(
     goal_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
 ):
     """
@@ -169,7 +169,7 @@ async def get_goal(
 @router.get("/goals/{goal_id}/progress")
 async def get_goal_progress(
     goal_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
 ):
     """
@@ -186,7 +186,7 @@ async def get_goal_progress(
 async def update_goal(
     goal_id: uuid.UUID,
     payload: HealthGoalUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GOAL_EDIT)),
 ):
     """
@@ -203,7 +203,7 @@ async def update_goal(
 @router.delete("/goals/{goal_id}")
 async def delete_goal(
     goal_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GOAL_DELETE)),
 ):
     """
@@ -213,6 +213,16 @@ async def delete_goal(
     """
     participant_id = get_participant_id(current_user)
     await ParticipantQuery(db).delete_goal(goal_id, participant_id)
+    await create_notification(
+        db=db,
+        user_id=current_user.user_id,
+        notification_type="goal",
+        title="Goal removed",
+        message="A health goal has been removed from your dashboard.",
+        role_target="participant",
+        source_type="goal_deleted",
+        source_id=goal_id,
+    )
     return {"detail": "Goal deleted"}
 
 
@@ -220,7 +230,7 @@ async def delete_goal(
 async def get_goal_logs(
     goal_id: uuid.UUID,
     days: int = 7,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
 ):
     """
@@ -237,7 +247,7 @@ async def get_goal_logs(
 async def log_goal_progress(
     goal_id: uuid.UUID,
     payload: GoalProgressLog,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GOAL_EDIT)),
 ):
     """
@@ -279,6 +289,55 @@ async def log_goal_progress(
     return data_point
 
 
+@router.get("/my-care-team")
+async def get_my_care_team(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
+):
+    """Return the group(s) and caretaker(s) the authenticated participant belongs to."""
+    participant_id = get_participant_id(current_user)
+
+    rows = await db.execute(
+        select(
+            Group.group_id,
+            Group.name.label("group_name"),
+            Group.description.label("group_description"),
+            User.first_name.label("caretaker_first_name"),
+            User.last_name.label("caretaker_last_name"),
+            User.email.label("caretaker_email"),
+            CaretakerProfile.title.label("caretaker_title"),
+            CaretakerProfile.specialty.label("caretaker_specialty"),
+        )
+        .select_from(GroupMember)
+        .join(Group, Group.group_id == GroupMember.group_id)
+        .outerjoin(CaretakerProfile, CaretakerProfile.caretaker_id == Group.caretaker_id)
+        .outerjoin(User, User.user_id == CaretakerProfile.user_id)
+        .where(GroupMember.participant_id == participant_id)
+        .where(GroupMember.left_at.is_(None))
+    )
+
+    results = rows.all()
+    if not results:
+        return {"groups": []}
+
+    return {
+        "groups": [
+            {
+                "group_id": str(row.group_id),
+                "group_name": row.group_name,
+                "group_description": row.group_description,
+                "caretaker": {
+                    "name": f"{row.caretaker_first_name or ''} {row.caretaker_last_name or ''}".strip() or None,
+                    "email": row.caretaker_email,
+                    "title": row.caretaker_title,
+                    "specialty": row.caretaker_specialty,
+                } if row.caretaker_email else None,
+            }
+            for row in results
+        ]
+    }
+
+
 @router.get("/feedback", response_model=list[FeedbackItem])
 async def list_my_feedback(
     db: AsyncSession = Depends(get_db),
@@ -302,7 +361,7 @@ async def list_my_feedback(
 
 @router.get("/notifications", response_model=list[NotificationItem])
 async def list_notifications(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
 ):
     rows = await list_notifications_for_user(db, current_user.user_id, role_target="participant")
@@ -324,7 +383,7 @@ async def list_notifications(
 @router.patch("/notifications/{notification_id}", response_model=NotificationItem)
 async def mark_notification_read(
     notification_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_rls_db),
     current_user: User = Depends(require_permissions(GOAL_VIEW_ALL)),
 ):
     n = await mark_notification_read_for_user(db, notification_id, current_user.user_id)

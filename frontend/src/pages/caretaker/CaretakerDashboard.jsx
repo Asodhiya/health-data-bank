@@ -1,18 +1,11 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useOutletContext, useNavigate } from "react-router-dom";
+import { usePolling } from "../../hooks/usePolling";
+import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import NotificationsPanel from "../../components/NotificationsPanel";
-
-// ─── Utilities ──────────────────────────────────────────────────────────────────
-
-function daysSince(d) {
-  if (!d) return null;
-  const diff = Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
-  if (diff === 0) return "Today";
-  if (diff === 1) return "Yesterday";
-  return `${diff}d ago`;
-}
+import { daysSince } from "../../utils/dateFormatters";
+import SVGIcon from "../../components/SVGIcon";
 
 function getDotColor(status) {
   switch (status) {
@@ -34,13 +27,9 @@ function getStatusLabel(status) {
   }
 }
 
-// ─── SVG Icons ──────────────────────────────────────────────────────────────────
+// ─── SVG Icons (using shared SVGIcon wrapper) ──────────────────────────────────
 
-const Ico = ({ d, size = 20, sw = 1.8, stroke = "currentColor" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={stroke}
-    strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">{d}</svg>
-);
-
+const Ico = SVGIcon;
 const UsersIco = () => <Ico d={<><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>} />;
 const ActivityIco = () => <Ico d={<><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></>} />;
 const AlertIco = () => <Ico d={<><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></>} />;
@@ -249,7 +238,6 @@ function StatCards({
 // ─── Main Dashboard ─────────────────────────────────────────────────────────────
 
 export default function CaretakerDashboard() {
-  useOutletContext();
   const navigate = useNavigate();
   const [groups, setGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("all");
@@ -258,49 +246,95 @@ export default function CaretakerDashboard() {
   const [participants, setParticipants] = useState([]);
   const [activityCounts, setActivityCounts] = useState({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 });
   const [loading, setLoading] = useState(true);
+  const [countsReady, setCountsReady] = useState(false);
+  const [error, setError] = useState(null);
   const selectedGroupQuery = selectedGroupId === "all" ? null : selectedGroupId;
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  // B23: previously this loader was a single useCallback whose dep array
+  // included both `selectedGroupQuery` AND `groups.length`. On initial mount
+  // groups.length was 0, the callback ran, fetched groups, set them — which
+  // changed groups.length and recreated the callback, which the useEffect
+  // then re-fired. Net result: every page load fired
+  // caretakerListParticipants and caretakerGetActivityCounts twice. Splitting
+  // the groups-once fetch into its own effect breaks the cycle.
+  const loadGroups = useCallback(async () => {
     try {
-      const groupData = await api.caretakerGetGroups().catch(() => []);
-
-      const transformedGroups = Array.isArray(groupData)
-        ? groupData.map(g => ({ id: g.group_id, name: g.name, description: g.description || "" }))
+      const data = await api.caretakerGetGroups();
+      const transformed = Array.isArray(data)
+        ? data.map(g => ({ id: g.group_id, name: g.name, description: g.description || "" }))
         : [];
-      setGroups(transformedGroups);
-    } catch (err) {
-      console.error("Failed to load dashboard data:", err);
-    } finally {
-      setLoading(false);
+      setGroups(transformed);
+    } catch {
+      setGroups([]);
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  // Activity counts + participants — refetched whenever the selected group
+  // changes, but not when groups.length flips from 0 to N.
+  //
+  // `background` is passed by the polling hook on refreshes after the first.
+  // When true we skip the loading spinner so the UI doesn't flash on every
+  // auto-refresh.
+  const loadDashboard = useCallback(async ({ signal, background = false } = {}) => {
+    if (!background) { setLoading(true); setCountsReady(false); }
+    try {
+      const participantsData = await api.caretakerListParticipants({
+        limit: 25,
+        offset: 0,
+        sort_by: "name",
+        ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
+      }).catch(() => null);
 
-  useEffect(() => {
-    api.caretakerGetActivityCounts(selectedGroupQuery)
-      .then((counts) => {
-        setActivityCounts({
-          highly_active: Number(counts?.highly_active || 0),
-          moderately_active: Number(counts?.moderately_active || 0),
-          low_active: Number(counts?.low_active || 0),
-          inactive: Number(counts?.inactive || 0),
-        });
-      })
-      .catch(() => setActivityCounts({ highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0 }));
+      if (signal?.aborted) return;
+      setError(null);
+      setParticipants(Array.isArray(participantsData?.items) ? participantsData.items : []);
+      if (!background) setLoading(false);
+
+      const countsData = await api.caretakerGetActivityCounts(selectedGroupQuery).catch(() => ({
+        highly_active: 0, moderately_active: 0, low_active: 0, inactive: 0,
+      }));
+
+      if (signal?.aborted) return;
+      setActivityCounts({
+        highly_active: Number(countsData?.highly_active || 0),
+        moderately_active: Number(countsData?.moderately_active || 0),
+        low_active: Number(countsData?.low_active || 0),
+        inactive: Number(countsData?.inactive || 0),
+      });
+      setCountsReady(true);
+    } catch (err) {
+      if (!signal?.aborted) {
+        console.error("Failed to load dashboard data:", err);
+        setError("Failed to load dashboard data. Please try again.");
+      }
+    } finally {
+      if (!signal?.aborted && !background) setLoading(false);
+    }
   }, [selectedGroupQuery]);
 
+  // Filter-change effect: when the user picks a different group from the
+  // dropdown, we want the spinner to show (background = false).
   useEffect(() => {
-    api.caretakerListParticipants({
-      limit: 50,
-      offset: 0,
-      sort_by: "name",
-      ...(selectedGroupQuery ? { group_id: selectedGroupQuery } : {}),
-    })
-      .then((pList) => setParticipants(Array.isArray(pList) ? pList : []))
-      .catch(() => setParticipants([]));
-  }, [selectedGroupQuery]);
+    const controller = new AbortController();
+    loadDashboard({ signal: controller.signal, background: false });
+    return () => controller.abort();
+  }, [loadDashboard]);
+
+  // Auto-refresh: combined background poll for both groups and dashboard data.
+  // Pauses when the tab is hidden, refetches when the tab regains focus, and
+  // also refetches immediately when a new notification fires (in case the
+  // event reflects a change a caretaker cares about — e.g. new submission).
+  const backgroundRefresh = useCallback(async ({ background = false } = {}) => {
+    // Skip the very first call — both fetches already ran via their own
+    // initial effects. Only do work on true background refreshes.
+    if (!background) return;
+    await Promise.all([
+      loadGroups(),
+      loadDashboard({ background: true }),
+    ]);
+  }, [loadGroups, loadDashboard]);
+
+  usePolling(backgroundRefresh, 90_000);
 
   const filteredParticipants = useMemo(() => participants, [participants]);
 
@@ -443,6 +477,13 @@ export default function CaretakerDashboard() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      {error && (
+        <div className="flex items-center justify-between bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="ml-4 font-medium hover:text-red-900">Dismiss</button>
+        </div>
+      )}
+
       <div className="mb-2">
         <h1 className="text-2xl font-bold text-slate-800">Caretaker Overview</h1>
         <p className="text-sm text-slate-500 mt-1">Monitor your assigned groups and manage participant health.</p>
@@ -454,20 +495,26 @@ export default function CaretakerDashboard() {
 
       <QuickActions groups={groups} navigate={navigate} />
 
-      <StatCards
-        totalMembers={totalMembers}
-        activeCount={activeCount}
-        lowCount={filteredCounts.low_active}
-        inactiveCount={filteredCounts.inactive}
-        activePct={activePct}
-        lowPct={lowPct}
-        inactivePct={inactivePct}
-        selectedStatusFilter={selectedStatusFilter}
-        onSelectStatusFilter={(next) => {
-          setSurveyFilter(null);
-          setSelectedStatusFilter(next);
-        }}
-      />
+      {countsReady ? (
+        <StatCards
+          totalMembers={totalMembers}
+          activeCount={activeCount}
+          lowCount={filteredCounts.low_active}
+          inactiveCount={filteredCounts.inactive}
+          activePct={activePct}
+          lowPct={lowPct}
+          inactivePct={inactivePct}
+          selectedStatusFilter={selectedStatusFilter}
+          onSelectStatusFilter={(next) => {
+            setSurveyFilter(null);
+            setSelectedStatusFilter(next);
+          }}
+        />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 animate-pulse">
+          {[...Array(3)].map((_, i) => <div key={i} className="h-20 bg-slate-200 rounded-2xl" />)}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full">
@@ -525,7 +572,14 @@ export default function CaretakerDashboard() {
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col h-full">
           <h2 className="text-lg font-bold text-slate-800 mb-6">Activity Breakdown</h2>
-          {totalMembers === 0 ? (
+          {!countsReady ? (
+            <div className="flex-1 animate-pulse space-y-4">
+              <div className="h-64 bg-slate-100 rounded-xl" />
+              <div className="grid grid-cols-2 gap-4">
+                {[...Array(4)].map((_, i) => <div key={i} className="h-16 bg-slate-100 rounded-xl" />)}
+              </div>
+            </div>
+          ) : totalMembers === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-slate-200 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg>
               <p className="text-sm text-slate-400">No activity data to display.</p>

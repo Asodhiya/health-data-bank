@@ -8,7 +8,7 @@ from app.db.models import User, GroupMember
 from app.db.session import get_db
 from app.core.dependency import require_permissions
 from app.core.permissions import STATS_VIEW
-from app.db.queries.Queries import StatsQuery, CaretakersQuery, get_participant_id
+from app.db.queries.Queries import StatsQuery, get_participant_id
 from sqlalchemy import select
 
 router = APIRouter()
@@ -85,13 +85,11 @@ async def get_my_vs_group(
     if not group_id:
         raise HTTPException(status_code=404, detail="You are not in any active group")
 
-    report = await CaretakersQuery(db).generate_comparison_report(
+    report = await StatsQuery(db).get_participant_vs_group_comparison(
         participant_id=participant_id,
-        requested_by=current_user.user_id,
-        compare_with="group",
         group_id=group_id,
         element_ids=element_ids,
         date_from=date_from,
         date_to=date_to,
     )
-    return report.parameters.get("payload", {})
+    return report

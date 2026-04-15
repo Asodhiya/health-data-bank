@@ -26,8 +26,14 @@ export const DASHBOARD_NAV = [
   },
 
   {
-    label: "Onboarding",
+    label: "Onboarding Management",
     to: "/onboarding-management",
+    roles: ["admin"],
+  },
+
+  {
+    label: "Goal Builder",
+    to: "/admin/goals",
     roles: ["admin"],
   },
 
@@ -81,8 +87,6 @@ export const DASHBOARD_NAV = [
     to: "/researcher/data-elements",
     roles: ["researcher"],
   },
-
-  { label: "Health Goals", to: "/researcher/goals", roles: ["researcher"] },
 
   /* =====================
      CARETAKER

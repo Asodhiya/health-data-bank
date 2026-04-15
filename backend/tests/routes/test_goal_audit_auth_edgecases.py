@@ -455,7 +455,7 @@ class TestAuthenticationApiEndpoints:
                     "email": "pat@example.com",
                     "password": "StrongPass1!",
                     "confirm_password": "StrongPass1!",
-                    "phone": "1234567890",
+                    "phone": "+19025550147",
                     "address": "123 Main St",
                 },
             )

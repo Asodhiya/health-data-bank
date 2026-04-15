@@ -23,14 +23,11 @@ def get_session_token_expiry_minutes() -> int:
 async def create_user_session(
     user_id: UUID,
     db: AsyncSession,
-    *,
-    device_id: UUID | None = None,
 ) -> Session:
     """Create a DB-backed session whose expiry slides with activity."""
     now = datetime.now(timezone.utc)
     session = Session(
         user_id=user_id,
-        device_id=device_id,
         expired_at=now + timedelta(minutes=get_session_idle_timeout_minutes()),
     )
     db.add(session)

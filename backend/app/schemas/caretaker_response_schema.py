@@ -77,6 +77,19 @@ class ParticipantListItem(BaseModel):
     last_submission_at: Optional[date] = None
 
 
+class PaginatedParticipants(BaseModel):
+    """Response wrapper for /caretaker/participants.
+
+    `total_count` is the total number of rows matching the SQL-level filters
+    (q, status, gender, age, has_alerts, survey_progress, group_id), ignoring
+    the goal_progress filter — that one is applied in Python after the SQL
+    fetch (a known limitation tracked as B22). When goal_progress is set,
+    `total_count` is therefore an upper bound on the real total.
+    """
+    items: List[ParticipantListItem]
+    total_count: int = 0
+
+
 class ParticipantActivityCounts(BaseModel):
     highly_active: int = 0
     moderately_active: int = 0
@@ -147,6 +160,8 @@ class GroupDeployedFormItem(BaseModel):
 class SubmissionAnswerItem(BaseModel):
     field_id: Optional[UUID] = None
     field_label: Optional[str] = None
+    element_label: Optional[str] = None
+    element_unit: Optional[str] = None
     value_text: Optional[str] = None
     value_number: Optional[float] = None
     value_date: Optional[str] = None
@@ -165,7 +180,16 @@ class SubmissionDetailItem(BaseModel):
 class ReportListItem(BaseModel):
     report_id: UUID
     scope: str
+    group_id: Optional[UUID] = None
+    group_name: Optional[str] = None
+    participant_id: Optional[UUID] = None
     created_at: datetime
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    participant_status: Optional[str] = None
+    compare_with: Optional[str] = None
+    element_count: int = 0
+    element_labels: List[str] = Field(default_factory=list)
 
 
 class NoteCreateRequest(BaseModel):
@@ -184,15 +208,18 @@ class NoteItem(BaseModel):
 
 
 class NoteUpdateRequest(BaseModel):
-    text: Optional[str] = None
+    text: Optional[str] = Field(default=None, min_length=1)
     tag: Optional[str] = None
 
 
 class ReportGenerateRequest(BaseModel):
     date_from: Optional[date] = None
     date_to: Optional[date] = None
-    element_ids: list[UUID] = Field(default_factory=list)  # filter by data elements
-    report_type: Literal["numeric", "graph"] = "numeric"
+    element_ids: list[UUID] = Field(default_factory=list)
+    participant_status: Literal["all", "active", "inactive"] = "all"
+    gender: Optional[str] = None
+    age_min: Optional[int] = Field(default=None, ge=0, le=150)
+    age_max: Optional[int] = Field(default=None, ge=0, le=150)
 
 
 class ComparisonReportRequest(BaseModel):
@@ -214,9 +241,10 @@ class ComparisonReportRequest(BaseModel):
 
 class ReportResponse(BaseModel):
     report_id: UUID
-    scope: Literal["participant", "group", "comparison"]
+    scope: str
     created_at: datetime
     payload: dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
 
 
 class GroupDataElementItem(BaseModel):
@@ -225,6 +253,28 @@ class GroupDataElementItem(BaseModel):
     label: Optional[str] = None
     unit: Optional[str] = None
     datatype: Optional[str] = None
+    # Reports v2: richer metadata for the metric picker.
+    description: Optional[str] = None
+    form_names: List[str] = Field(default_factory=list)
+    data_point_count: int = 0
+
+
+class ParticipantDataElementItem(BaseModel):
+    """Reports v2: data elements relevant to a single participant.
+
+    Returned by GET /caretaker/participants/{id}/data-elements. Includes any
+    element either currently deployed to one of the participant's groups OR
+    with at least one HealthDataPoint for the participant — whichever applies.
+    """
+    element_id: UUID
+    code: Optional[str] = None
+    label: Optional[str] = None
+    unit: Optional[str] = None
+    datatype: Optional[str] = None
+    description: Optional[str] = None
+    form_names: List[str] = Field(default_factory=list)
+    data_point_count: int = 0
+    is_currently_deployed: bool = False
 
 
 class GroupCreateRequest(BaseModel):
@@ -299,6 +349,10 @@ class CaretakerProfileUpdate(BaseModel):
     working_hours_end: Optional[str] = None
     contact_preference: Optional[str] = None
     available_days: Optional[List[str]] = None
+    # B19: explicit signal from the onboarding page that the caretaker has
+    # finished initial setup. Other profile-edit clients (e.g. ProfilePage)
+    # should leave this unset so it preserves whatever value is in the DB.
+    onboarding_completed: Optional[bool] = None
 
 
 class CaretakerProfileOut(BaseModel):

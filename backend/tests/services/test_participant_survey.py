@@ -16,8 +16,11 @@ Run with:
 
 import pytest
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
+
+from app.db.models import FormSubmission, HealthDataPoint
 
 
 USER_ID = uuid.uuid4()
@@ -305,3 +308,110 @@ class TestGetParticipantAndSubmission:
 
         with pytest.raises(ValueError, match="completed"):
             await _get_participant_and_submission(FORM_ID, USER_ID, db)
+
+
+class TestSubmitSurveyResponse:
+
+    @pytest.mark.asyncio
+    async def test_submission_sets_source_submission_id_on_health_data_point(self):
+        from app.services.participant_survey_service import submit_survey_response
+
+        db = make_db()
+        participant = make_participant()
+        deployment = MagicMock()
+        deployment.group_id = uuid.uuid4()
+        mapping = MagicMock()
+        mapping.field_id = FIELD_ID
+        mapping.element_id = uuid.uuid4()
+        mapping.transform_rule = None
+        field_meta_result = MagicMock()
+        field_meta_result.all.return_value = []
+
+        db.scalar = AsyncMock(return_value=None)
+        db.execute.side_effect = [
+            db_result(participant),  # _get_participant
+            db_result(deployment),   # deployment lookup
+            db_result(None),         # no existing draft/completed submission
+            field_meta_result,       # field metadata query
+            db_result([mapping]),    # field map query
+        ]
+
+        async def fake_flush():
+            for call in db.add.call_args_list:
+                candidate = call.args[0]
+                if isinstance(candidate, FormSubmission) and candidate.submission_id is None:
+                    candidate.submission_id = SUBMISSION_ID
+
+        db.flush.side_effect = fake_flush
+
+        await submit_survey_response(
+            FORM_ID,
+            USER_ID,
+            [{"field_id": str(FIELD_ID), "value": 118}],
+            db,
+        )
+
+        health_data_points = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if isinstance(call.args[0], HealthDataPoint)
+        ]
+
+        assert len(health_data_points) == 1
+        assert health_data_points[0].source_type == "survey"
+        assert health_data_points[0].source_submission_id == SUBMISSION_ID
+
+    @pytest.mark.asyncio
+    async def test_submission_resolves_dropdown_option_label_for_health_data_point(self):
+        from app.services.participant_survey_service import submit_survey_response
+
+        db = make_db()
+        participant = make_participant()
+        deployment = MagicMock()
+        deployment.group_id = uuid.uuid4()
+        mapping = MagicMock()
+        mapping.field_id = FIELD_ID
+        mapping.element_id = uuid.uuid4()
+        mapping.transform_rule = None
+
+        field_meta_result = MagicMock()
+        field_meta_result.all.return_value = [
+            (
+                SimpleNamespace(field_id=FIELD_ID, field_type="dropdown"),
+                SimpleNamespace(field_id=FIELD_ID, value=2, label="Often"),
+            )
+        ]
+
+        db.scalar = AsyncMock(return_value=None)
+        db.execute.side_effect = [
+            db_result(participant),
+            db_result(deployment),
+            db_result(None),
+            field_meta_result,
+            db_result([mapping]),
+        ]
+
+        async def fake_flush():
+            for call in db.add.call_args_list:
+                candidate = call.args[0]
+                if isinstance(candidate, FormSubmission) and candidate.submission_id is None:
+                    candidate.submission_id = SUBMISSION_ID
+
+        db.flush.side_effect = fake_flush
+
+        await submit_survey_response(
+            FORM_ID,
+            USER_ID,
+            [{"field_id": str(FIELD_ID), "value": 2}],
+            db,
+        )
+
+        health_data_points = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if isinstance(call.args[0], HealthDataPoint)
+        ]
+
+        assert len(health_data_points) == 1
+        assert health_data_points[0].value_text == "Often"
+        assert health_data_points[0].value_number is None

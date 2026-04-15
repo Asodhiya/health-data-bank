@@ -32,6 +32,77 @@ function fmtDateTime(iso) {
   });
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function scaleLegend(displayLabels) {
+  if (!Array.isArray(displayLabels) || displayLabels.length === 0) return "";
+  return displayLabels
+    .map((item) => `${item.value} = ${item.label}`)
+    .join(" • ");
+}
+
+function normalizedScaleEntries(displayLabels) {
+  if (!Array.isArray(displayLabels)) return [];
+  return displayLabels
+    .map((item) => ({
+      value: item?.value,
+      label: String(item?.label ?? "").trim(),
+    }))
+    .filter((item) => item.value != null);
+}
+
+function hasMeaningfulScaleEntries(displayLabels) {
+  return normalizedScaleEntries(displayLabels).some(
+    (item) => item.label && item.label !== String(item.value),
+  );
+}
+
+function pointDisplay(point) {
+  const displayValue = point?.display_value;
+  const numericValue = point?.value_number;
+  if (displayValue && numericValue != null) {
+    const numericText = fmt(numericValue);
+    const normalizedDisplay = String(displayValue).trim();
+    if (!normalizedDisplay) return numericText;
+    const sameAsNumeric = [numericText, String(numericValue), String(Number(numericValue))].includes(normalizedDisplay);
+    return sameAsNumeric ? normalizedDisplay : `${numericText} (${normalizedDisplay})`;
+  }
+  if (displayValue) return String(displayValue);
+  if (numericValue != null) return fmt(numericValue);
+  if (point?.value_date) return fmtDate(point.value_date);
+  if (Array.isArray(point?.value_json)) return point.value_json.join(", ");
+  if (point?.value_json && typeof point.value_json === "object") {
+    return Object.entries(point.value_json)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join(", ");
+  }
+  return "—";
+}
+
+function pointNumericDisplay(point) {
+  if (point?.value_number != null) return fmt(point.value_number);
+  return pointDisplay(point);
+}
+
+function isTextLikeSeries(series) {
+  const datatype = String(series?.datatype || "").toLowerCase();
+  if (datatype === "text") return true;
+  const fieldTypes = Array.isArray(series?.field_types) ? series.field_types : [];
+  return fieldTypes.some((fieldType) => String(fieldType).toLowerCase() === "text");
+}
+
+function latestPoint(points) {
+  if (!Array.isArray(points) || points.length === 0) return null;
+  return points[points.length - 1] || null;
+}
+
 function trendLabel(vals) {
   if (!vals || vals.length < 2) return "—";
   const mid = Math.floor(vals.length / 2);
@@ -61,7 +132,38 @@ function goalWindow(goal) {
 
 // ── PDF (print-based) ──────────────────────────────────────────────────────
 
-export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }) {
+function filterReportData({ elements, timeseries, goals, selectedElementIds }) {
+  const allowed = new Set((selectedElementIds || []).map(String));
+  if (allowed.size === 0) {
+    return {
+      elements: elements || [],
+      timeseries: timeseries || [],
+      goals: goals || [],
+    };
+  }
+
+  const filteredElements = (elements || []).filter((element) =>
+    allowed.has(String(element.element_id)),
+  );
+  const filteredTimeseries = (timeseries || []).filter((series) =>
+    allowed.has(String(series.element_id)),
+  );
+  const filteredGoals = (goals || []).filter((goal) =>
+    allowed.has(String(goal.element_id || goal.element?.element_id || "")),
+  );
+
+  return {
+    elements: filteredElements,
+    timeseries: filteredTimeseries,
+    goals: filteredGoals,
+  };
+}
+
+export function generatePDFReport({ user, elements, timeseries, goals, vsGroup, selectedElementIds }) {
+  const filtered = filterReportData({ elements, timeseries, goals, selectedElementIds });
+  elements = filtered.elements;
+  timeseries = filtered.timeseries;
+  goals = filtered.goals;
   const name = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.username || "Participant";
   const generatedAt = new Date().toLocaleString("en-US", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
@@ -71,6 +173,8 @@ export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }
   // Build timeseries map for trend calculation
   const tsMap = {};
   (timeseries || []).forEach((ts) => { tsMap[ts.element_id] = ts.points || []; });
+  const tsMetaMap = {};
+  (timeseries || []).forEach((ts) => { tsMetaMap[ts.element_id] = ts || {}; });
 
   const goalsCompleted = (goals || []).filter((g) => g.is_completed).length;
   const totalReadings = (elements || []).reduce((s, e) => s + (e.count ?? 0), 0);
@@ -89,6 +193,9 @@ export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }
     .slice()
     .sort((a, b) => a.label.localeCompare(b.label))
     .map((el) => {
+      const meta = tsMetaMap[el.element_id] || {};
+      const latest = latestPoint(tsMap[el.element_id] || []);
+      const latestText = isTextLikeSeries(meta) ? pointDisplay(latest) : "";
       const pts = (tsMap[el.element_id] || [])
         .map((p) => p.value_number)
         .filter((v) => v != null && Number.isFinite(v));
@@ -96,13 +203,38 @@ export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }
       const trendCls = trend.startsWith("↑") ? "trend-up" : trend.startsWith("↓") ? "trend-down" : "trend-flat";
       return `
         <tr>
-          <td>${el.label}</td>
-          <td class="center">${el.unit || "—"}</td>
+          <td>
+            <div>${escapeHtml(el.label)}</div>
+            ${latestText ? `<div class="metric-detail">Latest note: ${escapeHtml(latestText)}</div>` : ""}
+          </td>
+          <td class="center">${escapeHtml(el.unit || "—")}</td>
           <td class="center num">${fmt(el.avg)}</td>
           <td class="center num">${fmt(el.min)}</td>
           <td class="center num">${fmt(el.max)}</td>
           <td class="center num">${el.count ?? "—"}</td>
           <td class="center"><span class="${trendCls}">${trend}</span></td>
+        </tr>`;
+    }).join("");
+
+  const likertGuideRows = (timeseries || [])
+    .filter((series) => normalizedScaleEntries(series.display_labels).length > 0)
+    .sort((a, b) => String(a.label || "").localeCompare(String(b.label || "")))
+    .map((series) => {
+      const entries = normalizedScaleEntries(series.display_labels);
+      const hasMeaningfulEntries = hasMeaningfulScaleEntries(series.display_labels);
+      const guideMarkup = hasMeaningfulEntries
+        ? entries.map((entry) => `
+            <div class="scale-chip">
+              <span class="scale-value">${escapeHtml(entry.value)}</span>
+              <span class="scale-label">${escapeHtml(entry.label || "Not labeled")}</span>
+            </div>`).join("")
+        : `<span class="scale-missing">Scale labels are not configured for this data element.</span>`;
+      return `
+        <tr>
+          <td>${escapeHtml(series.label || "Metric")}</td>
+          <td>
+            <div class="scale-guide-wrap">${guideMarkup}</div>
+          </td>
         </tr>`;
     }).join("");
 
@@ -145,20 +277,21 @@ export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }
   // ── Recent entries table ───────────────────────────────────────────────────
   const recentEntries = Object.entries(tsMap)
     .flatMap(([elId, pts]) => {
-      const el = (elements || []).find((e) => e.element_id === elId);
-      return pts.map((p) => ({ ...p, label: el?.label ?? elId, unit: el?.unit ?? "" }));
+      const el = (elements || []).find((e) => String(e.element_id) === String(elId));
+      const meta = tsMetaMap[elId] || {};
+      return pts.map((p) => ({ ...p, label: el?.label ?? meta.label ?? elId, unit: el?.unit ?? meta.unit ?? "" }));
     })
-    .filter((p) => p.value_number != null && p.observed_at)
+    .filter((p) => p.observed_at)
     .sort((a, b) => new Date(b.observed_at) - new Date(a.observed_at))
     .slice(0, 30);
 
   const entriesRows = recentEntries.map((p) => `
     <tr>
       <td>${fmtDateTime(p.observed_at)}</td>
-      <td>${p.label}</td>
-      <td class="center num">${fmt(p.value_number)}</td>
-      <td class="center">${p.unit || "—"}</td>
-      <td>${p.notes || "—"}</td>
+      <td>${escapeHtml(p.label)}</td>
+      <td class="center ${p.value_number != null ? "num" : ""}">${escapeHtml(pointNumericDisplay(p))}</td>
+      <td class="center">${escapeHtml(p.unit || "—")}</td>
+      <td>${escapeHtml(p.notes || "—")}</td>
     </tr>`).join("");
 
   const html = `<!DOCTYPE html>
@@ -260,6 +393,33 @@ export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }
     td { padding: 7px 10px; color: #334155; vertical-align: middle; }
     td.center { text-align: center; }
     td.num { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .metric-detail { margin-top: 4px; font-size: 9px; color: #64748b; line-height: 1.45; }
+    .scale-guide-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
+    .scale-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border: 1px solid #dbeafe;
+      background: #eff6ff;
+      border-radius: 999px;
+      margin: 2px 6px 2px 0;
+    }
+    .scale-value {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: #1d4ed8;
+      color: white;
+      font-size: 9px;
+      font-weight: 800;
+    }
+    .scale-label { font-size: 9px; color: #1e3a8a; font-weight: 600; }
+    .scale-missing { font-size: 9px; color: #64748b; }
 
     /* ── Trend badges ── */
     .trend-up { color: #16a34a; font-weight: 700; }
@@ -389,12 +549,12 @@ export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }
     <div class="summary-tile">
       <div class="tile-label">Metrics Tracked</div>
       <div class="tile-value">${(elements || []).length}</div>
-      <div class="tile-sub">health data elements</div>
+      <div class="tile-sub">metrics in this report</div>
     </div>
     <div class="summary-tile">
       <div class="tile-label">Total Readings</div>
       <div class="tile-value">${totalReadings.toLocaleString()}</div>
-      <div class="tile-sub">data points recorded</div>
+      <div class="tile-sub">recorded entries</div>
     </div>
     <div class="summary-tile">
       <div class="tile-label">Goals</div>
@@ -413,7 +573,7 @@ export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }
     <!-- Health Metrics -->
     ${(elements || []).length > 0 ? `
     <div class="section">
-      <div class="section-title">Health Metrics</div>
+      <div class="section-title">Average Summary</div>
       <table>
         <thead>
           <tr>
@@ -427,6 +587,20 @@ export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }
           </tr>
         </thead>
         <tbody>${metricsRows}</tbody>
+      </table>
+    </div>` : ""}
+
+    ${likertGuideRows ? `
+    <div class="section">
+      <div class="section-title">Likert Scale Guide</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>Scale Meaning</th>
+          </tr>
+        </thead>
+        <tbody>${likertGuideRows}</tbody>
       </table>
     </div>` : ""}
 
@@ -453,7 +627,7 @@ export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }
     <!-- Recent Readings -->
     ${recentEntries.length > 0 ? `
     <div class="section">
-      <div class="section-title">Recent Readings <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b8;font-size:9px">(last 30 entries)</span></div>
+      <div class="section-title">Recorded Readings <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b8;font-size:9px">(last 30 entries)</span></div>
       <table>
         <thead>
           <tr>
@@ -490,12 +664,18 @@ export function generatePDFReport({ user, elements, timeseries, goals, vsGroup }
 
 // ── CSV ────────────────────────────────────────────────────────────────────
 
-export function generateCSVReport({ user, elements, timeseries, goals }) {
+export function generateCSVReport({ user, elements, timeseries, goals, selectedElementIds }) {
+  const filtered = filterReportData({ elements, timeseries, goals, selectedElementIds });
+  elements = filtered.elements;
+  timeseries = filtered.timeseries;
+  goals = filtered.goals;
   const name = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.username || "Participant";
   const generatedAt = new Date().toISOString();
 
   const tsMap = {};
   (timeseries || []).forEach((ts) => { tsMap[ts.element_id] = ts.points || []; });
+  const tsMetaMap = {};
+  (timeseries || []).forEach((ts) => { tsMetaMap[ts.element_id] = ts || {}; });
 
   const lines = [];
 
@@ -508,11 +688,13 @@ export function generateCSVReport({ user, elements, timeseries, goals }) {
 
   // Metrics section
   lines.push(["HEALTH METRICS"]);
-  lines.push(["Metric", "Unit", "Average", "Lowest", "Highest", "Readings", "Trend"]);
+  lines.push(["Metric", "Unit", "Average", "Lowest", "Highest", "Readings", "Trend", "Scale Meanings", "Latest Text"]);
   (elements || [])
     .slice()
     .sort((a, b) => a.label.localeCompare(b.label))
     .forEach((el) => {
+      const meta = tsMetaMap[el.element_id] || {};
+      const latest = latestPoint(tsMap[el.element_id] || []);
       const pts = (tsMap[el.element_id] || [])
         .map((p) => p.value_number)
         .filter((v) => v != null && Number.isFinite(v));
@@ -524,6 +706,8 @@ export function generateCSVReport({ user, elements, timeseries, goals }) {
         fmt(el.max),
         el.count ?? "",
         trendLabel(pts),
+        scaleLegend(meta.display_labels),
+        isTextLikeSeries(meta) ? pointDisplay(latest) : "",
       ]);
     });
   lines.push([]);
@@ -552,10 +736,11 @@ export function generateCSVReport({ user, elements, timeseries, goals }) {
   // Readings section
   const entries = Object.entries(tsMap)
     .flatMap(([elId, pts]) => {
-      const el = (elements || []).find((e) => e.element_id === elId);
-      return pts.map((p) => ({ ...p, label: el?.label ?? elId, unit: el?.unit ?? "" }));
+      const el = (elements || []).find((e) => String(e.element_id) === String(elId));
+      const meta = tsMetaMap[elId] || {};
+      return pts.map((p) => ({ ...p, label: el?.label ?? meta.label ?? elId, unit: el?.unit ?? meta.unit ?? "" }));
     })
-    .filter((p) => p.value_number != null && p.observed_at)
+    .filter((p) => p.observed_at)
     .sort((a, b) => new Date(b.observed_at) - new Date(a.observed_at));
 
   if (entries.length > 0) {
@@ -565,7 +750,7 @@ export function generateCSVReport({ user, elements, timeseries, goals }) {
       lines.push([
         fmtDateTime(p.observed_at),
         p.label,
-        fmt(p.value_number),
+        pointNumericDisplay(p),
         p.unit,
         p.notes || "",
       ]);

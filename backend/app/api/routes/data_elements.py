@@ -18,7 +18,7 @@ mapping.  An optional ``transform_rule`` stored on the mapping is
 applied at projection time to convert the raw answer into the
 element's expected unit / format.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
@@ -26,22 +26,61 @@ from app.db.session import get_db
 from app.core.dependency import require_permissions
 from app.core.permissions import ELEMENT_VIEW, ELEMENT_CREATE, ELEMENT_DELETE, ELEMENT_MAP
 from app.db.queries.Queries import DataElementQuery
-from app.schemas.data_element_schema import DataElementCreate, FieldMapPayload
+from app.schemas.data_element_schema import DataElementCreate, DataElementUpdate, FieldMapPayload, DataElementListPage
 
 router = APIRouter()
 
 
 @router.get("/elements", dependencies=[Depends(require_permissions(ELEMENT_VIEW))])
-async def list_data_elements(db: AsyncSession = Depends(get_db)):
+async def list_data_elements(
+    include_inactive: bool = Query(default=False),
+    exclude_profile: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+):
     """Return all active data elements.
 
-    Returns 
+    Returns
     -------
     list[DataElement]
         Every data element where ``is_active`` is ``True``.
+        Pass ``exclude_profile=true`` to omit elements that are only linked
+        to demographic/profile intake fields (gender, dob, etc.).
     """
     data_element_queries = DataElementQuery(db)
-    return await data_element_queries.get_data_elements()
+    return await data_element_queries.get_data_elements(
+        include_inactive=include_inactive,
+        exclude_profile=exclude_profile,
+    )
+
+
+@router.get("/elements-paged", response_model=DataElementListPage, dependencies=[Depends(require_permissions(ELEMENT_VIEW))])
+async def list_data_elements_paged(
+    deleted: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=15, ge=1, le=50),
+    search: str | None = Query(default=None),
+    type_filter: str | None = Query(default="All"),
+    mapping_filter: str | None = Query(default="All"),
+    sort: str = Query(default="newest"),
+    db: AsyncSession = Depends(get_db),
+):
+    data_element_queries = DataElementQuery(db)
+    return await data_element_queries.list_data_elements_paged(
+        page=page,
+        page_size=page_size,
+        deleted=deleted,
+        search=search,
+        type_filter=type_filter,
+        mapping_filter=mapping_filter,
+        sort=sort,
+    )
+
+
+@router.get("/deleted", dependencies=[Depends(require_permissions(ELEMENT_VIEW))])
+async def list_deleted_data_elements(db: AsyncSession = Depends(get_db)):
+    """Return all soft-deleted data elements."""
+    data_element_queries = DataElementQuery(db)
+    return await data_element_queries.list_deleted_data_elements()
 
 
 @router.post("/data_element", dependencies=[Depends(require_permissions(ELEMENT_CREATE))])
@@ -66,6 +105,13 @@ async def create_data_element(payload: DataElementCreate, db: AsyncSession = Dep
     """
     data_element_queries = DataElementQuery(db)
     return await data_element_queries.add_data_element(payload)
+
+
+@router.patch("/{element_id}", dependencies=[Depends(require_permissions(ELEMENT_CREATE))])
+async def update_data_element(element_id: UUID, payload: DataElementUpdate, db: AsyncSession = Depends(get_db)):
+    """Update an existing data element."""
+    data_element_queries = DataElementQuery(db)
+    return await data_element_queries.update_data_element(element_id, payload)
 
 
 @router.get("/all-mappings", dependencies=[Depends(require_permissions(ELEMENT_VIEW))])
@@ -109,6 +155,13 @@ async def delete_data_element(element_id: UUID, db: AsyncSession = Depends(get_d
     """
     data_element_queries = DataElementQuery(db)
     return await data_element_queries.delete_data_element(element_id)
+
+
+@router.post("/{element_id}/restore", dependencies=[Depends(require_permissions(ELEMENT_DELETE))])
+async def restore_data_element(element_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Restore a soft-deleted data element."""
+    data_element_queries = DataElementQuery(db)
+    return await data_element_queries.restore_data_element(element_id)
 
 
 @router.post("/fields/{field_id}/map", dependencies=[Depends(require_permissions(ELEMENT_MAP))])

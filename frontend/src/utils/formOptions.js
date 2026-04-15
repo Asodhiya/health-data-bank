@@ -1,5 +1,7 @@
 /* ── Shared option lists for intake / profile forms ── */
 
+export const PRONOUNS = ['He/Him', 'She/Her', 'They/Them', 'Other'];
+
 export const LANGUAGES = [
   'English', 'French', 'Spanish', 'Mandarin', 'Cantonese', 'Arabic', 'Hindi',
   'Urdu', 'Punjabi', 'Bengali', 'Portuguese', 'Russian', 'Japanese', 'Korean',
@@ -53,3 +55,9 @@ export const COUNTRIES = [
   'Uruguay', 'Uzbekistan', 'Vanuatu', 'Vatican City', 'Venezuela',
   'Vietnam', 'Yemen', 'Zambia', 'Zimbabwe',
 ];
+
+export const PREDEFINED_LISTS = {
+  languages: LANGUAGES,
+  countries: COUNTRIES,
+  pronouns: PRONOUNS,
+};

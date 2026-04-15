@@ -1,297 +1,618 @@
-import { useState, useEffect, useMemo, useRef } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useOutletContext } from "react-router-dom";
 import { api } from "../../services/api";
+import { useResearcherMeta } from "../../hooks/useResearcherMeta";
+import { normalizeAvailableSurveys } from "../../utils/researcherSurveys";
 import { LANGUAGES } from "../../utils/formOptions";
+import { formatDateTime } from "../../utils/dateFormatters";
 import {
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
   Bar,
+  BarChart,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  Tooltip,
-  ResponsiveContainer,
 } from "recharts";
 
-export default function ResearcherDashboard() {
-  // 👈 2. Safe user fallback so the sidebar/layout doesn't crash
-  const { user } = useOutletContext() || {};
+const PAGE_SIZE = 10;
+const DEMOGRAPHIC_COLUMNS = [
+  { id: "gender", text: "Gender" },
+  { id: "pronouns", text: "Pronouns" },
+  { id: "primary_language", text: "Primary Language" },
+  { id: "occupation_status", text: "Occupation / Status" },
+  { id: "living_arrangement", text: "Living Arrangement" },
+  { id: "highest_education_level", text: "Highest Education Level" },
+  { id: "dependents", text: "Dependents" },
+  { id: "marital_status", text: "Marital Status" },
+  { id: "age", text: "Age" },
+];
+const DEMOGRAPHIC_COLUMN_IDS = new Set(DEMOGRAPHIC_COLUMNS.map((column) => column.id));
+const META_COLUMN_IDS = new Set(["observed_at", "source_type", "source_submission_id"]);
+const CHART_COLORS = ["#3b82f6", "#10b981", "#6366f1"];
+const HIDDEN_SYSTEM_COLUMN_IDS = new Set(["source_submission_id", "group_value"]);
+const TEXT_DEMOGRAPHIC_FIELDS = [
+  { value: "gender", label: "Gender" },
+  { value: "pronouns", label: "Pronouns" },
+  { value: "primary_language", label: "Primary Language" },
+  { value: "occupation_status", label: "Occupation" },
+  { value: "living_arrangement", label: "Living Arrangement" },
+  { value: "highest_education_level", label: "Education" },
+  { value: "marital_status", label: "Marital Status" },
+  { value: "status", label: "Status" },
+];
+const NUMERIC_DEMOGRAPHIC_FIELDS = [
+  { value: "age", label: "Age" },
+  { value: "dependents", label: "Dependents" },
+];
+const ALL_DEMOGRAPHIC_FIELDS = [...TEXT_DEMOGRAPHIC_FIELDS, ...NUMERIC_DEMOGRAPHIC_FIELDS];
+const DEMOGRAPHIC_VALUE_OPTIONS = {
+  gender: ["Male", "Female", "Other"],
+  pronouns: ["He/Him", "She/Her", "They/Them", "Other"],
+  primary_language: LANGUAGES,
+  occupation_status: [
+    "Student",
+    "Full-time",
+    "Part-time",
+    "Less than 10 hrs/week",
+    "Unemployed",
+    "Don't work",
+    "Retired",
+    "Other",
+  ],
+  living_arrangement: [
+    "Alone",
+    "With Partner",
+    "With Family",
+    "With Friends",
+    "Shared Housing",
+    "Other",
+  ],
+  highest_education_level: [
+    "High school",
+    "Some college/university",
+    "Trade/vocational",
+    "Bachelor's degree",
+    "Graduate degree",
+    "Other",
+  ],
+  marital_status: [
+    "Single",
+    "Married",
+    "Common-law",
+    "Separated",
+    "Divorced",
+    "Widowed",
+    "Other",
+  ],
+  status: ["Active", "Inactive"],
+};
 
-  const [queryData, setQueryData] = useState({ columns: [], data: [] });
-  const [loading, setLoading] = useState(true);
-  const [filtering, setFiltering] = useState(false);
-  const [hiddenColumns, setHiddenColumns] = useState([]);
-  const [attributeSearch, setAttributeSearch] = useState("");
+function isNumericDemographicField(field) {
+  return NUMERIC_DEMOGRAPHIC_FIELDS.some((option) => option.value === field);
+}
 
-  // 👈 3. New states to hold our filter data (we will use these in Step 2)
-  const [availableSurveys, setAvailableSurveys] = useState([]);
-  const [allGroups, setAllGroups] = useState([]);
-  const [availableGroups, setAvailableGroups] = useState([]);
-  const [allForms, setAllForms] = useState([]);
-  // 🟢 UPDATED: group_id is now an array (group_ids) for multi-select
-  const [showMoreFilters, setShowMoreFilters] = useState(false);
+function getDemographicOperators(field) {
+  if (field === "age") {
+    return [
+      { value: "eq", label: "=" },
+      { value: "gt", label: ">" },
+      { value: "gte", label: ">=" },
+      { value: "lt", label: "<" },
+      { value: "lte", label: "<=" },
+      { value: "between", label: "Between" },
+    ];
+  }
+  return [{ value: "eq", label: "=" }];
+}
 
-  const [filters, setFilters] = useState({
+function needsDemographicOperator(field) {
+  return field === "age";
+}
+
+function hasPredefinedDemographicOptions(field) {
+  return Array.isArray(DEMOGRAPHIC_VALUE_OPTIONS[field]) && DEMOGRAPHIC_VALUE_OPTIONS[field].length > 0;
+}
+
+function getDemographicFieldLabel(field) {
+  return ALL_DEMOGRAPHIC_FIELDS.find((option) => option.value === field)?.label || "Value";
+}
+
+function getParticipantMarker(participantNumber) {
+  if (!participantNumber) return "Participant";
+  return `Participant ${participantNumber}`;
+}
+
+function getGroupByLabel(groupBy) {
+  if (!groupBy) return "Group";
+  if (groupBy?.type === "element") return "Data Element";
+  const labels = {
+    gender: "Gender",
+    pronouns: "Pronouns",
+    primary_language: "Primary Language",
+    occupation_status: "Occupation",
+    living_arrangement: "Living Arrangement",
+    highest_education_level: "Education",
+    marital_status: "Marital Status",
+    age_bucket: "Age Range",
+  };
+  return labels[groupBy?.field] || "Group";
+}
+
+function isCategoricalElement(element) {
+  const datatype = String(element?.datatype || "").trim().toLowerCase();
+  return ["text", "string", "boolean", "bool", "choice", "select", "option", "categorical"].includes(datatype);
+}
+
+function createDefaultFilters() {
+  return {
     survey_id: "",
     group_ids: [],
+    source_types: ["survey", "goal"],
+    allow_null: true,
+    mode: "longitudinal",
+    group_by: null,
     search: "",
-    status: "",
-    gender: "",
-    primary_language: [],
-    date_range: "all_time",
-    age_min: "18",
-    age_max: "100",
-    highest_education_level: "",
-    marital_status: "",
-    living_arrangement: "",
-    dependents_min: "",
-    dependents_max: "",
-    pronouns: "",
-    occupation_status: "",
+    date_from: "",
+    date_to: "",
+    selected_element_ids: [],
+    demographic_filters: [],
+    element_filters: [],
+    sort_by: null,
+    sort_dir: "asc",
+  };
+}
+
+function createElementFilterDraft() {
+  return {
+    element_id: "",
+    operator: "has_value",
+    value: "",
+    value_max: "",
+  };
+}
+
+function createDemographicFilterDraft() {
+  return {
+    field: "gender",
+    operator: "eq",
+    value: "",
+    value_max: "",
+  };
+}
+
+function createDefaultExportConfig() {
+  return {
+    filename: `research_export_${new Date().toISOString().split("T")[0]}`,
+    type: "csv",
+  };
+}
+
+function normalizeElementFilters(filters) {
+  const seen = new Set();
+  return [...(filters || [])]
+    .reverse()
+    .filter((filter) => {
+      const key = String(filter.element_id || "");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .reverse();
+}
+
+function uniqueIds(values) {
+  const seen = new Set();
+  return (values || []).filter((value) => {
+    const key = String(value || "");
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export default function ResearcherDashboard() {
+  const { user } = useOutletContext() || {};
+  const todayDateString = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
+  const [draftFilters, setDraftFilters] = useState(createDefaultFilters);
+  const [appliedFilters, setAppliedFilters] = useState(createDefaultFilters);
+  const [queryData, setQueryData] = useState({ columns: DEMOGRAPHIC_COLUMNS, data: [] });
+  const [pagination, setPagination] = useState({
+    offset: 0,
+    limit: PAGE_SIZE,
+    returned_participants: 0,
+    total_participants: 0,
+    has_more: false,
+    next_offset: 0,
+  });
+  const [filtering, setFiltering] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [filterError, setFilterError] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportConfig, setExportConfig] = useState(createDefaultExportConfig);
+  const [hiddenColumns, setHiddenColumns] = useState([]);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showSurveyMenu, setShowSurveyMenu] = useState(false);
+  const [showGroupMenu, setShowGroupMenu] = useState(false);
+  const [showElementMenu, setShowElementMenu] = useState(false);
+  const [shouldLoadSurveys, setShouldLoadSurveys] = useState(true);
+  const [shouldLoadGroups, setShouldLoadGroups] = useState(false);
+  const [surveySearch, setSurveySearch] = useState("");
+  const [elementSearch, setElementSearch] = useState("");
+  const [elementDraft, setElementDraft] = useState(createElementFilterDraft);
+  const [editingElementId, setEditingElementId] = useState(null);
+  const [demographicDraft, setDemographicDraft] = useState(createDemographicFilterDraft);
+  const [editingDemographicField, setEditingDemographicField] = useState(null);
+  const [viewMode, setViewMode] = useState("table");
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
+  const [hasRunQuery, setHasRunQuery] = useState(false);
+
+  const surveyMenuRef = useRef(null);
+  const groupMenuRef = useRef(null);
+  const elementMenuRef = useRef(null);
+  const loadResultsRef = useRef(null);
+  const {
+    surveys: availableSurveys,
+    elements: availableElements,
+    groups: allGroups,
+    loading,
+  } = useResearcherMeta({
+    includeSurveys: shouldLoadSurveys,
+    includeElements: true,
+    includeInactiveElements: true,
+    excludeProfileElements: true,
+    includeGroups: shouldLoadGroups,
   });
 
-  const [surveySearch, setSurveySearch] = useState("");
-  const [groupSearch, setGroupSearch] = useState("");
-  const [langSearch, setLangSearch] = useState("");
-  const [langOpen, setLangOpen] = useState(false);
-  const langRef = useRef(null);
-  const [isSurveyOpen, setIsSurveyOpen] = useState(false);
-  const [isGroupOpen, setIsGroupOpen] = useState(false);
-  const [sourceStatusFilter, setSourceStatusFilter] = useState("PUBLISHED");
+  const numericElements = useMemo(
+    () => (availableElements || []),
+    [availableElements],
+  );
 
-  // 🟢 NEW: Individual refs for each dropdown so they close properly
-  const surveyDropdownRef = useRef(null);
-  const groupDropdownRef = useRef(null);
+  const isNumericElement = useCallback(
+    (elementId) => {
+      const element = (availableElements || []).find(
+        (candidate) => String(candidate.element_id) === String(elementId),
+      );
+      return !element || ["number", "int", "integer", "float", "double", "decimal", "numeric"].includes(
+        String(element.datatype || "number").toLowerCase(),
+      );
+    },
+    [availableElements],
+  );
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      // If click is outside the survey box, close survey
-      if (
-        surveyDropdownRef.current &&
-        !surveyDropdownRef.current.contains(event.target)
-      ) {
-        setIsSurveyOpen(false);
-      }
-      // If click is outside the group box, close group
-      if (
-        groupDropdownRef.current &&
-        !groupDropdownRef.current.contains(event.target)
-      ) {
-        setIsGroupOpen(false);
-      }
-      if (langRef.current && !langRef.current.contains(event.target)) {
-        setLangOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const [viewMode, setViewMode] = useState("table"); // "table" or "charts"
-
-  // 1. Initial Data Load — load surveys+groups first so the page renders immediately,
-  useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      api.getAvailableSurveys().catch(() => []),
-      api.listGroups().catch(() => []),
-      api.listForms().catch(() => []),
-    ])
-      .then(([formsRes, groupsRes, allFormsRes]) => {
-        setAvailableSurveys(formsRes || []);
-
-        const fetchedGroups = groupsRes || [];
-        setAllGroups(fetchedGroups);
-        setAvailableGroups(fetchedGroups);
-
-        setAllForms(allFormsRes || []); // 🟢 STORE THE FULL FORMS LIST
-      })
-      .catch((err) => console.error("API Error:", err))
-      .finally(() => setLoading(false));
-
-    // Results load in the background — apply default age range so only valid participants show
-    setFiltering(true);
-    api
-      .getResearcherResults({ age_min: 18, age_max: 100 })
-      .then((resultsRes) =>
-        setQueryData({
-          columns: (resultsRes.columns || []).filter(
-            (col) =>
-              col.id !== "participant_id" &&
-              col.text?.toLowerCase() !== "participant id",
-          ),
-          data: resultsRes.data || [],
-        }),
-      )
-      .catch((err) => console.error("Results Error:", err))
-      .finally(() => setFiltering(false));
-  }, []);
-
-  // 2. The Instant Local Group Filter (USING LISTFORMS DATA)
-  useEffect(() => {
-    if (!filters.survey_id) {
-      setAvailableGroups(allGroups); // Show all groups if no survey selected
-      return;
+  const participantMarkerMap = useMemo(() => {
+    const markers = new Map();
+    let nextNumber = 1;
+    for (const row of queryData.data || []) {
+      const participantId = row?._participant_id;
+      if (!participantId || markers.has(participantId)) continue;
+      markers.set(participantId, nextNumber);
+      nextNumber += 1;
     }
+    return markers;
+  }, [queryData.data]);
 
-    // 🟢 Look up the survey in allForms because it contains deployed_groups!
-    const surveyDetails = allForms.find(
-      (s) => (s.form_id || s.id) === filters.survey_id,
-    );
+  const getSurveyOwnershipLabel = useCallback(
+    (survey) =>
+      String(survey?.created_by || "") === String(user?.user_id || "")
+        ? "Mine"
+        : "Other",
+    [user?.user_id],
+  );
 
-    // Grab the exact arrays you saw in the Network tab
-    const groupIds = surveyDetails?.deployed_group_ids || [];
-    const groupNames = surveyDetails?.deployed_groups || [];
+  const getSurveyStatusLabel = useCallback(
+    (survey) => String(survey?.status || "").replaceAll("_", " ") || "Unknown",
+    [],
+  );
 
-    if (groupIds.length > 0) {
-      // Zip the IDs and Names together perfectly
-      const mappedGroups = groupIds.map((id, index) => ({
-        id: id,
-        group_id: id,
-        name: groupNames[index] || `Group ${id.substring(0, 8)}`,
-      }));
+  const getSurveyStatusClasses = useCallback((survey) => {
+    const status = String(survey?.status || "").toUpperCase();
+    if (status === "PUBLISHED") {
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    }
+    if (status === "ARCHIVED") {
+      return "border-slate-200 bg-slate-100 text-slate-600";
+    }
+    if (status === "DELETED") {
+      return "border-rose-200 bg-rose-50 text-rose-700";
+    }
+    return "border-slate-200 bg-slate-50 text-slate-600";
+  }, []);
 
-      setAvailableGroups(mappedGroups);
+  const surveyOptions = useMemo(
+    () => normalizeAvailableSurveys(availableSurveys),
+    [availableSurveys],
+  );
 
-      // Auto-select them so the blue pills appear instantly
-      setFilters((prev) => {
-        const currentStr = (prev.group_ids || []).slice().sort().join(",");
-        const newStr = groupIds.slice().sort().join(",");
-        if (currentStr === newStr) return prev; // Prevent infinite loops
+  const filteredSurveyOptions = useMemo(() => {
+    const term = surveySearch.trim().toLowerCase();
+    if (!term) return surveyOptions;
 
-        return { ...prev, group_ids: [...groupIds] };
+    return surveyOptions.filter((survey) => {
+      const searchableText = [survey.title || "", survey.version ? `v${survey.version}` : ""]
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(term);
+    });
+  }, [surveyOptions, surveySearch]);
+
+  const getSurveyOwnershipClasses = useCallback(
+    (survey) =>
+      String(survey?.created_by || "") === String(user?.user_id || "")
+        ? "border-blue-200 bg-blue-50 text-blue-700"
+        : "border-amber-200 bg-amber-50 text-amber-700",
+    [user?.user_id],
+  );
+
+  const appliedSurvey = useMemo(
+    () =>
+      availableSurveys.find(
+        (form) => String(form.form_id || form.id || "") === String(appliedFilters.survey_id || ""),
+      ) || null,
+    [appliedFilters.survey_id, availableSurveys],
+  );
+
+  const groupByOptions = useMemo(() => {
+    const options = [
+      { value: "demographic:gender", label: "Gender" },
+      { value: "demographic:pronouns", label: "Pronouns" },
+      { value: "demographic:primary_language", label: "Primary Language" },
+      { value: "demographic:occupation_status", label: "Occupation" },
+      { value: "demographic:living_arrangement", label: "Living Arrangement" },
+      { value: "demographic:highest_education_level", label: "Education" },
+      { value: "demographic:marital_status", label: "Marital Status" },
+      { value: "demographic:age_bucket", label: "Age Range" },
+    ];
+
+    const seen = new Set(options.map((option) => option.value));
+    (draftFilters.element_filters || []).forEach((filter) => {
+      const elementId = String(filter.element_id || "");
+      if (!elementId) return;
+      const optionValue = `element:${elementId}`;
+      if (seen.has(optionValue)) return;
+      const element = (availableElements || []).find(
+        (candidate) => String(candidate.element_id) === elementId,
+      );
+      if (!isCategoricalElement(element)) return;
+      options.push({
+        value: optionValue,
+        label: element ? `${element.label}${element.unit ? ` (${element.unit})` : ""}` : "Data Element",
       });
-    } else {
-      // Survey has zero deployed groups
-      setAvailableGroups([]);
-      setFilters((prev) => ({ ...prev, group_ids: [] }));
-    }
-  }, [filters.survey_id, allGroups, allForms]); // 🟢 Added allForms to dependencies
-
-  // Group surveys into version families — one entry per form family
-  const surveyFamilies = useMemo(() => {
-    const familyMap = {};
-    availableSurveys.forEach((s) => {
-      const rootId = String(s.parent_form_id || s.form_id || s.id);
-      if (!familyMap[rootId]) familyMap[rootId] = [];
-      familyMap[rootId].push(s);
+      seen.add(optionValue);
     });
-    return Object.values(familyMap).map((fam) => {
-      const sorted = [...fam].sort((a, b) => (b.version || 1) - (a.version || 1));
-      return { latest: sorted[0], versions: sorted };
-    });
-  }, [availableSurveys]);
 
-  // Derive the selected family from the current survey_id
-  const selectedFamily = useMemo(() => {
-    if (!filters.survey_id) return null;
-    const s = availableSurveys.find((s) => (s.form_id || s.id) === filters.survey_id);
-    if (!s) return null;
-    const rootId = String(s.parent_form_id || s.form_id || s.id);
-    const versions = availableSurveys
-      .filter((f) => String(f.parent_form_id || f.form_id || f.id) === rootId)
-      .sort((a, b) => (b.version || 1) - (a.version || 1));
-    return { title: versions[0].title, versions };
-  }, [filters.survey_id, availableSurveys]);
+    return options;
+  }, [draftFilters.element_filters, availableElements]);
 
-  // Auto-fetch when any filter changes (debounced 400ms)
-  const filterMounted = useRef(false);
-  useEffect(() => {
-    if (!filterMounted.current) {
-      filterMounted.current = true;
-      return;
+  const appliedGroupByLabel = useMemo(
+    () => {
+      const currentValue =
+        appliedFilters.group_by?.type === "demographic"
+          ? `demographic:${appliedFilters.group_by.field}`
+          : appliedFilters.group_by?.type === "element"
+            ? `element:${appliedFilters.group_by.element_id}`
+            : "";
+      return groupByOptions.find((option) => option.value === currentValue)?.label || getGroupByLabel(appliedFilters.group_by);
+    },
+    [appliedFilters.group_by, groupByOptions],
+  );
+
+  const draftGroupByValue = useMemo(() => {
+    if (!draftFilters.group_by) return "";
+    if (draftFilters.group_by.type === "demographic") {
+      return `demographic:${draftFilters.group_by.field}`;
     }
-    const timer = setTimeout(() => applyFilters(), 400);
-    return () => clearTimeout(timer);
-  }, [
-    filters.survey_id,
-    filters.group_ids,
-    filters.gender,
-    filters.status,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    filters.primary_language.join(","),
-    filters.age_min,
-    filters.age_max,
-    filters.highest_education_level,
-    filters.marital_status,
-    filters.living_arrangement,
-    filters.dependents_min,
-    filters.dependents_max,
-    filters.pronouns,
-    filters.occupation_status,
-  ]);
+    if (draftFilters.group_by.type === "element") {
+      return `element:${draftFilters.group_by.element_id}`;
+    }
+    return "";
+  }, [draftFilters.group_by]);
 
-  // NEW STATS CALCULATION: Filtered Results, Total Participants, Active Groups
+  const prioritizedElementColumnIds = useMemo(
+    () =>
+      !appliedFilters.survey_id
+        ? (appliedFilters.element_filters || [])
+            .map((filter) => String(filter.element_id || ""))
+            .filter(Boolean)
+        : [],
+    [appliedFilters.element_filters, appliedFilters.survey_id],
+  );
+
+  const selectedElementFilters = useMemo(
+    () => (draftFilters.element_filters || []).filter((filter) => filter.element_id),
+    [draftFilters.element_filters],
+  );
+
+  const showAllowNullToggle = useMemo(
+    () =>
+      !draftFilters.survey_id ||
+      (draftFilters.element_filters || []).length > 0 ||
+      (appliedFilters.element_filters || []).length > 0,
+    [draftFilters.survey_id, draftFilters.element_filters, appliedFilters.element_filters],
+  );
+
+  const selectedGroups = useMemo(
+    () =>
+      (draftFilters.group_ids || [])
+        .map((groupId) =>
+          allGroups.find((group) => String(group.group_id || group.id) === String(groupId)),
+        )
+        .filter(Boolean),
+    [draftFilters.group_ids, allGroups],
+  );
+
+  const availableElementChoices = useMemo(() => {
+    const selectedIds = new Set(selectedElementFilters.map((filter) => String(filter.element_id)));
+    const searchTerm = elementSearch.trim().toLowerCase();
+
+    return numericElements.filter((element) => {
+      if (selectedIds.has(String(element.element_id))) return false;
+      if (!searchTerm) return true;
+      const searchableText = `${element.label || ""} ${element.code || ""} ${element.unit || ""}`.toLowerCase();
+      return searchableText.includes(searchTerm);
+    });
+  }, [numericElements, selectedElementFilters, elementSearch]);
+
+  const elementOperatorOptions = useMemo(
+    () => ({
+      numeric: [],
+      text: [],
+    }),
+    [],
+  );
+
+  const orderedColumns = useMemo(() => {
+    const columns = [...(queryData.columns || [])].filter(
+      (column) => !HIDDEN_SYSTEM_COLUMN_IDS.has(column.id),
+    );
+    if (prioritizedElementColumnIds.length === 0) return columns;
+
+    const prioritySet = new Set(prioritizedElementColumnIds);
+    const demographics = [];
+    const remaining = [];
+    const prioritized = [];
+
+    columns.forEach((column) => {
+      if (DEMOGRAPHIC_COLUMN_IDS.has(column.id)) demographics.push(column);
+      else if (prioritySet.has(column.id)) prioritized.push(column);
+      else remaining.push(column);
+    });
+
+    return [...demographics, ...remaining, ...prioritized];
+  }, [queryData.columns, prioritizedElementColumnIds]);
+
+  const visibleColumns = useMemo(
+    () => orderedColumns.filter((column) => !hiddenColumns.includes(column.id)),
+    [orderedColumns, hiddenColumns],
+  );
+
+  const loadedParticipantCount = useMemo(() => {
+    if (appliedFilters.group_by) {
+      return queryData.data.length;
+    }
+    return new Set(queryData.data.map((row) => row._participant_id).filter(Boolean)).size;
+  }, [appliedFilters.group_by, queryData.data]);
+
   const stats = useMemo(() => {
-    const count = queryData.data.length;
+    const selectedCount = appliedFilters.group_ids.length;
+    const selectedSources = appliedFilters.source_types || ["survey", "goal"];
+    const selectedGroupName =
+      (appliedFilters.group_ids || [])
+        .map((groupId) =>
+          allGroups.find((group) => String(group.group_id || group.id) === String(groupId)),
+        )
+        .filter(Boolean)[0]?.name || null;
+    const totalGroupCount = allGroups.length;
+    const sourceLabels = {
+      survey: "Survey",
+      goal: "Goal",
+    };
+    const sourceSummary = selectedSources
+      .map((sourceType) => sourceLabels[sourceType] || sourceType)
+      .join(" + ");
+    const dateSummary =
+      appliedFilters.date_from || appliedFilters.date_to
+        ? `${appliedFilters.date_from || "Any start"} to ${appliedFilters.date_to || "Today"}`
+        : "All dates";
+    const healthColumnsVisible = (queryData.columns || []).some(
+      (column) =>
+        column &&
+        !HIDDEN_SYSTEM_COLUMN_IDS.has(column.id) &&
+        !DEMOGRAPHIC_COLUMN_IDS.has(column.id),
+    );
+    const hasHealthScope =
+      Boolean(appliedFilters.survey_id) ||
+      Boolean(appliedFilters.group_by) ||
+      (appliedFilters.element_filters || []).length > 0 ||
+      healthColumnsVisible;
+    const isDemographicsOnlyView = !hasHealthScope;
 
-    // 🟢 NEW RATIO LOGIC
-    const selectedCount = filters.group_ids.length;
-    const totalAssigned = availableGroups.length;
+    const primaryLabel = isDemographicsOnlyView
+      ? "Participant profiles in scope"
+      : "Participants in current scope";
+    const primaryDescription = isDemographicsOnlyView
+      ? (
+        appliedFilters.date_from || appliedFilters.date_to
+          ? `Showing demographic profiles for participants with records from ${dateSummary}.`
+          : "Showing demographic profile data only."
+      )
+      : `${sourceSummary} data across ${dateSummary}.`;
+
+    const resultLabel = isDemographicsOnlyView
+      ? appliedFilters.survey_id
+        ? "Survey selected"
+        : "Available surveys"
+      : appliedFilters.group_by
+        ? "Grouped results"
+        : appliedFilters.mode === "longitudinal"
+          ? "Observations loaded"
+          : "Participant summaries";
+    const rowSummary = isDemographicsOnlyView
+      ? appliedFilters.survey_id
+        ? `${appliedSurvey?.title || "Selected survey"} is currently in scope for health data filters.`
+        : `${surveyOptions.length} surveys are available to add health data columns and filters.`
+      : appliedFilters.group_by
+        ? `Grouped by ${appliedGroupByLabel}.`
+        : appliedFilters.mode === "longitudinal"
+          ? "One row per observation."
+          : "One row per participant with summarized health data.";
 
     return {
-      count,
-      totalParticipants: count,
-      // This creates the "1 of 2" text
+      totalParticipants: pagination.total_participants,
+      filteredResults: isDemographicsOnlyView
+        ? appliedFilters.survey_id
+          ? 1
+          : surveyOptions.length
+        : queryData.data.length,
       activeGroupsText:
-        selectedCount > 0
-          ? `${selectedCount} of ${totalAssigned}`
-          : totalAssigned > 0
-            ? `All (${totalAssigned})`
-            : "0",
-      isFiltered: selectedCount > 0 && selectedCount < totalAssigned,
+        selectedGroupName
+          ? selectedGroupName
+          : totalGroupCount > 0
+            ? `All (${totalGroupCount})`
+            : "All participants",
+      isGroupFiltered: selectedCount > 0,
+      primaryLabel,
+      primaryDescription,
+      resultLabel,
+      rowSummary,
     };
-  }, [queryData, filters.group_ids, availableGroups]);
+  }, [
+    appliedFilters.date_from,
+    appliedFilters.element_filters,
+    appliedFilters.group_by,
+    appliedFilters.group_ids,
+    appliedFilters.mode,
+    appliedFilters.source_types,
+    appliedFilters.survey_id,
+    appliedFilters.date_to,
+    allGroups,
+    appliedGroupByLabel,
+    pagination.total_participants,
+    appliedSurvey,
+    queryData.columns,
+    queryData.data.length,
+    surveyOptions.length,
+  ]);
 
-  // ── TABLE SORTING STATE & LOGIC ──
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
-
-  const handleSort = (key) => {
-    let direction = "asc";
-    if (sortConfig.key === key && sortConfig.direction === "asc") {
-      direction = "desc";
-    }
-    setSortConfig({ key, direction });
-  };
-
-  const sortedData = useMemo(() => {
-    let sortableItems = [...queryData.data];
-    if (sortConfig.key !== null) {
-      sortableItems.sort((a, b) => {
-        // We use ?? "" to safely handle those annoying null values we talked about!
-        const aValue = a[sortConfig.key] ?? "";
-        const bValue = b[sortConfig.key] ?? "";
-
-        if (aValue < bValue) {
-          return sortConfig.direction === "asc" ? -1 : 1;
-        }
-        if (aValue > bValue) {
-          return sortConfig.direction === "asc" ? 1 : -1;
-        }
-        return 0;
-      });
-    }
-    return sortableItems;
-  }, [queryData.data, sortConfig]);
-
-  // DERIVE CHART DATA
   const chartData = useMemo(() => {
     const genderCounts = { Male: 0, Female: 0 };
     const ageBuckets = { "Under 25": 0, "26-35": 0, "36-50": 0, "51+": 0 };
 
     queryData.data.forEach((row) => {
-      // Tally Gender — intake form only records Male/Female
-      const g = row.gender || "";
-      if (genderCounts[g] !== undefined) genderCounts[g]++;
-
-      // Tally Age Buckets
-      const a = row.age;
-      if (a) {
-        if (a <= 25) ageBuckets["Under 25"]++;
-        else if (a >= 26 && a <= 35) ageBuckets["26-35"]++;
-        else if (a >= 36 && a <= 50) ageBuckets["36-50"]++;
-        else if (a >= 51) ageBuckets["51+"]++;
+      const gender = row.gender || "";
+      if (genderCounts[gender] !== undefined) genderCounts[gender] += 1;
+      const age = row.age;
+      if (typeof age === "number") {
+        if (age <= 25) ageBuckets["Under 25"] += 1;
+        else if (age <= 35) ageBuckets["26-35"] += 1;
+        else if (age <= 50) ageBuckets["36-50"] += 1;
+        else ageBuckets["51+"] += 1;
       }
     });
 
@@ -299,1434 +620,1631 @@ export default function ResearcherDashboard() {
       gender: [
         { name: "Male", value: genderCounts.Male },
         { name: "Female", value: genderCounts.Female },
-      ].filter((d) => d.value > 0),
-      age: Object.keys(ageBuckets).map((k) => ({
-        name: k,
-        count: ageBuckets[k],
-      })),
+      ].filter((entry) => entry.value > 0),
+      age: Object.keys(ageBuckets).map((name) => ({ name, count: ageBuckets[name] })),
     };
-  }, [queryData]);
+  }, [queryData.data]);
 
-  const CHART_COLORS = ["#3b82f6", "#10b981", "#6366f1"]; // Blue, Emerald, Indigo
+  const demographicFilterSummaries = useMemo(
+    () =>
+      (draftFilters.demographic_filters || []).map((filter, index) => {
+        const label = getDemographicFieldLabel(filter.field);
+        if (filter.operator === "between" && filter.value_max !== "") {
+          return {
+            key: `${filter.field}-${index}`,
+            text: `${label}: ${filter.value} to ${filter.value_max}`,
+          };
+        }
+        return {
+          key: `${filter.field}-${index}`,
+          text: `${label}: ${filter.value}`,
+        };
+      }),
+    [draftFilters.demographic_filters],
+  );
 
-  // Smart age validation — clamps on blur, prevents invalid ranges being sent to the API
-  const handleAgeBlur = (field) => {
-    setFilters((prev) => {
-      let currentMin = parseInt(prev.age_min, 10);
-      let currentMax = parseInt(prev.age_max, 10);
+  const buildResearcherPayload = (filters, offset = 0, limit = PAGE_SIZE) => {
+    const demographicFilters = (filters.demographic_filters || [])
+      .filter((filter) => filter.field && filter.operator && filter.value !== "")
+      .map((filter) => ({
+        field: filter.field,
+        operator: filter.operator,
+        value: String(filter.value),
+        ...(filter.operator === "between" && filter.value_max !== ""
+          ? { value_max: String(filter.value_max) }
+          : {}),
+      }));
 
-      if (isNaN(currentMin)) currentMin = 18;
-      if (isNaN(currentMax)) currentMax = 120;
-
-      currentMin = Math.min(Math.max(currentMin, 18), 120);
-      currentMax = Math.min(Math.max(currentMax, 18), 120);
-
-      // Swap if inverted — fix whichever field the user just left
-      if (currentMin > currentMax) {
-        if (field === "min") currentMin = currentMax;
-        else currentMax = currentMin;
-      }
-
-      return { ...prev, age_min: String(currentMin), age_max: String(currentMax) };
-    });
-  };
-
-  // Smart validation for dependents — clamps negatives and fixes inverted ranges even with one side empty
-  const handleDependentsBlur = (field) => {
-    setFilters((prev) => {
-      let currentMin = prev.dependents_min === "" ? null : parseInt(prev.dependents_min, 10);
-      let currentMax = prev.dependents_max === "" ? null : parseInt(prev.dependents_max, 10);
-
-      if (currentMin !== null && currentMin < 0) currentMin = 0;
-      if (currentMax !== null && currentMax < 0) currentMax = 0;
-
-      // Fix inverted range — even when only one side is filled
-      if (currentMin !== null && currentMax !== null && currentMin > currentMax) {
-        if (field === "min") currentMin = currentMax;
-        else currentMax = currentMin;
-      }
-
+    const explicitSelectedElementIds = uniqueIds(filters.selected_element_ids || []);
+    const selectedElements = uniqueIds([
+      ...explicitSelectedElementIds,
+      ...(filters.element_filters || []).map((filter) => filter.element_id).filter(Boolean),
+    ]).map((elementId) => {
+      const matchingFilter = (filters.element_filters || []).find(
+        (filter) => String(filter.element_id) === String(elementId),
+      );
       return {
-        ...prev,
-        dependents_min: currentMin !== null ? String(currentMin) : "",
-        dependents_max: currentMax !== null ? String(currentMax) : "",
+        element_id: elementId,
+        source_types:
+          matchingFilter?.source_types && matchingFilter.source_types.length > 0
+            ? matchingFilter.source_types
+            : filters.source_types && filters.source_types.length > 0
+              ? filters.source_types
+              : ["survey", "goal"],
       };
     });
-  };
+    const selectedElementIds = selectedElements.map((filter) => filter.element_id);
 
-  //  5. Updated Reset Function
-  const resetFilters = () => {
-    setLoading(true);
-    setFilters({
-      survey_id: "",
-      group_ids: [],
-      search: "",
-      status: "",
-      gender: "",
-      primary_language: [],
-      date_range: "all_time",
-      age_min: "18",
-      age_max: "100",
-      // 🟢 Add to reset
-      highest_education_level: "",
-      marital_status: "",
-      living_arrangement: "",
-      dependents_min: "",
-      dependents_max: "",
-      pronouns: "",
-      occupation_status: "",
+    const elementFilters = (filters.element_filters || [])
+      .flatMap((filter) => {
+        if (!filter.element_id || !filter.operator) return [];
+
+        const sourceTypes =
+          filter.source_types && filter.source_types.length > 0
+            ? filter.source_types
+            : ["survey", "goal"];
+
+        if (["has_value", "is_empty"].includes(filter.operator)) {
+          return [
+            {
+              element_id: filter.element_id,
+              operator: filter.operator,
+              source_types: sourceTypes,
+            },
+          ];
+        }
+
+        if (filter.value === "") {
+          return [];
+        }
+
+        return [
+          {
+            element_id: filter.element_id,
+            operator: filter.operator,
+            value: Number(filter.value),
+            ...(filter.operator === "between" && filter.value_max !== ""
+              ? { value_max: Number(filter.value_max) }
+              : {}),
+            source_types: sourceTypes,
+          },
+        ];
+      });
+
+    const payload = {
+      ...filters,
+      group_ids: filters.group_ids || [],
+      demographic_filters: demographicFilters,
+      selected_elements: selectedElements,
+      selected_element_ids: selectedElementIds,
+      element_filters: elementFilters,
+      search: String(filters.search || "").trim() || undefined,
+      group_by: filters.group_by || undefined,
+      sort_by: filters.sort_by || undefined,
+      sort_dir: filters.sort_dir || "asc",
+      offset,
+      limit,
+    };
+
+    Object.keys(payload).forEach((key) => {
+      if (payload[key] === "") delete payload[key];
     });
-    api
-      .getResearcherResults({ age_min: 18, age_max: 100 })
-      .then((res) =>
-        setQueryData({
-          columns: (res.columns || []).filter(
-            (col) =>
-              col.id !== "participant_id" &&
-              col.text?.toLowerCase() !== "participant id",
-          ),
-          data: res.data || [],
-        }),
-      )
-      .catch((err) => console.error("API Error:", err))
-      .finally(() => setLoading(false));
+
+    return payload;
   };
 
-  const [isExporting, setIsExporting] = useState(false);
-  const [filterError, setFilterError] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
+  const loadResults = async ({ reset = false, filters = appliedFilters, offset = 0, limit = PAGE_SIZE, updateApplied = false } = {}) => {
+    const payload = buildResearcherPayload(filters, offset, limit);
+
+    if (reset) {
+      setFiltering(true);
+      setFilterError("");
+    } else {
+      setLoadingMore(true);
+    }
+
+    try {
+      const response = filters.group_by
+        ? await api.getResearcherResultsGrouped(payload)
+        : await api.getResearcherResults(payload);
+      const columns = response.columns || DEMOGRAPHIC_COLUMNS;
+      const rows = response.data || [];
+      const responsePagination = response.pagination || {
+        offset,
+        limit,
+        returned_participants: rows.length,
+        total_participants: rows.length,
+        has_more: false,
+        next_offset: offset + rows.length,
+      };
+
+      if (updateApplied) setAppliedFilters(filters);
+      setSortConfig({
+        key: filters.sort_by || null,
+        direction: filters.sort_dir || "asc",
+      });
+      setFilterError("");
+      setPagination(responsePagination);
+      setQueryData((prev) => ({
+        columns,
+        data: reset ? rows : [...prev.data, ...rows],
+      }));
+    } catch (error) {
+      console.error(reset ? "Filter Error:" : "Load More Error:", error);
+      if (reset) {
+        setFilterError(error?.message || "We couldn't apply the current filters. Please review the inputs and try again.");
+        setPagination({
+          offset: 0,
+          limit: PAGE_SIZE,
+          returned_participants: 0,
+          total_participants: 0,
+          has_more: false,
+          next_offset: 0,
+        });
+        setQueryData({ columns: DEMOGRAPHIC_COLUMNS, data: [] });
+      }
+    } finally {
+      if (reset) setFiltering(false);
+      else setLoadingMore(false);
+    }
+  };
+
+  loadResultsRef.current = loadResults;
+
+  useEffect(() => {
+    if (prioritizedElementColumnIds.length === 0) return;
+    setHiddenColumns((prev) => prev.filter((columnId) => !prioritizedElementColumnIds.includes(columnId)));
+  }, [prioritizedElementColumnIds]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (surveyMenuRef.current && !surveyMenuRef.current.contains(event.target)) {
+        setShowSurveyMenu(false);
+      }
+      if (groupMenuRef.current && !groupMenuRef.current.contains(event.target)) {
+        setShowGroupMenu(false);
+      }
+      if (elementMenuRef.current && !elementMenuRef.current.contains(event.target)) {
+        setShowElementMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (loading || hasRunQuery) return;
+    setHasRunQuery(true);
+    loadResultsRef.current({
+      reset: true,
+      filters: createDefaultFilters(),
+      updateApplied: true,
+    });
+  }, [hasRunQuery, loading]);
+
+  const selectedSurvey = useMemo(
+    () =>
+      availableSurveys.find((form) => String(form.form_id || form.id || "") === String(draftFilters.survey_id || "")) ||
+      null,
+    [availableSurveys, draftFilters.survey_id],
+  );
+
+  useEffect(() => {
+    if (draftFilters.survey_id || appliedFilters.survey_id) {
+      setShouldLoadSurveys(true);
+    }
+  }, [appliedFilters.survey_id, draftFilters.survey_id]);
+
+  useEffect(() => {
+    if ((draftFilters.group_ids || []).length > 0 || (appliedFilters.group_ids || []).length > 0) {
+      setShouldLoadGroups(true);
+    }
+  }, [appliedFilters.group_ids, draftFilters.group_ids]);
+
+  const surveyGroupMismatch = useMemo(() => {
+    if (!draftFilters.survey_id || draftFilters.group_ids.length === 0) return false;
+    const deployedGroupIds = new Set((selectedSurvey?.deployed_group_ids || []).map(String));
+    if (deployedGroupIds.size === 0) return false;
+    return !draftFilters.group_ids.some((groupId) => deployedGroupIds.has(String(groupId)));
+  }, [draftFilters.survey_id, draftFilters.group_ids, selectedSurvey]);
+
+  const handleSort = (key) => {
+    if (!hasRunQuery) return;
+    const nextSort =
+      sortConfig.key !== key
+        ? { key, direction: "asc" }
+        : sortConfig.direction === "asc"
+          ? { key, direction: "desc" }
+          : { key: null, direction: "asc" };
+
+    const nextFilters = {
+      ...appliedFilters,
+      sort_by: nextSort.key,
+      sort_dir: nextSort.direction,
+    };
+    setDraftFilters(nextFilters);
+    setQueryData((prev) => ({ ...prev, data: [] }));
+    setPagination((prev) => ({ ...prev, offset: 0, next_offset: 0 }));
+    loadResultsRef.current({
+      reset: true,
+      filters: nextFilters,
+      updateApplied: true,
+    });
+  };
+
+  const applyFilters = () => {
+    setHasRunQuery(true);
+    loadResultsRef.current({
+      reset: true,
+      filters: draftFilters,
+      updateApplied: true,
+    });
+  };
+
+  const resetFilters = () => {
+    const nextFilters = createDefaultFilters();
+    setDraftFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setElementDraft(createElementFilterDraft());
+    setDemographicDraft(createDemographicFilterDraft());
+    setElementSearch("");
+    setShowElementMenu(false);
+    setHiddenColumns([]);
+    setQueryData({ columns: DEMOGRAPHIC_COLUMNS, data: [] });
+    setPagination({
+      offset: 0,
+      limit: PAGE_SIZE,
+      returned_participants: 0,
+      total_participants: 0,
+      has_more: false,
+      next_offset: 0,
+    });
+    setFilterError("");
+    setSortConfig({ key: null, direction: "asc" });
+    if (hasRunQuery) {
+      loadResultsRef.current({
+        reset: true,
+        filters: nextFilters,
+        updateApplied: true,
+      });
+      return;
+    }
+  };
+
+  const toggleColumn = (columnId) => {
+    const baseElementId = String(columnId || "").split("__")[0];
+    const isHealthDataElement = (availableElements || []).some(
+      (element) => String(element.element_id) === baseElementId,
+    );
+
+    if (isHealthDataElement) {
+      const scopedElementIds = uniqueIds(
+        (orderedColumns || [])
+          .map((column) => {
+            const elementId = String(column.id || "").split("__")[0];
+            return (availableElements || []).some(
+              (element) => String(element.element_id) === elementId,
+            )
+              ? elementId
+              : null;
+          })
+          .filter(Boolean),
+      );
+
+      let nextFilters = null;
+      setDraftFilters((prev) => {
+        const remainingElementFilters = prev.element_filters.filter(
+          (filter) => String(filter.element_id) !== baseElementId,
+        );
+        const remainingExplicitIds = scopedElementIds.filter(
+          (elementId) =>
+            elementId !== baseElementId &&
+            !remainingElementFilters.some(
+              (filter) => String(filter.element_id) === String(elementId),
+            ),
+        );
+
+        nextFilters = {
+          ...prev,
+          selected_element_ids: remainingExplicitIds,
+          element_filters: remainingElementFilters,
+        };
+        return nextFilters;
+      });
+
+      setHiddenColumns((prev) =>
+        prev.filter((id) => String(id || "").split("__")[0] !== baseElementId),
+      );
+
+      if (String(editingElementId || "") === baseElementId) {
+        setElementDraft(createElementFilterDraft());
+        setEditingElementId(null);
+      }
+
+      if (nextFilters) {
+        loadResultsRef.current({
+          reset: true,
+          filters: nextFilters,
+          updateApplied: true,
+        });
+      }
+      return;
+    }
+
+    setHiddenColumns((prev) =>
+      prev.includes(columnId) ? prev.filter((id) => id !== columnId) : [...prev, columnId],
+    );
+  };
+
+  const addElementFilterById = (elementId) => {
+    if (!elementId) return;
+    const existing = (draftFilters.element_filters || []).find(
+      (filter) => String(filter.element_id) === String(elementId),
+    );
+    if (existing) {
+      setElementDraft({
+        element_id: String(existing.element_id || ""),
+        operator: "has_value",
+        value: "",
+        value_max: "",
+      });
+      setEditingElementId(String(elementId));
+    } else {
+      setElementDraft(() => ({
+        element_id: elementId,
+        operator: "has_value",
+        value: "",
+        value_max: "",
+      }));
+      setEditingElementId(null);
+    }
+    setElementSearch("");
+    setShowElementMenu(false);
+  };
+
+  const removeElementFilterById = (elementId) => {
+    setDraftFilters((prev) => {
+      return {
+        ...prev,
+        element_filters: prev.element_filters.filter(
+          (filter) => String(filter.element_id) !== String(elementId),
+        ),
+      };
+    });
+    if (String(editingElementId || "") === String(elementId)) {
+      setElementDraft(createElementFilterDraft());
+      setEditingElementId(null);
+    }
+  };
+
+  const editElementFilterById = (elementId) => {
+    const existing = (draftFilters.element_filters || []).find(
+      (filter) => String(filter.element_id) === String(elementId),
+    );
+    if (!existing) return;
+    setElementDraft({
+      element_id: String(existing.element_id || ""),
+      operator: "has_value",
+      value: "",
+      value_max: "",
+    });
+    setEditingElementId(String(elementId));
+    setShowElementMenu(false);
+    setElementSearch("");
+  };
+
+  const updateElementDraft = (key, value) => {
+    setElementDraft((prev) => {
+      const currentElementId = key === "element_id" ? value : prev.element_id;
+      const numericElementSelected = isNumericElement(currentElementId);
+      if (key === "operator") {
+        const isPresenceOperator = ["has_value", "is_empty"].includes(value);
+        return {
+          ...prev,
+          operator: value,
+          value: isPresenceOperator ? "" : prev.value,
+          value_max: value === "between" ? prev.value_max : "",
+        };
+      }
+      if (key === "element_id") {
+        const nextOperator =
+          numericElementSelected
+            ? (["has_value", "is_empty"].includes(prev.operator) ? prev.operator : prev.operator || "gte")
+            : "has_value";
+        return {
+          ...prev,
+          element_id: value,
+          operator: nextOperator,
+          value: numericElementSelected ? prev.value : "",
+          value_max: numericElementSelected && nextOperator === "between" ? prev.value_max : "",
+        };
+      }
+      if (!numericElementSelected && (key === "value" || key === "value_max")) {
+        return prev;
+      }
+      return { ...prev, [key]: value };
+    });
+  };
+
+  const addElementFilter = () => {
+    if (!elementDraft.element_id) return;
+
+    setDraftFilters((prev) => {
+      const nextFilter = {
+        ...elementDraft,
+        source_types:
+          prev.source_types && prev.source_types.length > 0
+            ? prev.source_types
+            : ["survey", "goal"],
+      };
+      const existingIndex = prev.element_filters.findIndex(
+        (filter) => String(filter.element_id) === String(nextFilter.element_id),
+      );
+      if (existingIndex >= 0) {
+        return {
+          ...prev,
+          element_filters: normalizeElementFilters(prev.element_filters.map((filter, index) =>
+            index === existingIndex ? nextFilter : filter,
+          )),
+        };
+      }
+      return {
+        ...prev,
+        element_filters: normalizeElementFilters([...prev.element_filters, nextFilter]),
+      };
+    });
+    setElementDraft(createElementFilterDraft());
+    setEditingElementId(null);
+    setElementSearch("");
+  };
+
+  const addDemographicFilter = () => {
+    if (demographicDraft.value === "") return;
+    setDraftFilters((prev) => {
+      const nextFilter = { ...demographicDraft };
+      const existingIndex = prev.demographic_filters.findIndex(
+        (filter) => String(filter.field) === String(nextFilter.field),
+      );
+      if (existingIndex >= 0) {
+        return {
+          ...prev,
+          demographic_filters: prev.demographic_filters.map((filter, index) =>
+            index === existingIndex ? nextFilter : filter,
+          ),
+        };
+      }
+      return {
+        ...prev,
+        demographic_filters: [...prev.demographic_filters, nextFilter],
+      };
+    });
+    setDemographicDraft(createDemographicFilterDraft());
+    setEditingDemographicField(null);
+  };
+
+  const updateDemographicDraft = (key, value) => {
+    setDemographicDraft((prev) => {
+      if (key === "field") {
+        return {
+          field: value,
+          operator: "eq",
+          value: "",
+          value_max: "",
+        };
+      }
+      if (key === "operator") {
+        return {
+          ...prev,
+          operator: value,
+          value_max: value === "between" ? prev.value_max : "",
+        };
+      }
+      return { ...prev, [key]: value };
+    });
+  };
+
+  const removeDemographicFilter = (index) => {
+    setDraftFilters((prev) => {
+      return {
+        ...prev,
+        demographic_filters: prev.demographic_filters.filter((_, filterIndex) => filterIndex !== index),
+      };
+    });
+    const removedField = draftFilters.demographic_filters[index]?.field;
+    if (removedField && String(editingDemographicField || "") === String(removedField)) {
+      setDemographicDraft(createDemographicFilterDraft());
+      setEditingDemographicField(null);
+    }
+  };
+
+  const editDemographicFilter = (index) => {
+    const existing = (draftFilters.demographic_filters || [])[index];
+    if (!existing) return;
+    setDemographicDraft({
+      field: existing.field || "gender",
+      operator: existing.operator || "eq",
+      value: existing.value ?? "",
+      value_max: existing.value_max ?? "",
+    });
+    setEditingDemographicField(String(existing.field || ""));
+  };
 
   const handleExport = async () => {
     setIsExporting(true);
     try {
-      const activeFilters = {};
-      Object.entries(filters).forEach(([key, value]) => {
-        if (Array.isArray(value)) {
-          if (value.length > 0) activeFilters[key] = value;
-        } else if (value !== "" && value !== "all_time") {
-          activeFilters[key] = value;
+      const payload = buildResearcherPayload(appliedFilters, 0, PAGE_SIZE);
+      delete payload.limit;
+      delete payload.offset;
+      const trimmedName = (exportConfig.filename || "").trim() || createDefaultExportConfig().filename;
+      const downloadName = `${trimmedName}.${exportConfig.type}`;
+      if (appliedFilters.group_by) {
+        if (exportConfig.type === "xlsx") {
+          await api.downloadResearcherResultsGroupedExcel(payload, hiddenColumns, downloadName);
+        } else {
+          await api.downloadResearcherResultsGrouped(payload, hiddenColumns, downloadName);
         }
-      });
-      await api.downloadResearcherResults(activeFilters, hiddenColumns);
-    } catch (err) {
-      alert("Export failed: " + err.message);
+      } else {
+        if (exportConfig.type === "xlsx") {
+          await api.downloadResearcherResultsExcel(payload, hiddenColumns, downloadName);
+        } else {
+          await api.downloadResearcherResults(payload, hiddenColumns, downloadName);
+        }
+      }
+      setShowExportModal(false);
     } finally {
       setIsExporting(false);
     }
   };
 
-  const handleFilterChange = (field, value) => {
-    setFilters((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const applyFilters = () => {
-    // Survey selected but all groups deselected — nothing can match
-    if (filters.survey_id && availableGroups.length > 0 && filters.group_ids.length === 0) {
-      setQueryData({ columns: [], data: [] });
-      return;
-    }
-
-    setFiltering(true);
-    setFilterError(false);
-    const activeFilters = {};
-
-    Object.entries(filters).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        if (value.length > 0) activeFilters[key] = value;
-      } else if (value !== "" && value !== "all_time") {
-        activeFilters[key] = value;
-      }
-    });
-
-    api
-      .getResearcherResults(activeFilters)
-      .then((res) => {
-        setFilterError(false);
-        setQueryData({
-          columns: (res.columns || []).filter(
-            (col) =>
-              col.id !== "participant_id" &&
-              col.text?.toLowerCase() !== "participant id",
-          ),
-          data: res.data || [],
-        });
-      })
-      .catch((err) => { console.error("Filter Error:", err); setFilterError(true); })
-      .finally(() => setFiltering(false));
-  };
-
   return (
     <div className="w-full space-y-6">
-      {/* Help modal */}
-      {showHelp && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowHelp(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 pt-6 pb-4 border-b border-slate-100 flex items-start justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-900">How the Dashboard Works</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">A quick guide for researchers</p>
-                </div>
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">
+            Welcome, {user?.first_name || "Researcher"}
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Review participant demographics and survey-linked health data in one place.
+          </p>
+        </div>
+
+        <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              setExportConfig(createDefaultExportConfig());
+              setShowExportModal(true);
+            }}
+            disabled={isExporting || filtering}
+            className={`rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
+              isExporting || filtering
+                ? "cursor-not-allowed bg-slate-200 text-slate-500"
+                : "bg-blue-700 text-white hover:bg-blue-800"
+            }`}
+          >
+            {isExporting ? "Exporting..." : "Export"}
+          </button>
+        </div>
+      </div>
+
+      {showExportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Export results</h2>
+                <p className="mt-1 text-sm text-slate-500">Choose the file name and format for this download.</p>
               </div>
-              <button onClick={() => setShowHelp(false)} className="text-slate-300 hover:text-slate-500 transition-colors shrink-0">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+              <button
+                type="button"
+                onClick={() => !isExporting && setShowExportModal(false)}
+                className="text-slate-400 transition hover:text-slate-600"
+                aria-label="Close export dialog"
+              >
+                ×
               </button>
             </div>
-            <div className="px-6 py-5 space-y-4 text-sm text-slate-600">
-              <div className="flex gap-3">
-                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">1</span>
-                <div>
-                  <p className="font-semibold text-slate-800">Participant data table</p>
-                  <p className="text-slate-500 text-xs mt-0.5">The table shows anonymised participant response data. Each row is one participant. You can sort by any column and hide columns you don't need.</p>
-                </div>
+
+            <div className="mt-5 space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">File name</label>
+                <input
+                  type="text"
+                  value={exportConfig.filename}
+                  onChange={(event) =>
+                    setExportConfig((prev) => ({ ...prev, filename: event.target.value }))
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500"
+                  placeholder="research_export"
+                />
               </div>
-              <div className="flex gap-3">
-                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">2</span>
-                <div>
-                  <p className="font-semibold text-slate-800">Filtering results</p>
-                  <p className="text-slate-500 text-xs mt-0.5">Use the filter panel to narrow results by survey, group, demographics (age, gender, language), and more. Filters apply automatically after a short delay.</p>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">3</span>
-                <div>
-                  <p className="font-semibold text-slate-800">Charts view</p>
-                  <p className="text-slate-500 text-xs mt-0.5">Switch to the Charts tab to see a visual breakdown of gender and age distribution for the current filtered dataset.</p>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">4</span>
-                <div>
-                  <p className="font-semibold text-slate-800">Exporting data</p>
-                  <p className="text-slate-500 text-xs mt-0.5">Click Export CSV to download the current filtered results. Hidden columns are excluded from the export. Only participants aged 18–100 are included by default.</p>
-                </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">File type</label>
+                <select
+                  value={exportConfig.type}
+                  onChange={(event) =>
+                    setExportConfig((prev) => ({ ...prev, type: event.target.value }))
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500"
+                >
+                  <option value="csv">CSV</option>
+                  <option value="xlsx">Excel (.xlsx)</option>
+                </select>
               </div>
             </div>
-            <div className="px-6 py-4 border-t border-slate-100">
-              <button onClick={() => setShowHelp(false)} className="w-full py-2 text-sm font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 transition">Got it</button>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                disabled={isExporting}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={isExporting}
+                className={`rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
+                  isExporting
+                    ? "cursor-not-allowed bg-slate-200 text-slate-500"
+                    : "bg-blue-700 text-white hover:bg-blue-800"
+                }`}
+              >
+                {isExporting ? "Exporting..." : "Download"}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* PAGE HEADER & EXPORT */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            Welcome, {user?.first_name || "Researcher"}
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Analyzing {stats.count} participant responses in the database.
-          </p>
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2a3 3 0 00-5.356-1.857M15 7a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+          </div>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              Scope
+            </span>
+          </div>
+          <div className="mt-4">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">{stats.primaryLabel}</p>
+            <p className="mt-1 text-3xl font-bold text-slate-900">{stats.totalParticipants}</p>
+            <p className="mt-2 text-sm text-slate-500">
+              {stats.primaryDescription}
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => setShowHelp(true)}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition"
-          >
-            <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">?</span>
-            How it works
-          </button>
-          <button
-            onClick={handleExport}
-            disabled={isExporting || stats.count === 0}
-            className={`px-5 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-2 w-fit shadow-sm text-sm ${isExporting || stats.count === 0 ? "bg-slate-300 text-slate-500 cursor-not-allowed" : "bg-blue-700 hover:bg-blue-800 text-white active:scale-95"}`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z" />
             </svg>
-            {isExporting ? "Exporting..." : `Export ${stats.count} Rows (CSV)`}
-          </button>
+          </div>
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+              Output
+            </span>
+          </div>
+          <div className="mt-4">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">{stats.resultLabel}</p>
+            <p className="mt-1 text-3xl font-bold text-slate-900">{stats.filteredResults}</p>
+            <p className="mt-2 text-sm text-slate-500">
+              {stats.rowSummary}
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${stats.isGroupFiltered ? "bg-amber-50 text-amber-600" : "bg-indigo-50 text-indigo-600"}`}>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+          </div>
+            <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+              stats.isGroupFiltered
+                ? "bg-amber-50 text-amber-700"
+                : "bg-indigo-50 text-indigo-700"
+            }`}>
+              {stats.isGroupFiltered ? "Filtered group" : "All groups"}
+            </span>
+          </div>
+          <div className="mt-4">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Current group scope</p>
+            <p className="mt-1 text-3xl font-bold text-slate-900">{stats.activeGroupsText}</p>
+            <p className="mt-2 text-sm text-slate-500">
+              {stats.isGroupFiltered ? "Results are limited to the selected group." : "No group filter is applied."}
+            </p>
+          </div>
         </div>
       </div>
-      {/* ── NEW DATA FILTERS UI (MOCKUP STYLE) ── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-3">
-            <h2 className="text-[15px] font-bold text-slate-900 flex items-center gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5 text-blue-500"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-              Data filters
-            </h2>
-            {/* Active Filters Badge */}
-            {(filters.group_ids.length > 0 ||
-              filters.survey_id ||
-              filters.status ||
-              filters.gender ||
-              filters.primary_language.length > 0 ||
-              filters.highest_education_level ||
-              filters.marital_status ||
-              filters.living_arrangement ||
-              filters.dependents_min ||
-              filters.dependents_max ||
-              filters.pronouns ||
-              filters.occupation_status) && (
-              <span className="bg-blue-50 text-blue-600 px-2.5 py-0.5 rounded-full text-[11px] font-bold border border-blue-100 uppercase tracking-wide">
-                {
-                  [
-                    filters.survey_id,
-                    filters.status,
-                    filters.gender,
-                    ...filters.primary_language,
-                    filters.highest_education_level,
-                    filters.marital_status,
-                    filters.living_arrangement,
-                    filters.dependents_min,
-                    filters.dependents_max,
-                    filters.pronouns,
-                    filters.occupation_status,
-                    ...filters.group_ids,
-                  ].filter(Boolean).length
-                }{" "}
-                filters active
-              </span>
-            )}
+
+      <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50 px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
+          <div className="inline-flex w-full flex-wrap rounded-xl border border-slate-200 bg-white p-1 md:w-auto">
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              className={`rounded-lg px-4 py-2 text-sm font-bold transition ${viewMode === "table" ? "bg-blue-50 text-blue-600" : "text-slate-500 hover:text-slate-700"}`}
+            >
+              📋 Raw Data Table
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("charts")}
+              className={`rounded-lg px-4 py-2 text-sm font-bold transition ${viewMode === "charts" ? "bg-blue-50 text-blue-600" : "text-slate-500 hover:text-slate-700"}`}
+            >
+              📊 Analytics & Charts
+            </button>
           </div>
-          <button
-            onClick={resetFilters}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 px-4 py-1.5 rounded-full transition-colors flex items-center gap-1"
-          >
-            Clear filters
-          </button>
         </div>
 
-        <div className="space-y-5">
-          {/* ── Survey Combobox ── */}
-          <div className="relative z-20" ref={surveyDropdownRef}>
-            <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-              Survey
-            </label>
+        {filterError && (
+          <div className="mx-6 mt-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <svg className="h-4 w-4 shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <span>{filterError}</span>
+          </div>
+        )}
 
-            <div className="relative">
-              <div className="flex items-center border border-slate-200 rounded-lg p-1.5 bg-white focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all shadow-sm">
-                <span className="pl-2 pr-2 text-slate-400">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </span>
-                {filters.survey_id && !isSurveyOpen ? (
-                  <div
-                    className="flex-1 text-sm font-medium text-slate-800 p-1 cursor-pointer truncate"
-                    onClick={() => setIsSurveyOpen(true)}
-                  >
-                    {selectedFamily ? selectedFamily.title : "Selected Survey"}
-                  </div>
-                ) : (
-                  <input
-                    type="text"
-                    className="flex-1 text-sm text-slate-800 p-1 outline-none bg-transparent placeholder-slate-400"
-                    placeholder="Search for a survey..."
-                    value={surveySearch}
-                    onChange={(e) => setSurveySearch(e.target.value)}
-                    onFocus={() => setIsSurveyOpen(true)}
-                  />
-                )}
-                {filters.survey_id && (
-                  <button
-                    onClick={() => setFilters((prev) => ({ ...prev, survey_id: "", group_ids: [] }))}
-                    className="p-1 hover:bg-slate-100 rounded-md text-slate-400 mr-1 transition-colors"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-
-              {/* Version switcher pills */}
-              {selectedFamily && selectedFamily.versions.length > 1 && (
-                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                  <span className="text-xs text-slate-400 font-medium">Version:</span>
-                  {selectedFamily.versions.map((v) => {
-                    const vid = v.form_id || v.id;
-                    const isActive = filters.survey_id === vid;
-                    return (
-                      <button
-                        key={vid}
-                        onClick={() => setFilters((prev) => ({ ...prev, survey_id: vid, group_ids: [] }))}
-                        className={`text-xs font-bold px-2.5 py-1 rounded-full border transition-all ${
-                          isActive
-                            ? "bg-violet-600 text-white border-violet-600"
-                            : "bg-white text-violet-700 border-violet-300 hover:bg-violet-50"
+        <div className="border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              {(queryData.columns || [])
+                .filter((column) => !HIDDEN_SYSTEM_COLUMN_IDS.has(column.id))
+                .map((column) => {
+                  const hidden = hiddenColumns.includes(column.id);
+                  return (
+                    <button
+                      key={column.id}
+                      type="button"
+                      onClick={() => toggleColumn(column.id)}
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                        hidden
+                          ? "border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-slate-600"
+                          : "border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-300 hover:bg-blue-100"
+                      }`}
+                      title={hidden ? "Show column" : "Hide column"}
+                    >
+                      <span>{column.text || column.id}</span>
+                      <span
+                        className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] leading-none ${
+                          hidden ? "bg-slate-100 text-slate-500" : "bg-white text-blue-700"
                         }`}
                       >
-                        v{v.version || 1}
-                      </button>
+                        {hidden ? "+" : "x"}
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+
+            {showAllowNullToggle && (
+              <div className="w-full lg:max-w-xs lg:pl-4">
+                <label className="flex cursor-pointer items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={draftFilters.allow_null}
+                    onChange={(event) => {
+                      const nextAllowNull = event.target.checked;
+                      const nextAppliedFilters = {
+                        ...appliedFilters,
+                        allow_null: nextAllowNull,
+                      };
+                      const nextFilters = {
+                        ...draftFilters,
+                        allow_null: nextAllowNull,
+                      };
+                      setDraftFilters(nextFilters);
+                      loadResultsRef.current({
+                        reset: true,
+                        filters: nextAppliedFilters,
+                        updateApplied: true,
+                      });
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-slate-700">
+                      Include missing element data
+                    </span>
+                    {draftFilters.survey_id ? (
+                      <p className="mt-1 text-xs text-slate-400">
+                        Applies to the selected health-data elements and filters in this survey view.
+                      </p>
+                    ) : null}
+                    {!draftFilters.allow_null && (
+                      <p className="mt-1 text-xs text-slate-400">
+                        {draftFilters.survey_id
+                          ? "Only participants with a recorded value for every selected or filtered health-data element will appear in results."
+                          : "Only participants with recorded values for the health-data columns in scope will appear in results."}
+                      </p>
+                    )}
+                  </div>
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {viewMode === "table" ? (
+          <div className={`relative overflow-x-auto transition-opacity duration-200 ${filtering ? "pointer-events-none opacity-60" : ""}`}>
+            {filtering && queryData.data.length > 0 && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 backdrop-blur-[1px]">
+                <div className="flex min-w-[220px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600 shadow-lg">
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+                  <div>
+                    <p className="font-semibold text-slate-700">Loading table</p>
+                    <p className="text-xs text-slate-500">Fetching participant results...</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="inline-block min-w-full align-top">
+            <table className="min-w-full border-collapse whitespace-nowrap text-left">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">#</th>
+                  <th
+                    onClick={() => handleSort(appliedFilters.group_by ? "group_value" : "participant")}
+                    className="cursor-pointer px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500 transition hover:bg-slate-100"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      {appliedFilters.group_by ? appliedGroupByLabel : "Participant"}
+                      <span className="text-slate-300">
+                        {sortConfig.key === (appliedFilters.group_by ? "group_value" : "participant")
+                          ? sortConfig.direction === "asc"
+                            ? "↑"
+                            : "↓"
+                          : "↕"}
+                      </span>
+                    </div>
+                  </th>
+                  {visibleColumns.map((column) => {
+                    return (
+                  <th
+                        key={column.id}
+                        onClick={() => handleSort(column.id)}
+                        className="cursor-pointer px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500 transition hover:bg-slate-100"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          {column.text || column.id}
+                          <span className="text-slate-300">
+                            {sortConfig.key === column.id
+                              ? sortConfig.direction === "asc"
+                                ? "↑"
+                                : "↓"
+                              : "↕"}
+                          </span>
+                        </div>
+                      </th>
                     );
                   })}
-                </div>
-              )}
-
-              {/* Dropdown */}
-              {isSurveyOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-64 overflow-y-auto z-50">
-                  {(() => {
-                    const q = surveySearch.toLowerCase();
-
-                    const STATUS_OPTS = [
-                      { key: "PUBLISHED", label: "Published", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
-                      { key: "ARCHIVED",  label: "Archived",  cls: "bg-slate-100 text-slate-500 border-slate-300" },
-                      { key: "DELETED",   label: "Deleted",   cls: "bg-rose-100 text-rose-500 border-rose-200" },
-                    ];
-
-                    const filteredFamilies = surveyFamilies.filter(({ latest: s }) =>
-                      s.status === sourceStatusFilter && (s.title || "").toLowerCase().includes(q)
-                    );
-
-                    const renderFamily = ({ latest: s, versions }) => (
-                      <div
-                        key={s.form_id || s.id}
-                        className="flex items-center justify-between px-4 py-2.5 text-sm font-medium cursor-pointer border-b border-slate-50 last:border-0 text-slate-700 hover:bg-blue-50 hover:text-blue-700"
-                        onClick={() => {
-                          setFilters((prev) => ({ ...prev, survey_id: s.form_id || s.id, group_ids: [] }));
-                          setSurveySearch("");
-                          setIsSurveyOpen(false);
-                        }}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {s.status !== "PUBLISHED" && (
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 uppercase ${
-                              s.status === "ARCHIVED" ? "bg-slate-100 text-slate-500 border-slate-300" : "bg-rose-100 text-rose-500 border-rose-200"
-                            }`}>{s.status}</span>
-                          )}
-                          <span className="truncate">{s.title || s.name}</span>
-                        </div>
-                        {versions.length > 1 && (
-                          <span className="ml-2 shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">
-                            {versions.length} versions
-                          </span>
-                        )}
-                      </div>
-                    );
-
-                    return (
-                      <>
-                        <div className="flex items-center gap-1.5 px-3 py-2 border-b border-slate-100 bg-slate-50">
-                          {STATUS_OPTS.map(({ key, label, cls }) => (
-                            <button
-                              key={key}
-                              onClick={() => setSourceStatusFilter(key)}
-                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all ${
-                                sourceStatusFilter === key ? cls : "bg-white text-slate-400 border-slate-200"
-                              }`}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {queryData.data.map((row, index) => (
+                  <tr key={`${row._participant_id || "row"}-${index}`} className="transition-colors hover:bg-blue-50/50">
+                    <td className="px-6 py-4 text-xs font-bold text-slate-400">{index + 1}</td>
+                    <td className="px-6 py-4 text-sm">
+                      {appliedFilters.group_by ? (
+                        <span className="font-semibold text-slate-700">{row.group_value || "Unknown"}</span>
+                      ) : (
+                        <span className="rounded-lg bg-slate-100 px-2.5 py-1 font-mono text-xs font-semibold text-slate-600">
+                          {getParticipantMarker(participantMarkerMap.get(row._participant_id))}
+                        </span>
+                      )}
+                    </td>
+                    {visibleColumns.map((column) => {
+                      const value = row[column.id];
+                      const canDrillIntoSubmission =
+                        column.id === "source_submission_id" &&
+                        row.source_type === "survey" &&
+                        row.source_submission_id &&
+                        row._participant_id;
+                      return (
+                        <td key={column.id} className="px-6 py-4 text-sm font-bold text-slate-700">
+                          {canDrillIntoSubmission ? (
+                            <Link
+                              to={`/researcher/submissions/${row._participant_id}/${row.source_submission_id}`}
+                              className="text-blue-600 hover:text-blue-800"
                             >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                        {filteredFamilies.length > 0
-                          ? filteredFamilies.map(renderFamily)
-                          : <div className="px-4 py-3 text-sm text-slate-400">No surveys found</div>
+                              View submission
+                            </Link>
+                          ) : column.id === "observed_at" && value ? (
+                            <span className="text-slate-600">{formatDateTime(value)}</span>
+                          ) : META_COLUMN_IDS.has(column.id) && value ? (
+                            String(value)
+                          ) : column.id.includes("id") && value ? (
+                            <span className="rounded-lg bg-blue-50 px-2 py-1 font-mono text-xs text-blue-600">
+                              {String(value).slice(0, 8)}...
+                            </span>
+                          ) : value !== null && value !== undefined && value !== "" ? (
+                            String(value)
+                          ) : (
+                            <span className="italic text-slate-300">—</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {queryData.data.length === 0 && (filtering || (loading && hasRunQuery)) && (
+              <div className="p-16 text-center text-slate-400">
+                <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+                <p className="text-sm font-semibold text-slate-600">Loading participant table...</p>
+              </div>
+            )}
+
+            {queryData.data.length === 0 && !hasRunQuery && !loading && !filtering && (
+              <div className="p-16 text-center text-slate-400">
+                <p className="text-sm font-semibold text-slate-600">Choose your filters and click Apply to load dashboard results.</p>
+              </div>
+            )}
+
+            {queryData.data.length === 0 && hasRunQuery && !loading && !filtering && (
+              <div className="p-16 text-center text-slate-400">
+                <p className="text-sm font-semibold">No participants match the current filters.</p>
+              </div>
+            )}
+
+            {queryData.data.length > 0 && (
+              <div className="border-t border-slate-100 px-4 py-4 text-sm text-slate-500 sm:px-6">
+                <div className="flex min-w-full flex-col items-start gap-3 sm:flex-row sm:items-center">
+                  <span className="break-words">
+                    Loaded {loadedParticipantCount} of {pagination.total_participants} participants
+                  </span>
+                  <div className="w-full sm:ml-auto sm:w-auto sm:pl-4 sm:text-right">
+                    {loadingMore ? (
+                      <span className="whitespace-nowrap font-medium text-blue-600">Loading more...</span>
+                    ) : pagination.has_more ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          loadResultsRef.current({
+                            reset: false,
+                            filters: appliedFilters,
+                            offset: pagination.next_offset,
+                            limit: PAGE_SIZE,
+                          })
                         }
-                      </>
-                    );
-                  })()}
+                        className="whitespace-nowrap font-medium text-blue-600 hover:text-blue-800"
+                      >
+                        Load more
+                      </button>
+                    ) : (
+                      <span className="whitespace-nowrap">All participants loaded</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            </div>
+          </div>
+        ) : (
+          <div className="grid gap-6 bg-slate-50/50 p-4 sm:p-6 md:grid-cols-2 md:p-8">
+            <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+              <h3 className="mb-6 text-center text-sm font-bold uppercase tracking-widest text-slate-700">
+                Gender Distribution
+              </h3>
+              {!hasRunQuery ? (
+                <div className="flex h-64 items-center justify-center text-sm text-slate-400">Apply filters to load chart data</div>
+              ) : chartData.gender.length === 0 ? (
+                <div className="flex h-64 items-center justify-center text-sm text-slate-400">No data to display</div>
+              ) : (
+                <>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={chartData.gender} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                          {chartData.gender.map((entry, index) => (
+                            <Cell key={entry.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value) => [`${value} Participants`, "Count"]} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+              <h3 className="mb-6 text-center text-sm font-bold uppercase tracking-widest text-slate-700">
+                Age Demographics
+              </h3>
+              {!hasRunQuery ? (
+                <div className="flex h-64 items-center justify-center text-sm text-slate-400">Apply filters to load chart data</div>
+              ) : chartData.age.length === 0 ? (
+                <div className="flex h-64 items-center justify-center text-sm text-slate-400">No data to display</div>
+              ) : (
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData.age} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <XAxis dataKey="name" tick={{ fontSize: 12, fontWeight: 600, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 12, fontWeight: 600, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        cursor={{ fill: "#f1f5f9" }}
+                        contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }}
+                      />
+                      <Bar dataKey="count" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               )}
             </div>
           </div>
+        )}
+      </div>
+      </div>
 
-          {/* ── Groups Combobox ── */}
-          <div className="relative z-10" ref={groupDropdownRef}>
-            <label className="text-xs font-semibold text-slate-500 mb-1.5 flex justify-between items-center">
-              Groups
-              {filters.group_ids.length > 0 && (
-                <button
-                  onClick={() =>
-                    setFilters((prev) => ({ ...prev, group_ids: [] }))
-                  }
-                  className="text-[10px] text-blue-500 hover:text-blue-700 uppercase tracking-widest font-bold"
-                >
-                  Deselect All
-                </button>
-              )}
-            </label>
-
-            <div className="relative">
-              <div className="flex items-center border border-slate-200 rounded-lg p-1.5 bg-white focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all shadow-sm">
-                <span className="pl-2 pr-2 text-slate-400">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M15 20v-2a3 3 0 00-5.356-1.857M15 20H9m6 0v-2c0-.656-.126-1.283-.356-1.857M9 20H4v-2a3 3 0 015.356-1.857M15 7a4 4 0 11-8 0 4 4 0 018 0zm6 3a3 3 0 11-6 0 3 3 0 016 0zM7 10a3 3 0 11-6 0 3 3 0 016 0z"
-                    />
-                  </svg>
-                </span>
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5 xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
+        <div className="flex flex-col gap-4">
+          <div className="relative" ref={surveyMenuRef}>
+            <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+              <label className="block text-xs font-semibold text-slate-500">Survey</label>
+              <span className="text-xs text-slate-400">(optional - adds health data columns)</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setShouldLoadSurveys(true);
+                if (!showSurveyMenu) setSurveySearch("");
+                setShowSurveyMenu((prev) => !prev);
+              }}
+              className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white p-2.5 text-left text-sm text-slate-700 shadow-sm transition hover:border-slate-300 focus:border-blue-500 focus:outline-none"
+            >
+              <span className="min-w-0 truncate">
+                {selectedSurvey
+                  ? `${selectedSurvey.title}${selectedSurvey.version ? ` (v${selectedSurvey.version})` : ""}`
+                  : "No survey selected"}
+              </span>
+              <span className="ml-3 shrink-0 text-slate-400">{showSurveyMenu ? "˄" : "˅"}</span>
+            </button>
+            {showSurveyMenu && (
+              <div className="absolute left-0 right-0 top-full z-20 mt-2 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
                 <input
                   type="text"
-                  className="flex-1 text-sm text-slate-800 p-1 outline-none bg-transparent placeholder-slate-400"
-                  placeholder={
-                    filters.survey_id
-                      ? "Filter assigned groups..."
-                      : "Select a survey first..."
-                  }
-                  value={groupSearch}
-                  onChange={(e) => setGroupSearch(e.target.value)}
-                  onFocus={() => setIsGroupOpen(true)}
+                  value={surveySearch}
+                  onChange={(event) => setSurveySearch(event.target.value)}
+                  placeholder="Search surveys"
+                  className="mb-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500"
                 />
-              </div>
-
-              {/* 🟢 DROPDOWN: absolute positioning prevents "popping" */}
-              {isGroupOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-2xl max-h-48 overflow-y-auto z-[100]">
-                  {availableGroups
-                    .filter((g) =>
-                      (g.name || "")
-                        .toLowerCase()
-                        .includes(groupSearch.toLowerCase()),
-                    )
-                    .map((g) => {
-                      const gid = g.group_id || g.id;
-                      const isChecked = filters.group_ids.includes(gid);
-                      return (
-                        <label
-                          key={gid}
-                          className="flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-blue-50 cursor-pointer border-b border-slate-50 last:border-0 transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => {
-                              setFilters((prev) => ({
-                                ...prev,
-                                group_ids: isChecked
-                                  ? prev.group_ids.filter((id) => id !== gid)
-                                  : [...prev.group_ids, gid],
-                              }));
-                            }}
-                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="truncate flex-1">{g.name}</span>
-                        </label>
-                      );
-                    })}
-                </div>
-              )}
-            </div>
-            {/* 🟢 PILLS: Only show when dropdown is CLOSED for a cleaner look */}
-            {!isGroupOpen && filters.group_ids.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-3 animate-in fade-in slide-in-from-top-1">
-                {filters.group_ids.map((gid) => {
-                  // Find the group in our fetched list, fallback to allGroups
-                  const g =
-                    availableGroups.find((x) => (x.group_id || x.id) === gid) ||
-                    allGroups.find((x) => (x.group_id || x.id) === gid);
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraftFilters((prev) => ({ ...prev, survey_id: "" }));
+                    setSurveySearch("");
+                    setShowSurveyMenu(false);
+                  }}
+                  className={`mb-2 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
+                    !draftFilters.survey_id ? "bg-blue-50 text-blue-700" : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  <span className="font-medium">No survey selected</span>
+                </button>
+                {shouldLoadSurveys && surveyOptions.length === 0 ? (
+                  <p className="px-3 py-2 text-sm text-slate-500">Loading surveys...</p>
+                ) : null}
+                {filteredSurveyOptions.length === 0 && shouldLoadSurveys && surveyOptions.length > 0 ? (
+                  <p className="px-3 py-2 text-sm text-slate-500">No surveys match your search.</p>
+                ) : null}
+                {filteredSurveyOptions.map((survey) => {
+                  const surveyId = survey.form_id || survey.id;
+                  const isSelected = String(draftFilters.survey_id || "") === String(surveyId);
                   return (
-                    <span
-                      key={gid}
-                      className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-[11px] font-bold border border-blue-100 shadow-sm"
+                    <button
+                      key={surveyId}
+                      type="button"
+                      onClick={() => {
+                        setDraftFilters((prev) => ({ ...prev, survey_id: surveyId }));
+                        setSurveySearch("");
+                        setShowSurveyMenu(false);
+                      }}
+                      className={`mb-1 flex w-full flex-col rounded-lg border px-3 py-2 text-left transition last:mb-0 ${
+                        isSelected
+                          ? "border-blue-200 bg-blue-50"
+                          : "border-transparent hover:border-slate-200 hover:bg-slate-50"
+                      }`}
                     >
-                      {/* Render the actual mapped name! */}
-                      {g?.name || `Group ${gid.substring(0, 8)}`}
-                      <button
-                        onClick={() =>
-                          setFilters((prev) => ({
-                            ...prev,
-                            group_ids: prev.group_ids.filter(
-                              (id) => id !== gid,
-                            ),
-                          }))
-                        }
-                        className="hover:bg-blue-200 hover:text-rose-600 rounded-full p-0.5"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-3 w-3"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2.5}
-                            d="M6 18L18 6M6 6l12 12"
-                          />
-                        </svg>
-                      </button>
-                    </span>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">
+                            {survey.title}
+                            {survey.version ? ` (v${survey.version})` : ""}
+                          </p>
+                        </div>
+                        {isSelected ? <span className="shrink-0 text-xs font-bold text-blue-600">Selected</span> : null}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getSurveyStatusClasses(survey)}`}>
+                          {getSurveyStatusLabel(survey)}
+                        </span>
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getSurveyOwnershipClasses(survey)}`}>
+                          {getSurveyOwnershipLabel(survey)}
+                        </span>
+                      </div>
+                    </button>
                   );
                 })}
               </div>
             )}
           </div>
 
-          {/* Row 3: Status, Gender */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-            <div>
-              <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-                Participant status
-              </label>
-              <select
-                className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
-                value={filters.status}
-                onChange={(e) =>
-                  setFilters((prev) => ({ ...prev, status: e.target.value }))
-                }
+          <div className="relative" ref={groupMenuRef}>
+            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Group (optional)</label>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShouldLoadGroups(true);
+                  setShowGroupMenu((prev) => !prev);
+                }}
+                className="flex flex-1 items-center justify-between rounded-lg border border-slate-200 bg-white p-2.5 text-left text-sm text-slate-700 shadow-sm transition hover:border-slate-300"
               >
-                <option value="">All statuses</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-                Gender
-              </label>
-              <select
-                className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
-                value={filters.gender}
-                onChange={(e) =>
-                  setFilters((prev) => ({ ...prev, gender: e.target.value }))
-                }
-              >
-                <option value="">All genders</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Row 3b: Primary Language (full width, multi-select with search) */}
-          <div className="pt-1" ref={langRef}>
-            <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-              Primary language
-            </label>
-            <div className="relative">
-              <div
-                className="border border-slate-200 rounded-lg bg-white shadow-sm px-3 py-2 flex flex-wrap items-center gap-1.5 cursor-text"
-                onClick={() => { setLangOpen(true); }}
-              >
-                {filters.primary_language.map((lang) => (
-                  <span
-                    key={lang}
-                    className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs font-medium px-2.5 py-1 rounded-full border border-blue-200"
-                  >
-                    {lang}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setFilters((prev) => ({
-                          ...prev,
-                          primary_language: prev.primary_language.filter((l) => l !== lang),
-                        }));
-                      }}
-                      className="hover:text-blue-900 leading-none text-sm"
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                <input
-                  type="text"
-                  className="flex-1 min-w-[140px] text-sm text-slate-700 outline-none bg-transparent py-0.5 placeholder:text-slate-400"
-                  placeholder={filters.primary_language.length > 0 ? "Add another…" : "Search languages…"}
-                  value={langSearch}
-                  onChange={(e) => { setLangSearch(e.target.value); setLangOpen(true); }}
-                  onFocus={() => setLangOpen(true)}
-                  onBlur={() => setTimeout(() => setLangOpen(false), 150)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") { setLangOpen(false); setLangSearch(""); e.target.blur(); }
-                    if (e.key === "Enter" && langSearch.trim() && !filters.primary_language.includes(langSearch.trim())) {
-                      e.preventDefault();
-                      setFilters((prev) => ({ ...prev, primary_language: [...prev.primary_language, langSearch.trim()] }));
-                      setLangSearch("");
-                    }
+                <span className="truncate">
+                  {draftFilters.group_ids.length === 0
+                    ? shouldLoadGroups
+                      ? "All participants"
+                      : "Choose group filter"
+                    : selectedGroups[0]?.name || "1 group selected"}
+                </span>
+                <span className="text-slate-400">▾</span>
+              </button>
+              {draftFilters.group_ids.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextFilters = { ...draftFilters, group_ids: [] };
+                    setDraftFilters(nextFilters);
                   }}
-                />
-              </div>
-              {langOpen && (
-                <ul className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto text-sm">
-                  {LANGUAGES.filter(
-                    (l) =>
-                      !filters.primary_language.includes(l) &&
-                      l.toLowerCase().includes(langSearch.toLowerCase())
-                  ).length === 0 ? (
-                    <li
-                      className={`px-3 py-2 ${langSearch.trim() && !filters.primary_language.includes(langSearch.trim()) ? "cursor-pointer hover:bg-blue-50 hover:text-blue-700 text-slate-500" : "text-slate-400"}`}
-                      onMouseDown={(e) => {
-                        if (!langSearch.trim() || filters.primary_language.includes(langSearch.trim())) return;
-                        e.preventDefault();
-                        setFilters((prev) => ({ ...prev, primary_language: [...prev.primary_language, langSearch.trim()] }));
-                        setLangSearch("");
-                      }}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                  aria-label="Clear selected group"
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+            {showGroupMenu && (
+              <div className="absolute left-0 right-0 top-full z-20 mt-2 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                {shouldLoadGroups && allGroups.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextFilters = { ...draftFilters, group_ids: [] };
+                      setDraftFilters(nextFilters);
+                    }}
+                    className="mb-2 w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    All participants
+                  </button>
+                ) : (
+                  <p className="px-3 py-2 text-sm text-slate-500">Loading groups...</p>
+                )}
+                {allGroups.map((group) => {
+                  const groupId = group.group_id || group.id;
+                  const checked = draftFilters.group_ids.some(
+                    (id) => String(id) === String(groupId),
+                  );
+                  return (
+                    <label
+                      key={groupId}
+                      className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                     >
-                      {langSearch.trim() && !filters.primary_language.includes(langSearch.trim())
-                        ? `Add "${langSearch.trim()}"`
-                        : "No languages found"}
-                    </li>
-                  ) : (
-                    LANGUAGES.filter(
-                      (l) =>
-                        !filters.primary_language.includes(l) &&
-                        l.toLowerCase().includes(langSearch.toLowerCase())
-                    ).map((lang) => (
-                      <li
-                        key={lang}
-                        className="px-3 py-2 hover:bg-blue-50 hover:text-blue-700 cursor-pointer"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          setFilters((prev) => ({
-                            ...prev,
-                            primary_language: [...prev.primary_language, lang],
-                          }));
-                          setLangSearch("");
+                      <input
+                        type="radio"
+                        name="researcher-group-filter"
+                        checked={checked}
+                        onChange={() => {
+                          const nextFilters = {
+                            ...draftFilters,
+                            group_ids: checked
+                              ? []
+                              : [groupId],
+                          };
+                          setDraftFilters(nextFilters);
                         }}
-                      >
-                        {lang}
-                      </li>
-                    ))
-                  )}
-                </ul>
-              )}
-            </div>
-          </div>
-
-          {/* Row 4: Date Range & Age Range */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-1">
-            <div>
-              <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-                Date range
-              </label>
-              <select
-                className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
-                value={filters.date_range}
-                onChange={(e) =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    date_range: e.target.value,
-                  }))
-                }
-              >
-                <option value="all_time">All time</option>
-                <option value="last_7_days">Last 7 days</option>
-                <option value="last_30_days">Last 30 days</option>
-                <option value="last_3_months">Last 3 months</option>
-                <option value="last_year">Last year</option>
-              </select>
-            </div>
-
-            {/* Custom Age Range Control */}
-            <div>
-              <div className="flex justify-between items-center mb-1.5">
-                <label className="text-xs font-semibold text-slate-500">
-                  Age range
-                </label>
-                <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                  {filters.age_min || 0} – {filters.age_max || 100}
-                </span>
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>{group.name}</span>
+                    </label>
+                  );
+                })}
               </div>
-              <div className="flex items-center gap-3">
-                {/* 🟢 MIN AGE INPUT */}
-                <input
-                  type="number"
-                  min="18"
-                  max="120"
-                  placeholder="Min"
-                  className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm text-center"
-                  value={filters.age_min}
-                  onChange={(e) =>
-                    setFilters((prev) => ({ ...prev, age_min: e.target.value }))
-                  }
-                  onBlur={() => handleAgeBlur("min")}
-                  onKeyDown={(e) => {
-                    if (['e', 'E', '+', '-', '.'].includes(e.key)) e.preventDefault();
-                    if (e.key === "Enter") handleAgeBlur("min");
-                  }}
-                />
-
-                <span className="text-slate-300 font-bold">-</span>
-
-                {/* 🟢 MAX AGE INPUT */}
-                <input
-                  type="number"
-                  min="18"
-                  max="120"
-                  placeholder="Max"
-                  className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm text-center"
-                  value={filters.age_max}
-                  onChange={(e) =>
-                    setFilters((prev) => ({ ...prev, age_max: e.target.value }))
-                  }
-                  onBlur={() => handleAgeBlur("max")}
-                  onKeyDown={(e) => {
-                    if (['e', 'E', '+', '-', '.'].includes(e.key)) e.preventDefault();
-                    if (e.key === "Enter") handleAgeBlur("max");
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* ── NEW: Expandable More Filters Section ── */}
-          {showMoreFilters && (
-            <div className="space-y-4 pt-4 border-t border-slate-100 mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Education Level */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-                    Education level
-                  </label>
-                  <select
-                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
-                    value={filters.highest_education_level}
-                    onChange={(e) =>
-                      setFilters((prev) => ({
-                        ...prev,
-                        highest_education_level: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">All levels</option>
-                    <option value="High school">High school</option>
-                    <option value="Some college/university">Some college/university</option>
-                    <option value="Bachelor's degree">Bachelor's degree</option>
-                    <option value="Master's degree">Master's degree</option>
-                    <option value="Doctoral degree">Doctoral degree</option>
-                    <option value="Trade/vocational">Trade/vocational</option>
-                  </select>
-                </div>
-                {/* Marital status */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-                    Marital status
-                  </label>
-                  <select
-                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
-                    value={filters.marital_status}
-                    onChange={(e) =>
-                      setFilters((prev) => ({
-                        ...prev,
-                        marital_status: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">All</option>
-                    <option value="Single">Single</option>
-                    <option value="Married">Married</option>
-                    <option value="Common-law">Common-law</option>
-                    <option value="Separated">Separated</option>
-                    <option value="Divorced">Divorced</option>
-                    <option value="Widowed">Widowed</option>
-                  </select>
-                </div>
-                {/* Living arrangement */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-                    Living arrangement
-                  </label>
-                  <select
-                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
-                    value={filters.living_arrangement}
-                    onChange={(e) =>
-                      setFilters((prev) => ({
-                        ...prev,
-                        living_arrangement: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">All</option>
-                    <option value="Alone">Alone</option>
-                    <option value="With Family">With Family</option>
-                    <option value="With Friends">With Friends</option>
-                    <option value="With Partner">With Partner</option>
-                    <option value="With Roommates">With Roommates</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Dependents */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-                    Dependents
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="Min"
-                      className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm text-center"
-                      value={filters.dependents_min}
-                      onChange={(e) =>
-                        setFilters((prev) => ({
-                          ...prev,
-                          dependents_min: e.target.value,
-                        }))
-                      }
-                      onBlur={() => handleDependentsBlur("min")}
-                      onKeyDown={(e) => {
-                        if (['e', 'E', '+', '-', '.'].includes(e.key)) e.preventDefault();
-                        if (e.key === "Enter") handleDependentsBlur("min");
-                      }}
-                    />
-                    <span className="text-slate-300 font-bold">-</span>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="Max"
-                      className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm text-center"
-                      value={filters.dependents_max}
-                      onChange={(e) =>
-                        setFilters((prev) => ({
-                          ...prev,
-                          dependents_max: e.target.value,
-                        }))
-                      }
-                      onBlur={() => handleDependentsBlur("max")}
-                      onKeyDown={(e) => {
-                        if (['e', 'E', '+', '-', '.'].includes(e.key)) e.preventDefault();
-                        if (e.key === "Enter") handleDependentsBlur("max");
-                      }}
-                    />
-                  </div>
-                </div>
-                {/* Pronouns */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-                    Pronouns
-                  </label>
-                  <select
-                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
-                    value={filters.pronouns}
-                    onChange={(e) =>
-                      setFilters((prev) => ({
-                        ...prev,
-                        pronouns: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">All</option>
-                    <option value="He/Him">He/Him</option>
-                    <option value="She/Her">She/Her</option>
-                    <option value="They/Them">They/Them</option>
-                    <option value="Ze/Zir">Ze/Zir</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                {/* Occupation */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-                    Occupation
-                  </label>
-                  <select
-                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 bg-white shadow-sm"
-                    value={filters.occupation_status}
-                    onChange={(e) =>
-                      setFilters((prev) => ({
-                        ...prev,
-                        occupation_status: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">All</option>
-                    <option value="Unemployed">Unemployed</option>
-                    <option value="Part-time">Part-time</option>
-                    <option value="Full-time">Full-time</option>
-                    <option value="Self-employed">Self-employed</option>
-                    <option value="Freelance">Freelance</option>
-                    <option value="Student">Student</option>
-                    <option value="Retired">Retired</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Toggle Button */}
-          <button
-            onClick={() => setShowMoreFilters(!showMoreFilters)}
-            className="flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors mt-2"
-          >
-            {showMoreFilters ? (
-              <>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2.5}
-                    d="M5 15l7-7 7 7"
-                  />
-                </svg>
-                Less filters
-              </>
-            ) : (
-              <>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2.5}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-                More filters
-              </>
             )}
-          </button>
-
-          {/* Apply Button */}
-          <button
-            onClick={applyFilters}
-            className="w-full bg-blue-700 hover:bg-blue-800 text-white py-3 rounded-lg text-sm font-bold transition shadow-md active:scale-[0.99] mt-4 flex justify-center items-center gap-2"
-          >
-            {loading ? "Applying filters..." : "Apply filters"}
-          </button>
-        </div>
-      </div>
-
-      {/* SECTION A: THE ATTRIBUTE SELECTOR */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5 pb-4 border-b border-slate-100">
-          <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5 text-blue-500"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
-              />
-            </svg>
-            Visible Attributes
-          </h2>
-
-          <div className="flex items-center gap-4 w-full md:w-auto">
-            {/* 🟢 NEW: Search Bar for the checkboxes */}
-            <input
-              type="text"
-              placeholder="🔍 Search attributes..."
-              value={attributeSearch}
-              onChange={(e) => setAttributeSearch(e.target.value)}
-              className="p-2 border border-slate-200 rounded-lg text-sm text-slate-700 outline-none focus:border-blue-500 w-full md:w-64"
-            />
-            <button
-              onClick={resetFilters}
-              className="text-xs font-bold text-slate-400 hover:text-blue-600 transition-colors uppercase tracking-widest whitespace-nowrap"
-            >
-              Refresh Schema
-            </button>
           </div>
-        </div>
 
-        <div className="flex flex-wrap gap-3">
-          {queryData.columns
-            // 🟢 SAFELY filter the checkboxes based on the search bar typing
-            .filter((col) =>
-              String(col?.text || col?.id || "")
-                .toLowerCase()
-                .includes(String(attributeSearch || "").toLowerCase()),
-            )
-            .map((col) => (
-              <label
-                key={col.id}
-                className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 hover:border-blue-300 transition-colors"
-              >
-                <input
-                  type="checkbox"
-                  checked={!hiddenColumns.includes(col.id)}
-                  onChange={() => {
-                    if (hiddenColumns.includes(col.id)) {
-                      setHiddenColumns(
-                        hiddenColumns.filter((id) => id !== col.id),
-                      );
-                    } else {
-                      setHiddenColumns([...hiddenColumns, col.id]);
-                    }
-                  }}
-                  className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
-                />
-                <span className="text-sm font-medium text-slate-700">
-                  {col?.text || col?.id}
-                </span>
-              </label>
-            ))}
+          {surveyGroupMismatch ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              This group does not have this survey.
+            </div>
+          ) : null}
 
-          {/* Quick empty state if they search for something that doesn't exist */}
-          {queryData.columns.filter((col) =>
-            String(col?.text || col?.id || "")
-              .toLowerCase()
-              .includes(String(attributeSearch || "").toLowerCase()),
-          ).length === 0 && (
-            <p className="text-sm text-slate-400 italic">
-              No attributes match your search.
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* MIDDLE SECTION: DYNAMIC SUMMARY CALCULATIONS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Card 1: Filtered Results (Kept this one!) */}
-        <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-6 w-6"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-          </div>
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Filtered Results
-            </p>
-            <p className="text-2xl font-bold text-slate-900">
-              {stats.count} Rows
-            </p>
-          </div>
-        </div>
-
-        {/* Card 2: Total Participants (NEW) */}
-        <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-6 w-6"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Group by</label>
+            <select
+              value={draftGroupByValue}
+              onChange={(event) =>
+                setDraftFilters((prev) => ({
+                  ...prev,
+                  group_by: !event.target.value
+                    ? null
+                    : event.target.value.startsWith("demographic:")
+                      ? { type: "demographic", field: event.target.value.split(":")[1] }
+                      : { type: "element", element_id: event.target.value.split(":")[1] },
+                }))
+              }
+              className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M15 20v-2a3 3 0 00-5.356-1.857M15 20H9m6 0v-2c0-.656-.126-1.283-.356-1.857M9 20H4v-2a3 3 0 015.356-1.857M15 7a4 4 0 11-8 0 4 4 0 018 0zm6 3a3 3 0 11-6 0 3 3 0 016 0zM7 10a3 3 0 11-6 0 3 3 0 016 0z"
-              />
-            </svg>
+              <option value="">None</option>
+              {groupByOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </div>
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Total Participants
-            </p>
-            <p className="text-2xl font-bold text-slate-900">
-              {stats.totalParticipants} Unique
-            </p>
-          </div>
-        </div>
 
-        {/* Card 3: Active Groups (NEW) */}
-        {/* Card 3: Active Groups */}
-        <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm flex items-center gap-4">
-          <div
-            className={`w-12 h-12 rounded-full flex items-center justify-center ${stats.isFiltered ? "bg-amber-50 text-amber-600" : "bg-indigo-50 text-indigo-600"}`}
-          >
-            {/* Same SVG as before */}
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-6 w-6"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Source data</label>
+            <select
+              value={draftFilters.source_types.join(",")}
+              onChange={(event) =>
+                setDraftFilters((prev) => ({
+                  ...prev,
+                  source_types:
+                    event.target.value === "survey,goal" ? ["survey", "goal"] : [event.target.value],
+                }))
+              }
+              className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-              />
-            </svg>
+              <option value="survey">Survey</option>
+              <option value="goal">Goal</option>
+              <option value="survey,goal">Survey + Goal</option>
+            </select>
+            <p className="mt-1.5 text-xs text-slate-400">
+              {draftFilters.survey_id
+                ? "Applies to elements linked to the selected survey only."
+                : "Applies across all available survey and goal data."}
+            </p>
           </div>
+
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Active Groups
-            </p>
-            <p className="text-2xl font-bold text-slate-900">
-              {stats.activeGroupsText}
+            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Mode</label>
+            <select
+              value={draftFilters.mode}
+              onChange={(event) =>
+                setDraftFilters((prev) => ({ ...prev, mode: event.target.value }))
+              }
+              className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
+            >
+              <option value="aggregate">Aggregate (mean/min/max)</option>
+              <option value="longitudinal">Longitudinal</option>
+            </select>
+            <p className="mt-1.5 text-xs text-slate-400">
+              {draftFilters.mode === "aggregate"
+                ? draftFilters.survey_id
+                  ? "One row per participant with each survey element summarized into mean, min, max, and observation count."
+                  : "One row per participant with each visible element summarized into mean, min, max, and observation count."
+                : draftFilters.survey_id
+                  ? "One row per survey submission with Observed At shown for each row."
+                  : "Keeps repeated observations as separate rows and shows Observed At for each one."}
             </p>
           </div>
-        </div>
-      </div>
 
-      {/* SECTION D: VIEW TOGGLE & CONTENT */}
-      <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-        {/* THE TOGGLE HEADER */}
-        <div className="flex border-b border-slate-100 bg-slate-50 p-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-500">Date from</label>
+              <input
+                type="date"
+                value={draftFilters.date_from}
+                max={todayDateString}
+                onChange={(event) =>
+                  setDraftFilters((prev) => ({ ...prev, date_from: event.target.value }))
+                }
+                className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-500">Date to</label>
+              <input
+                type="date"
+                value={draftFilters.date_to}
+                max={todayDateString}
+                onChange={(event) =>
+                  setDraftFilters((prev) => ({ ...prev, date_to: event.target.value }))
+                }
+                className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+        </div>
+
+        <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
           <button
-            onClick={() => setViewMode("table")}
-            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${viewMode === "table" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+            type="button"
+            onClick={() => setShowAdvancedFilters((prev) => !prev)}
+            className="inline-flex items-center gap-2 text-sm font-semibold text-blue-600 transition hover:text-blue-800"
           >
-            📋 Raw Data Table
-          </button>
-          <button
-            onClick={() => setViewMode("charts")}
-            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${viewMode === "charts" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-          >
-            📊 Analytics & Charts
+            <span>{showAdvancedFilters ? "Hide advanced filters" : "Advanced filters"}</span>
+            <span className="text-slate-300">{showAdvancedFilters ? "−" : "+"}</span>
           </button>
         </div>
 
-        {/* Filter error banner */}
-        {filterError && (
-          <div className="mx-6 mb-4 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
-            <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-            </svg>
-            <span>Filter failed to apply. Results shown may not reflect current filters.</span>
-            <button onClick={() => setFilterError(false)} className="ml-auto text-amber-600 hover:text-amber-800 font-bold text-xs">✕</button>
+        {!draftFilters.survey_id && (
+          <div className="mt-3 text-sm text-slate-500">
+            Showing all participants across the selected data sources. Select a survey above to limit results to elements linked to that survey.
           </div>
         )}
 
-        {/* CONDITIONALLY RENDER TABLE OR CHARTS */}
-        <div className="p-0">
-          {viewMode === "table" ? (
-            <div
-              className={`overflow-x-auto relative transition-opacity duration-200 ${filtering ? "opacity-50 pointer-events-none" : ""}`}
-            >
-              {filtering && (
-                <div className="absolute inset-0 flex items-center justify-center z-10">
-                  <span className="text-sm text-slate-500 font-medium bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200">
-                    Updating...
-                  </span>
+        {showAdvancedFilters && (
+          <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/70 p-4">
+            <div className="space-y-4">
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-col items-start gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-800">Demographic filters</p>
+                  <p className="text-xs text-slate-500">Add demographic conditions using the same builder pattern.</p>
                 </div>
-              )}
-              <table className="w-full text-left border-collapse whitespace-nowrap">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    {/* 1. Add the static Row Number header */}
-                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-12">
-                      #
-                    </th>
-
-                    {queryData.columns
-                      .filter((col) => !hiddenColumns.includes(col.id))
-                      .map((col) => (
-                        <th
-                          key={col.id}
-                          className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest cursor-pointer hover:bg-slate-100 transition-colors select-none"
-                          onClick={() => handleSort(col.id)}
+                {demographicFilterSummaries.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {demographicFilterSummaries.map((filter, index) => (
+                      <div
+                        key={filter.key}
+                        className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => editDemographicFilter(index)}
+                          className="text-left transition hover:text-blue-900"
                         >
-                          {/* 2. Make it clickable and show sort arrows */}
-                          <div className="flex items-center gap-1.5">
-                            {col.text || col.id}
-                            <span className="text-slate-300">
-                              {sortConfig.key === col.id
-                                ? sortConfig.direction === "asc"
-                                  ? "↑"
-                                  : "↓"
-                                : "↕"}
-                            </span>
-                          </div>
-                        </th>
-                      ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {/* 1. We map over sortedData instead of queryData.data! */}
-                  {sortedData.map((row, rowIndex) => (
-                    <tr
-                      key={rowIndex}
-                      className="hover:bg-blue-50/50 transition-colors"
-                    >
-                      {/* 2. Add the Row Number cell */}
-                      <td className="px-6 py-4 text-xs font-bold text-slate-400">
-                        {rowIndex + 1}
-                      </td>
+                          {filter.text}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeDemographicFilter(index)}
+                          className="text-blue-500 transition hover:text-blue-700"
+                          aria-label={`Remove ${filter.text}`}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
 
-                      {queryData.columns
-                        .filter((col) => !hiddenColumns.includes(col.id))
-                        .map((col) => {
-                          const value = row[col.id];
-                          return (
-                            <td
-                              key={col.id}
-                              className="px-6 py-4 text-sm font-bold text-slate-700"
-                            >
-                              {col.id.includes("id") && value ? (
-                                <span className="font-mono text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
-                                  {value.substring(0, 8)}...
-                                </span>
-                              ) : value !== null && value !== undefined ? (
-                                String(value)
-                              ) : (
-                                <span className="text-slate-300 italic">—</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                    </tr>
+              <div className="grid gap-2">
+                <select
+                  value={demographicDraft.field}
+                  onChange={(event) => updateDemographicDraft("field", event.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
+                >
+                  {ALL_DEMOGRAPHIC_FIELDS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
                   ))}
-                </tbody>
-              </table>
-              {queryData.data.length === 0 && !loading && (
-                <div className="p-20 flex flex-col items-center justify-center text-slate-300">
-                  <span className="text-6xl mb-4">📭</span>
-                  <p className="font-black text-xs uppercase tracking-widest">
-                    No Participant Data Found
-                  </p>
-                </div>
-              )}
-            </div>
-          ) : (
-            /* THE NEW CHARTS VIEW */
-            <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-10 bg-slate-50/50">
-              {/* Chart 1: Gender Distribution */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                <h3 className="text-sm font-bold text-slate-700 mb-6 text-center uppercase tracking-widest">
-                  Gender Distribution
-                </h3>
-                {chartData.gender.filter((d) => d.value > 0).length === 0 ? (
-                  <div className="h-64 flex items-center justify-center text-sm text-slate-400">No data to display</div>
+                </select>
+                {needsDemographicOperator(demographicDraft.field) ? (
+                  <select
+                    value={demographicDraft.operator}
+                    onChange={(event) => updateDemographicDraft("operator", event.target.value)}
+                    className="rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
+                  >
+                    {getDemographicOperators(demographicDraft.field).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                {!isNumericDemographicField(demographicDraft.field) &&
+                hasPredefinedDemographicOptions(demographicDraft.field) ? (
+                  <select
+                    value={demographicDraft.value}
+                    onChange={(event) => updateDemographicDraft("value", event.target.value)}
+                    className="rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
+                  >
+                    <option value="">{`Select ${getDemographicFieldLabel(demographicDraft.field).toLowerCase()}`}</option>
+                    {DEMOGRAPHIC_VALUE_OPTIONS[demographicDraft.field].map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
                 ) : (
-                  <>
-                    <div className="h-64">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={chartData.gender.filter((d) => d.value > 0)}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={80}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            {chartData.gender.filter((d) => d.value > 0).map((entry, index) => (
-                              <Cell
-                                key={`cell-${index}`}
-                                fill={CHART_COLORS[index % CHART_COLORS.length]}
-                              />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(value) => [
-                              `${value} Participants`,
-                              "Count",
-                            ]}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="flex justify-center gap-4 mt-4">
-                      {chartData.gender.filter((d) => d.value > 0).map((entry, index) => (
-                        <div
-                          key={entry.name}
-                          className="flex items-center gap-2 text-xs font-bold text-slate-600"
-                        >
-                          <span
-                            className="w-3 h-3 rounded-full"
-                            style={{
-                              backgroundColor:
-                                CHART_COLORS[index % CHART_COLORS.length],
-                            }}
-                          ></span>
-                          {entry.name} ({entry.value})
-                        </div>
-                      ))}
-                    </div>
-                  </>
+                  <input
+                    type={isNumericDemographicField(demographicDraft.field) ? "number" : "text"}
+                    value={demographicDraft.value}
+                    onChange={(event) => updateDemographicDraft("value", event.target.value)}
+                    placeholder={
+                      isNumericDemographicField(demographicDraft.field)
+                        ? `Enter ${getDemographicFieldLabel(demographicDraft.field).toLowerCase()}`
+                        : `Select ${getDemographicFieldLabel(demographicDraft.field).toLowerCase()}`
+                    }
+                    className="rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
+                  />
                 )}
+                {needsDemographicOperator(demographicDraft.field) &&
+                demographicDraft.operator === "between" ? (
+                  <input
+                    type="number"
+                    value={demographicDraft.value_max}
+                    onChange={(event) => updateDemographicDraft("value_max", event.target.value)}
+                    placeholder="Value max"
+                    className="rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-700 outline-none shadow-sm focus:border-blue-500"
+                  />
+                ) : null}
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={addDemographicFilter}
+                    disabled={!demographicDraft.value}
+                    className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    Add filter
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-col gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-800">Health data filters</p>
+                  <p className="text-xs text-slate-500">Filter participants by health data element values.</p>
+                </div>
+                <div className="space-y-3" ref={elementMenuRef}>
+                  {selectedElementFilters.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedElementFilters.map((filter) => {
+                        const element = numericElements.find(
+                          (candidate) => String(candidate.element_id) === String(filter.element_id),
+                        );
+                        const label = element
+                          ? `${element.label}${element.unit ? ` (${element.unit})` : ""}`
+                          : "Selected element";
+                        const suffix = "";
+                        return (
+                          <div
+                            key={String(filter.element_id)}
+                            className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => editElementFilterById(filter.element_id)}
+                              className="text-left transition hover:text-blue-900"
+                            >
+                              {label}{suffix}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeElementFilterById(filter.element_id)}
+                              className="text-blue-500 transition hover:text-blue-700"
+                              aria-label={`Remove ${label}`}
+                            >
+                              x
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowElementMenu((prev) => !prev)}
+                      className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-left text-sm text-slate-700 shadow-sm transition hover:border-slate-300"
+                    >
+                      <span>
+                        {elementDraft.element_id
+                          ? (() => {
+                              const selected = numericElements.find(
+                                (element) => String(element.element_id) === String(elementDraft.element_id),
+                              );
+                              return selected
+                                ? `${selected.label}${selected.unit ? ` (${selected.unit})` : ""}`
+                                : "Select health data element";
+                            })()
+                          : selectedElementFilters.length > 0
+                            ? "Add another health data element"
+                            : "Add health data element"}
+                      </span>
+                      <span className="text-slate-400">{showElementMenu ? "˄" : "˅"}</span>
+                    </button>
+                    {showElementMenu ? (
+                      <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-20 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+                        <input
+                          type="text"
+                          value={elementSearch}
+                          onChange={(event) => setElementSearch(event.target.value)}
+                          placeholder="Search health data elements"
+                          className="mb-3 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500"
+                        />
+                        <div className="max-h-60 space-y-1 overflow-y-auto">
+                          {availableElementChoices.length > 0 ? (
+                            availableElementChoices.map((element) => (
+                              <button
+                                key={element.element_id}
+                                type="button"
+                                onClick={() => addElementFilterById(element.element_id)}
+                                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                              >
+                                <span className="flex items-center gap-2">
+                                  <span>{element.label}{element.unit ? ` (${element.unit})` : ""}</span>
+                                  {element.is_active === false && (
+                                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                                      Deactivated
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="text-xs font-semibold text-blue-600">Add</span>
+                              </button>
+                            ))
+                          ) : (
+                            <p className="px-2 py-3 text-sm text-slate-500">No matching elements left to add.</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
               </div>
 
-              {/* Chart 2: Age Demographics */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                <h3 className="text-sm font-bold text-slate-700 mb-6 text-center uppercase tracking-widest">
-                  Age Demographics
-                </h3>
-                {chartData.age.length === 0 ? (
-                  <div className="h-64 flex items-center justify-center text-sm text-slate-400">No data to display</div>
-                ) : (
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={chartData.age}
-                      margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                    >
-                      <XAxis
-                        dataKey="name"
-                        tick={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          fill: "#64748b",
-                        }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <YAxis
-                        tick={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          fill: "#64748b",
-                        }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <Tooltip
-                        cursor={{ fill: "#f1f5f9" }}
-                        contentStyle={{
-                          borderRadius: "12px",
-                          border: "none",
-                          boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                        }}
-                      />
-                      <Bar
-                        dataKey="count"
-                        fill="#3b82f6"
-                        radius={[6, 6, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                )}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={addElementFilter}
+                  disabled={!elementDraft.element_id}
+                  className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  Add filter
+                </button>
               </div>
             </div>
-          )}
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2 pt-1 sm:flex-row">
+          <button
+            type="button"
+            onClick={applyFilters}
+            disabled={surveyGroupMismatch}
+            className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
+              surveyGroupMismatch
+                ? "cursor-not-allowed bg-slate-200 text-slate-500"
+                : "bg-blue-700 text-white hover:bg-blue-800"
+            }`}
+          >
+            Apply
+          </button>
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
+          >
+            Reset
+          </button>
         </div>
+      </div>
       </div>
     </div>
   );

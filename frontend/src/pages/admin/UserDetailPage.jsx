@@ -18,6 +18,8 @@ const ACTION_STYLES = {
   GOAL_LOGGED:          { bg: "bg-emerald-50", tx: "text-emerald-700", lb: "Goal Logged" },
   PASSWORD_RESET_REQ:   { bg: "bg-amber-50",   tx: "text-amber-700",   lb: "Password Reset Requested" },
   PASSWORD_RESET:       { bg: "bg-emerald-50", tx: "text-emerald-700", lb: "Password Reset" },
+  PASSWORD_RESET_REQUESTED: { bg: "bg-amber-50",   tx: "text-amber-700",   lb: "Password Reset Requested" },
+  PASSWORD_RESET_SUCCESS:   { bg: "bg-emerald-50", tx: "text-emerald-700", lb: "Password Reset" },
   REGISTER:             { bg: "bg-indigo-50",  tx: "text-indigo-700",  lb: "Registered" },
   REGISTER_SUCCESS:     { bg: "bg-indigo-50",  tx: "text-indigo-700",  lb: "Registered" },
   USER_STATUS_CHANGED:  { bg: "bg-amber-50",   tx: "text-amber-700",   lb: "Status Changed" },
@@ -36,6 +38,39 @@ const ACTION_STYLES = {
 
 const GOAL_BAR = { completed: "bg-emerald-500", in_progress: "bg-blue-500", active: "bg-blue-500", not_started: "bg-slate-300" };
 
+function formatActivityDetail(action, details) {
+  if (!details || typeof details !== "object") return null;
+  const d = details;
+  switch (action) {
+    case "USER_ROLE_CHANGED":   return d.new_role ? `Changed to ${d.new_role}` : null;
+    case "USER_STATUS_CHANGED": return d.new_status ? `Account ${d.new_status}` : null;
+    case "LOGIN_SUCCESS":       return null; // email redundant — already on user's page
+    case "LOGOUT":              return null;
+    case "LOGIN_FAILED":        return d.identifier_attempted ? `Attempted: ${d.identifier_attempted}` : null;
+    case "REGISTER_SUCCESS":    return d.role ? `Joined as ${d.role}` : null;
+    case "USER_REACTIVATED":    return "Account reactivated";
+    case "USER_UNLOCKED":       return "Account unlocked";
+    case "USER_ANONYMIZED":     return "Identifying data removed";
+    case "USER_DELETED":        return "Account permanently deleted";
+    case "USER_SELF_DEACTIVATED": return "Self-deactivated";
+    case "PASSWORD_RESET_REQUESTED": return "Reset link sent";
+    case "PASSWORD_RESET_SUCCESS":   return "Password updated";
+    case "INVITE_SENT":         return d.invited_email ? `Invited ${d.invited_email}${d.role ? ` as ${d.role}` : ""}` : null;
+    case "MAINTENANCE_MODE_UPDATED": return d.enabled != null ? (d.enabled ? "Maintenance enabled" : "Maintenance disabled") : null;
+    default: {
+      // Fallback: pick the most meaningful single field rather than dumping the full object
+      const skip = new Set(["email", "id", "user_id"]);
+      const entries = Object.entries(d).filter(([k]) => !skip.has(k));
+      if (entries.length === 0) return null;
+      if (entries.length === 1) {
+        const [k, v] = entries[0];
+        return `${k.replace(/_/g, " ")}: ${v}`;
+      }
+      return entries.map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join(" · ");
+    }
+  }
+}
+
 // ── Shared UI ─────────────────────────────────────────────────────────────────
 const Ic = ({ d, c = "h-5 w-5" }) => <svg xmlns="http://www.w3.org/2000/svg" className={c} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} /></svg>;
 const Spinner = () => <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>;
@@ -49,10 +84,10 @@ function Avatar({ name, size = "md" }) {
 }
 function StatusDot({ status }) { return <span className={`inline-block w-2.5 h-2.5 rounded-full ${status === "active" ? "bg-emerald-500" : "bg-slate-300"}`} />; }
 function RoleBadge({ role }) { const r = ROLES.find(x => x.value === role); return <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide ${r?.lightBg || "bg-slate-100"} ${r?.lightText || "text-slate-600"}`}>{role}</span>; }
-function InfoRow({ label, value }) { return <div className="flex justify-between py-2 border-b border-slate-50 last:border-0"><span className="text-xs text-slate-400">{label}</span><span className="text-sm text-slate-700 font-medium text-right max-w-[60%]">{value || <span className="text-slate-300 italic">—</span>}</span></div>; }
+function InfoRow({ label, value }) { return <div className="flex justify-between items-start gap-3 py-2 border-b border-slate-50 last:border-0"><span className="text-xs text-slate-400 shrink-0">{label}</span><span className="text-sm text-slate-700 font-medium text-right break-all min-w-0">{value || <span className="text-slate-300 italic">—</span>}</span></div>; }
 function StatCard({ label, value, sub, icon, color = "blue" }) { const c = { blue: "bg-blue-50 text-blue-600", emerald: "bg-emerald-50 text-emerald-600", amber: "bg-amber-50 text-amber-600", rose: "bg-rose-50 text-rose-600", violet: "bg-violet-50 text-violet-600" }; return <div className="bg-white rounded-xl border border-slate-100 p-4 shadow-sm"><div className="flex items-center gap-3 mb-2"><div className={`w-9 h-9 rounded-lg flex items-center justify-center ${c[color]}`}><Ic d={icon} c="h-4 w-4" /></div><p className="text-xs font-bold text-slate-400 uppercase tracking-wider">{label}</p></div><p className="text-2xl font-extrabold text-slate-800">{value}</p>{sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}</div>; }
 function Modal({ open, onClose, children }) { if (!open) return null; return <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} /><div className="relative z-10 bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">{children}</div></div>; }
-function Toast({ message, onClose }) { if (!message) return null; return <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70]"><div className="px-5 py-3 rounded-xl shadow-lg text-sm font-semibold text-white bg-emerald-600">{message}</div></div>; }
+function Toast({ message, type = "success", onClose }) { if (!message) return null; const bg = type === "error" ? "bg-red-600" : "bg-emerald-600"; return <div className={`fixed bottom-6 z-[200] left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-6 w-[calc(100%-3rem)] sm:w-auto max-w-sm`}><div className={`px-5 py-3 rounded-xl shadow-lg text-sm font-semibold text-white ${bg} flex items-center gap-2`}>{type === "error" && <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>}{message}</div></div>; }
 
 function fmt(d) { if (!d) return "—"; return new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" }); }
 function fmtTime(d) { if (!d) return "—"; return new Date(d).toLocaleString("en-CA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
@@ -70,105 +105,138 @@ function ApiPendingBanner({ endpoint, description }) {
 function ChangeRoleModal({ open, onClose, user, onConfirm }) {
   const [sel, setSel] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   if (!open || !user) return null;
+  const close = () => { setSel(""); setError(""); onClose(); };
   const handle = async () => {
     if (!sel || sel === user.role) return;
     setLoading(true);
+    setError("");
     try {
       await api.adminUpdateUser(user.id, { role: sel });
       await onConfirm(sel);
     } catch (err) {
-      console.error("Role change failed:", err);
+      setError(err.message || "Failed to change role. Please try again.");
+    } finally {
+      setLoading(false);
     }
-    finally { setLoading(false); setSel(""); }
   };
-  return <Modal open={open} onClose={() => { setSel(""); onClose(); }}>
+  return <Modal open={open} onClose={close}>
     <h3 className="text-lg font-bold text-slate-800 mb-1">Change Role</h3>
     <p className="text-sm text-slate-400 mb-4">{user.firstName} {user.lastName} — currently <span className="font-semibold capitalize">{user.role}</span></p>
-    <div className="space-y-2">{ROLES.map(r => { const cur = r.value === user.role; return <button key={r.value} onClick={() => setSel(r.value)} disabled={cur} className={`w-full text-left px-4 py-3 rounded-xl border transition-all capitalize ${cur ? "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed" : sel === r.value ? `${r.lightBg} ${r.border} ${r.lightText} ring-1 ring-current font-semibold` : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{r.value}{cur && <span className="text-xs ml-2 text-slate-400">(current)</span>}</button>; })}</div>
+    <div className="space-y-2">{ROLES.map(r => { const cur = r.value === user.role; return <button key={r.value} onClick={() => { setSel(r.value); setError(""); }} disabled={cur} className={`w-full text-left px-4 py-3 rounded-xl border transition-all capitalize ${cur ? "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed" : sel === r.value ? `${r.lightBg} ${r.border} ${r.lightText} ring-1 ring-current font-semibold` : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{r.value}{cur && <span className="text-xs ml-2 text-slate-400">(current)</span>}</button>; })}</div>
     {sel === "admin" && sel !== user.role && <div className="mt-3 bg-rose-50 border border-rose-100 rounded-xl p-3 text-xs text-rose-700"><span className="font-semibold">Warning:</span> Admin has full platform access.</div>}
-    <div className="flex gap-3 mt-5"><button onClick={() => { setSel(""); onClose(); }} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={!sel || sel === user.role || loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">{loading ? <><Spinner /> Changing…</> : "Change Role"}</button></div>
-  </Modal>;
-}
-
-// ── Change Group Modal (with No Group / Unassign option) ───────────────────────
-function ChangeGroupModal({ open, onClose, user, groups, onConfirm }) {
-  const [sel, setSel] = useState("");
-  const [loading, setLoading] = useState(false);
-  if (!open || !user) return null;
-  const handle = async () => {
-    setLoading(true);
-    try {
-      if (sel === "none") {
-        // Unassign: move to null group
-        await api.adminMoveParticipant(user.id, null);
-      } else {
-        await api.adminMoveParticipant(user.id, sel);
-      }
-      onConfirm(sel === "none" ? null : sel);
-    } catch (err) { console.error("Group change failed:", err); }
-    finally { setLoading(false); setSel(""); }
-  };
-  return <Modal open={open} onClose={() => { setSel(""); onClose(); }}>
-    <h3 className="text-lg font-bold text-slate-800 mb-1">Change Group</h3>
-    <p className="text-sm text-slate-400 mb-4">{user.firstName} {user.lastName}{user.group ? ` — in ${user.group}` : " — no group"}</p>
-    <div className="space-y-2">
-      <button onClick={() => setSel("none")} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${sel === "none" ? "border-amber-400 bg-amber-50 ring-1 ring-amber-300 text-amber-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-        <p className="text-sm font-semibold">No Group</p>
-        <p className="text-xs text-slate-400 mt-0.5">Remove from all groups</p>
-      </button>
-      {(groups || []).map(g => {
-        const cur = user.groupId && String(user.groupId) === String(g.group_id);
-        return <button key={g.group_id} onClick={() => setSel(g.group_id)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${sel === g.group_id ? "border-emerald-400 bg-emerald-50 ring-1 ring-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}>
-          <p className="text-sm font-semibold text-slate-700">{g.name}{cur && <span className="text-xs ml-2 text-emerald-600">(current)</span>}</p>
-          {g.caretaker_name && <p className="text-xs text-slate-400 mt-0.5">{g.caretaker_name}</p>}
-        </button>;
-      })}
-    </div>
-    <div className="flex gap-3 mt-5"><button onClick={() => { setSel(""); onClose(); }} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={!sel || loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">{loading ? <><Spinner /> Moving…</> : sel === "none" ? "Unassign" : "Move"}</button></div>
+    {error && <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-700">{error}</div>}
+    <div className="flex gap-3 mt-5"><button onClick={close} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={!sel || sel === user.role || loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">{loading ? <><Spinner /> Changing…</> : "Change Role"}</button></div>
   </Modal>;
 }
 
 // ── Deactivate / Reactivate Confirmation ──────────────────────────────────────
 function StatusModal({ open, onClose, user, onConfirm }) {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   if (!open || !user) return null;
   const isActive = user.status === "active";
+  const close = () => { if (!loading) { setError(""); onClose(); } };
   const handle = async () => {
     setLoading(true);
-    try { await api.adminUpdateUserStatus(user.id, isActive ? "inactive" : "active"); onConfirm(); }
-    catch (err) { console.error("Status change failed:", err); }
+    setError("");
+    try {
+      if (isActive) {
+        await api.adminUpdateUserStatus(user.id, "inactive");
+      } else {
+        await api.adminReactivateUser(user.id);
+      }
+      onConfirm();
+    }
+    catch (err) { setError(err.message || "Failed to update status. Please try again."); }
     finally { setLoading(false); }
   };
-  return <Modal open={open} onClose={() => !loading && onClose()}>
+  return <Modal open={open} onClose={close}>
     <div className="flex items-center gap-3 mb-4"><div className={`w-12 h-12 rounded-full flex items-center justify-center ${isActive ? "bg-amber-50 text-amber-600" : "bg-emerald-50 text-emerald-600"}`}><Ic d={isActive ? "M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" : "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"} /></div><div><h3 className="text-lg font-bold text-slate-800">{isActive ? "Deactivate" : "Reactivate"} User</h3><p className="text-sm text-slate-500">{user.firstName} {user.lastName}</p></div></div>
     <div className={`${isActive ? "bg-amber-50 border-amber-100 text-amber-700" : "bg-emerald-50 border-emerald-100 text-emerald-700"} border rounded-xl p-3 text-sm mb-4`}>{isActive ? "User won't be able to log in. Data is preserved." : "User will regain access to their account."}</div>
-    <div className="flex gap-3"><button onClick={onClose} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={loading} className={`flex-1 px-4 py-2.5 text-sm font-semibold text-white rounded-xl flex items-center justify-center gap-2 disabled:opacity-70 ${isActive ? "bg-amber-600" : "bg-emerald-600"}`}>{loading ? <><Spinner /> Processing…</> : isActive ? "Deactivate" : "Reactivate"}</button></div>
+    {error && <div className="mb-3 bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-700">{error}</div>}
+    <div className="flex gap-3"><button onClick={close} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={loading} className={`flex-1 px-4 py-2.5 text-sm font-semibold text-white rounded-xl flex items-center justify-center gap-2 disabled:opacity-70 ${isActive ? "bg-amber-600" : "bg-emerald-600"}`}>{loading ? <><Spinner /> Processing…</> : isActive ? "Deactivate" : "Reactivate"}</button></div>
   </Modal>;
 }
 
 // ── Delete Confirmation ──────────────────────────────────────────────────────
 function DeleteModal({ open, onClose, user, groups, onConfirm }) {
-  const [mode, setMode] = useState("anonymize");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   if (!open || !user) return null;
+  const close = () => { if (!loading) { setError(""); onClose(); } };
   const affectedGroups = user.role === "caretaker" ? (groups || []).filter(g => String(g.caretaker_user_id || g.caretaker_id) === String(user.id)) : [];
   const handle = async () => {
     setLoading(true);
-    try { await api.adminDeleteUser(user.id, mode); onConfirm(mode); }
-    catch (err) { console.error("Delete failed:", err); }
+    setError("");
+    try { await api.adminDeleteUser(user.id, "anonymize"); onConfirm("anonymize"); }
+    catch (err) { setError(err.message || "Failed to delete user. Please try again."); }
     finally { setLoading(false); }
   };
-  return <Modal open={open} onClose={() => !loading && onClose()}>
-    <div className="flex items-center gap-3 mb-4"><div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center shrink-0"><Ic d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></div><div><h3 className="text-lg font-bold text-slate-800">Delete User</h3><p className="text-sm text-slate-500">{user.firstName} {user.lastName}</p></div></div>
+  return <Modal open={open} onClose={close}>
+    <div className="flex items-center gap-3 mb-4"><div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center shrink-0"><Ic d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></div><div><h3 className="text-lg font-bold text-slate-800">Delete & Anonymize</h3><p className="text-sm text-slate-500">{user.firstName} {user.lastName}</p></div></div>
     {affectedGroups.length > 0 && <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-sm text-amber-700 mb-4"><p className="font-semibold mb-1">This caretaker is assigned to {affectedGroups.length} group{affectedGroups.length > 1 ? "s" : ""}:</p><ul className="list-disc list-inside text-xs space-y-0.5">{affectedGroups.map(g => <li key={g.group_id}>{g.name}</li>)}</ul><p className="mt-2 text-xs">They will be automatically unassigned.</p></div>}
-    <div className="space-y-2">
-      <button onClick={() => setMode("anonymize")} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${mode === "anonymize" ? "border-blue-500 bg-blue-50 ring-1 ring-blue-200" : "border-slate-200 hover:bg-slate-50"}`}><p className="text-sm font-semibold text-slate-700">Delete & Anonymize</p><p className="text-xs text-slate-400 mt-0.5">Replace name/email — submissions and health data kept.</p></button>
-      <button onClick={() => setMode("permanent")} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${mode === "permanent" ? "border-rose-500 bg-rose-50 ring-1 ring-rose-200" : "border-slate-200 hover:bg-slate-50"}`}><p className="text-sm font-semibold text-slate-700">Delete Permanently</p><p className="text-xs text-slate-400 mt-0.5">Remove account and ALL data. Cannot be undone.</p></button>
-    </div>
-    {mode === "permanent" && <div className="mt-3 bg-rose-50 border border-rose-100 rounded-xl p-3 text-xs text-rose-700"><span className="font-semibold">Warning:</span> All data will be erased.</div>}
-    <div className="flex gap-3 mt-4"><button onClick={onClose} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-70">{loading ? <><Spinner /> Deleting…</> : mode === "anonymize" ? "Anonymize" : "Delete"}</button></div>
+    <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm text-blue-700"><span className="font-semibold">This will:</span> remove identifying account details and keep retained submissions and health data in anonymized form.</div>
+    {error && <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-700">{error}</div>}
+    <div className="flex gap-3 mt-4"><button onClick={close} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button><button onClick={handle} disabled={loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-70">{loading ? <><Spinner /> Deleting…</> : "Delete & Anonymize"}</button></div>
   </Modal>;
+}
+
+function ChangeGroupModal({ open, onClose, targets, groups, onMove }) {
+  const [selected, setSelected] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const close = () => { if (!loading) { setSelected(""); setError(""); onClose(); } };
+
+  const handle = async () => {
+    if (!selected) return;
+    setLoading(true);
+    setError("");
+    try {
+      await onMove(selected);
+      setSelected("");
+    } catch (err) {
+      setError(err.message || "Failed to move participant.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const names = (targets || []).map(u => `${u.firstName || u.first_name || ""} ${u.lastName || u.last_name || ""}`.trim() || u.email).join(", ");
+
+  return (
+    <Modal open={open} onClose={close}>
+      <h3 className="text-lg font-bold text-slate-800 mb-1">Change Group</h3>
+      <p className="text-sm text-slate-400 mb-4 truncate">{names}</p>
+      <div className="space-y-2 mb-4">
+        <button
+          onClick={() => setSelected("none")}
+          className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium transition-colors ${selected === "none" ? "bg-rose-50 border-rose-200 text-rose-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+        >
+          Remove from group
+        </button>
+        {(groups || []).map(g => (
+          <button
+            key={g.group_id}
+            onClick={() => setSelected(g.group_id)}
+            className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium transition-colors ${selected === g.group_id ? "bg-blue-50 border-blue-200 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+          >
+            {g.name}
+            {g.caretaker_name && <span className="text-xs text-slate-400 ml-2">· {g.caretaker_name}</span>}
+          </button>
+        ))}
+      </div>
+      {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">{error}</div>}
+      <div className="flex gap-3">
+        <button onClick={close} className="flex-1 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl">Cancel</button>
+        <button onClick={handle} disabled={!selected || loading} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl disabled:opacity-40">
+          {loading ? "Moving…" : "Confirm"}
+        </button>
+      </div>
+    </Modal>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -188,8 +256,8 @@ export default function UserDetailPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [toast, setToast] = useState(null);
-  const msg = (m) => { setToast(m); setTimeout(() => setToast(null), 3500); };
+  const [toast, setToast] = useState(null); // { message, type }
+  const msg = (m, type = "success") => { setToast({ message: m, type }); setTimeout(() => setToast(null), 3500); };
 
   // ── UI state ──
   const [tab, setTab] = useState("profile");
@@ -211,6 +279,7 @@ export default function UserDetailPage() {
     lastName: u.last_name || "",
     email: u.email || "",
     phone: u.phone || "",
+    address: u.address || "",
     role: u.role || "",
     status: u.status === true ? "active" : "inactive",
     joinedAt: u.joined_at || null,
@@ -266,7 +335,11 @@ export default function UserDetailPage() {
 
       const transformed = transformUser(rawUser);
       setUser(transformed);
-      setGroups(Array.isArray(grps) ? grps : []);
+      const enrichedGroups = (Array.isArray(grps) ? grps : []).map(g => {
+        const ct = (Array.isArray(cts) ? cts : []).find(c => String(c.caretaker_id) === String(g.caretaker_id));
+        return { ...g, group_id: String(g.group_id), caretaker_name: ct?.name || null };
+      });
+      setGroups(enrichedGroups);
       setCaretakers(Array.isArray(cts) ? cts : []);
 
       // Fetch role-specific data
@@ -289,6 +362,14 @@ export default function UserDetailPage() {
   }, [userId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Reset view state when navigating to a different user
+  useEffect(() => {
+    setTab("profile");
+    setExpSub(null);
+    setExpGoal(null);
+    setActFilter("all");
+  }, [userId]);
 
   // ── Derived ──
   const isAnonymized = user?.email?.startsWith("deleted_");
@@ -327,9 +408,11 @@ export default function UserDetailPage() {
     fetchData(); // Refresh to pick up any profile changes
   };
 
-  const handleGroupChanged = (newGroupId) => {
-    const g = newGroupId ? groups.find(x => String(x.group_id) === String(newGroupId)) : null;
-    setUser(p => ({ ...p, groupId: newGroupId, group: g?.name || null }));
+  const handleGroupChanged = async (groupId) => {
+    const isUnassign = groupId === "none";
+    await api.adminMoveParticipant(user.id, isUnassign ? null : groupId);
+    const g = isUnassign ? null : groups.find(x => String(x.group_id) === String(groupId));
+    setUser(p => ({ ...p, groupId: isUnassign ? null : groupId, group: g?.name || null }));
     setShowChangeGroup(false);
     msg(g ? `Moved to ${g.name}.` : "Removed from group.");
   };
@@ -337,7 +420,7 @@ export default function UserDetailPage() {
   const handleStatusChanged = () => {
     setUser(p => ({ ...p, status: p.status === "active" ? "inactive" : "active" }));
     setShowStatusModal(false);
-    msg(user.status === "active" ? "User deactivated." : "User reactivated.");
+    msg(user.status === "active" ? "User deactivated." : "User reactivated. Password reset email sent.");
     fetchData();
   };
 
@@ -347,13 +430,13 @@ export default function UserDetailPage() {
       setUser(p => ({ ...p, lockedUntil: null, failedLoginAttempts: 0 }));
       msg("User unlocked.");
     } catch (err) {
-      msg(err.message || "Failed to unlock user.");
+      msg(err.message || "Failed to unlock user.", "error");
     }
   };
 
-  const handleDeleted = () => {
+  const handleDeleted = (mode) => {
     setShowDeleteModal(false);
-    msg("User deleted.");
+    msg(mode === "anonymize" ? "User anonymized." : "User account deleted. Retained data was anonymized.");
     navigate("/users");
   };
 
@@ -381,8 +464,7 @@ export default function UserDetailPage() {
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-bold text-slate-800">{user.firstName} {user.lastName}</h1>
               <RoleBadge role={user.role} />
-              <StatusDot status={user.status} />
-              <span className="text-sm text-slate-500 capitalize font-medium">{user.status}</span>
+              <span className="flex items-center gap-1.5"><StatusDot status={user.status} /><span className="text-sm text-slate-500 capitalize font-medium">{user.status}</span></span>
               {locked && <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full uppercase">Locked</span>}
               {isAnonymized && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full uppercase">Anonymized</span>}
             </div>
@@ -424,7 +506,7 @@ export default function UserDetailPage() {
       </div>
 
       {/* ═══ QUICK STATS ═══ */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Last Login" value={user.lastLoginAt ? timeAgo(user.lastLoginAt) : "Never"} sub={fmtTime(user.lastLoginAt)} icon="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" color="blue" />
         {user.role === "participant" && <>
           <StatCard label="Submissions" value={submissions?.length ?? "—"} sub="All time" icon="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" color="violet" />
@@ -442,7 +524,7 @@ export default function UserDetailPage() {
         <div className="flex border-b border-slate-100 overflow-x-auto">
           {tabs.map(t => (
             <button key={t.k} onClick={() => { setTab(t.k); setActFilter("all"); }}
-              className={`px-5 py-3.5 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${tab === t.k ? "border-blue-600 text-blue-600" : "border-transparent text-slate-400 hover:text-slate-700"}`}>
+              className={`px-3 sm:px-5 py-3.5 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${tab === t.k ? "border-blue-600 text-blue-600" : "border-transparent text-slate-400 hover:text-slate-700"}`}>
               {t.l}
             </button>
           ))}
@@ -563,14 +645,14 @@ export default function UserDetailPage() {
                 <div className="space-y-2">
                   {filteredActivity.map(a => {
                     const s = ACTION_STYLES[a.action] || { bg: "bg-slate-100", tx: "text-slate-600", lb: a.action?.replace(/_/g, " ") || "Event" };
-                    const detail = a.details ? (typeof a.details === "object" ? JSON.stringify(a.details) : a.details) : null;
+                    const detail = formatActivityDetail(a.action, a.details);
                     return (
                       <div key={a.audit_id || a.id} className={`flex items-start gap-3 px-4 py-3 rounded-xl ${s.bg}`}>
                         <div className={`w-2 h-2 rounded-full ${s.tx.replace("text-", "bg-")} shrink-0 mt-2`} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className={`text-sm font-semibold ${s.tx}`}>{s.lb}</span>
-                            {detail && detail !== "{}" && <span className="text-xs text-slate-500 truncate max-w-xs">— {detail}</span>}
+                            {detail && <span className="text-xs text-slate-500">— {detail}</span>}
                           </div>
                           <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
                             <span>{fmtTime(a.created_at)}</span>
@@ -733,11 +815,11 @@ export default function UserDetailPage() {
 
       {/* ═══ MODALS ═══ */}
       <ChangeRoleModal open={showChangeRole} onClose={() => setShowChangeRole(false)} user={user} onConfirm={handleRoleChanged} />
-      <ChangeGroupModal open={showChangeGroup} onClose={() => setShowChangeGroup(false)} user={user} groups={groups} onConfirm={handleGroupChanged} />
+      <ChangeGroupModal open={showChangeGroup} onClose={() => setShowChangeGroup(false)} targets={[user]} groups={groups} onMove={handleGroupChanged} />
       <StatusModal open={showStatusModal} onClose={() => setShowStatusModal(false)} user={user} onConfirm={handleStatusChanged} />
       <DeleteModal open={showDeleteModal} onClose={() => setShowDeleteModal(false)} user={user} groups={groups} onConfirm={handleDeleted} />
 
-      <Toast message={toast} />
+      <Toast message={toast?.message} type={toast?.type} />
     </div>
   );
 }

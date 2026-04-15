@@ -2,6 +2,7 @@ import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { DASHBOARD_NAV } from "../config/navigation";
 import NotificationBell from "../components/NotificationBell";
+import HDBLogo from "../components/HDBLogo";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function DashboardLayout({ role }) {
@@ -45,7 +46,7 @@ export default function DashboardLayout({ role }) {
         <div className="flex items-center gap-4">
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="md:hidden text-slate-500 hover:text-slate-800"
+            className="text-slate-500 hover:text-slate-800"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -62,12 +63,7 @@ export default function DashboardLayout({ role }) {
               />
             </svg>
           </button>
-          <Link
-            to={`/${role.toLowerCase()}`}
-            className="font-bold text-xl text-blue-600 hover:text-blue-700 transition-colors"
-          >
-            Health Data Bank
-          </Link>
+          <HDBLogo to={`/${role.toLowerCase()}`} size="md" />
         </div>
 
         {/* Bell + Avatar */}
@@ -147,11 +143,11 @@ export default function DashboardLayout({ role }) {
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Mobile Backdrop */}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        {/* Sidebar Backdrop */}
         {isSidebarOpen && (
           <div
-            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            className="fixed inset-0 bg-black/50 z-40"
             onClick={() => setIsSidebarOpen(false)}
           ></div>
         )}
@@ -160,9 +156,9 @@ export default function DashboardLayout({ role }) {
         <aside
           className={`${
             isSidebarOpen ? "translate-x-0" : "-translate-x-full"
-          } fixed top-0 left-0 z-50 h-screen w-64 shadow-xl transition-transform duration-300 ease-in-out md:translate-x-0 md:relative md:z-auto md:shadow-none bg-white border-r border-gray-200 md:flex md:flex-col md:w-64`}
+          } fixed top-0 left-0 z-50 h-screen w-64 shadow-xl transition-transform duration-300 ease-in-out bg-white border-r border-gray-200 flex flex-col`}
         >
-          <nav className="flex-1 p-6 flex flex-col gap-2">
+          <nav className="flex-1 p-6 flex flex-col gap-2 overflow-y-auto">
             {/* USER PROFILE CARD */}
             <div className="mb-6 p-4 bg-slate-50 border border-slate-100 rounded-xl shadow-sm">
               <div className="flex flex-col">
@@ -208,10 +204,19 @@ export default function DashboardLayout({ role }) {
           </nav>
         </aside>
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-slate-50 p-6">
-          <Outlet context={{ user }} />
-        </main>
+        {/* Main Content + Footer */}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-slate-50 p-6">
+            <Outlet context={{ user }} />
+          </main>
+          <footer className="shrink-0 border-t border-slate-200 bg-white px-6 py-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+            <Link to="/feedback/send" className="hover:text-slate-600 transition-colors">Send feedback</Link>
+            <span>·</span>
+            <Link to="/terms" className="hover:text-slate-600 transition-colors">Terms and conditions</Link>
+            <span>·</span>
+            <span>© 2026 University of Prince Edward Island</span>
+          </footer>
+        </div>
       </div>
     </div>
   );

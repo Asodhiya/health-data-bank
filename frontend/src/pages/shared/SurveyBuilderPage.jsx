@@ -1,7 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import FieldInput from '../../components/survey/FieldInput';
 import { FieldCard, AddFieldPanel, newField, uid } from '../../components/survey/FieldEditor';
 import { api } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
+import { useResearcherMeta } from '../../hooks/useResearcherMeta';
+import { getApiErrorMessage } from '../../utils/apiErrors';
 
 /* Toast animation — injected once, not per render */
 if (typeof document !== 'undefined' && !document.getElementById('hdb-toast-styles')) {
@@ -50,9 +53,6 @@ function StatusBadge({ status }) {
   return <span className={`text-xs font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${cls}`}>{status}</span>;
 }
 
-
-const toTitleCase = (str = '') =>
-  str.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 
 /* ── HELPERS: Data Transformation ── */
 const transformForSave = (form) => {
@@ -106,6 +106,15 @@ const daysSince = (dateStr) => {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
+const formatShortDate = (dateStr) => {
+  if (!dateStr) return '';
+  return new Date(dateStr).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+};
+
 const timeAgo = (date) => {
   if (!date) return '';
   const sec = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -126,7 +135,7 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
         <h3 className="text-lg font-bold text-slate-900 mb-2">{title}</h3>
         <p className="text-sm text-slate-500 mb-4">{message}</p>
         {children}
-        <div className="flex justify-end gap-2 mt-4">
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium hover:text-slate-700 transition">Cancel</button>
           <button onClick={onConfirm} disabled={disabled}
             className={`px-4 py-2 text-sm text-white rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${confirmClass || 'bg-blue-600 hover:bg-blue-700'}`}>
@@ -143,13 +152,19 @@ function ConfirmModal({ title, message, confirmLabel, confirmClass, onConfirm, o
    FORM LIST VIEW
    #6 tab counts, #7 sort, #8 publish date, #9 empty state
    ══════════════════════════════════════════════ */
-function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, onUnpublish, onArchive, groups, pageTitle = 'Survey Forms' }) {
+function FormListView({ fetchForms, refreshKey, onEdit, onBranch, onCreate, onDelete, onPublish, onUnpublish, onArchive, groups, currentUser, pageTitle = 'Survey Forms' }) {
+  const [forms, setForms]               = useState([]);
+  const [listLoading, setListLoading]   = useState(true);
+  const [counts, setCounts]             = useState({ ALL: 0, DRAFT: 0, PUBLISHED: 0, ARCHIVED: 0 });
+  const [totalCount, setTotalCount]     = useState(0);
+  const [totalPages, setTotalPages]     = useState(1);
   const [showHelp, setShowHelp]         = useState(false);
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sort, setSort]                 = useState('edited');
   const [showSort, setShowSort]         = useState(false);
   const [groupFilter, setGroupFilter]   = useState('ALL');
+  const [ownershipFilter, setOwnershipFilter] = useState('ALL');
   const [groupSearch, setGroupSearch]   = useState('');
   const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
   const groupDropdownRef = useRef(null);
@@ -164,7 +179,9 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
   const [selected, setSelected]         = useState(new Set());
   const [modal, setModal]               = useState(null);
   const [publishGroups, setPublishGroups] = useState(new Set());
+  const [unpublishGroups, setUnpublishGroups] = useState(new Set());
   const [publishGroupSearch, setPublishGroupSearch] = useState('');
+  const [publishCadence, setPublishCadence] = useState('once');
   const [publishError, setPublishError] = useState('');
   const [expandedHistory, setExpandedHistory] = useState(new Set());
   const [page, setPage] = useState(1);
@@ -172,10 +189,11 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
   const hasDateFilter  = dateFrom || dateTo;
   const hasGroupFilter = groupFilter !== 'ALL';
-  const activeFilterCount = (hasDateFilter ? 1 : 0) + (hasGroupFilter ? 1 : 0);
+  const hasOwnershipFilter = ownershipFilter !== 'ALL';
+  const activeFilterCount = (hasDateFilter ? 1 : 0) + (hasGroupFilter ? 1 : 0) + (hasOwnershipFilter ? 1 : 0);
 
   /* Group forms into version families — each family shows only its latest non-deleted version */
-  const families = (() => {
+  const families = useMemo(() => {
     const familyMap = {};
     forms.forEach((f) => {
       const rootId = String(f.parent_form_id || f.form_id);
@@ -196,35 +214,8 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
       const latest = active[0];
       return [{ latest, history: [...active.slice(1), ...inactive], rootId: String(latest.parent_form_id || latest.form_id) }];
     });
-  })();
-
-  /* #6 — Status counts (by latest version per family) */
-  const counts = {
-    ALL: families.length,
-    DRAFT: families.filter(({ latest: f }) => f.status === 'DRAFT').length,
-    PUBLISHED: families.filter(({ latest: f }) => f.status === 'PUBLISHED').length,
-    ARCHIVED: families.filter(({ latest: f }) => f.status === 'ARCHIVED').length,
-  };
-
-  const filtered = families.filter(({ latest: f }) => {
-    const matchSearch = f.title.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === 'ALL' || f.status === statusFilter;
-    const matchGroup  = groupFilter === 'ALL' || (f.status === 'PUBLISHED' && Array.isArray(f.deployed_group_ids) && f.deployed_group_ids.map(String).includes(groupFilter));
-    const matchFrom   = !dateFrom || new Date(f.created_at) >= new Date(dateFrom);
-    const matchTo     = !dateTo   || new Date(f.created_at) <= new Date(dateTo + 'T23:59:59.999');
-    return matchSearch && matchStatus && matchGroup && matchFrom && matchTo;
-  });
-
-  /* #7 — Sort */
+  }, [forms]);
   const sortLabels = { newest: 'Newest first', oldest: 'Oldest first', alpha: 'A → Z', edited: 'Recently edited' };
-  const sorted = [...filtered].sort((a, b) => {
-    const fa = a.latest, fb = b.latest;
-    if (sort === 'newest') return new Date(fb.created_at) - new Date(fa.created_at);
-    if (sort === 'oldest') return new Date(fa.created_at) - new Date(fb.created_at);
-    if (sort === 'alpha')  return fa.title.localeCompare(fb.title);
-    if (sort === 'edited') return new Date(fb.modified_at || fb.created_at) - new Date(fa.modified_at || fa.created_at);
-    return 0;
-  });
 
   const toggleHistory = (rootId) => {
     setExpandedHistory((prev) => { const n = new Set(prev); n.has(rootId) ? n.delete(rootId) : n.add(rootId); return n; });
@@ -234,19 +225,118 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
   const selectAll = () => {
-    if (selected.size === filtered.length) setSelected(new Set());
-    else setSelected(new Set(filtered.map(({ latest: f }) => f.form_id)));
+    if (selected.size === families.length) setSelected(new Set());
+    else setSelected(new Set(families.map(({ latest: f }) => f.form_id)));
   };
-  const clearFilters = () => { setDateFrom(''); setDateTo(''); setGroupFilter('ALL'); setShowFilters(false); };
+  const clearFilters = () => { setDateFrom(''); setDateTo(''); setGroupFilter('ALL'); setOwnershipFilter('ALL'); setShowFilters(false); };
 
-  useEffect(() => { setPage(1); }, [search, statusFilter, sort, groupFilter, dateFrom, dateTo]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, sort, groupFilter, ownershipFilter, dateFrom, dateTo]);
+  useEffect(() => { setSelected(new Set()); }, [page, statusFilter, search, sort, groupFilter, ownershipFilter, dateFrom, dateTo]);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const paginated  = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => {
+    let active = true;
+    setListLoading(true);
+    fetchForms({
+      page,
+      pageSize: PAGE_SIZE,
+      search,
+      statusFilter,
+      sort,
+      groupId: groupFilter,
+      dateFrom,
+      dateTo,
+      ownershipFilter,
+    }).then((data) => {
+      if (!active) return;
+      setForms(data?.items || []);
+      setCounts(data?.counts || { ALL: 0, DRAFT: 0, PUBLISHED: 0, ARCHIVED: 0 });
+      setTotalCount(Number(data?.total_count || 0));
+      setTotalPages(Math.max(1, Number(data?.total_pages || 1)));
+    }).catch(() => {
+      if (!active) return;
+      setForms([]);
+      setCounts({ ALL: 0, DRAFT: 0, PUBLISHED: 0, ARCHIVED: 0 });
+      setTotalCount(0);
+      setTotalPages(1);
+    }).finally(() => {
+      if (active) setListLoading(false);
+    });
+    return () => { active = false; };
+  }, [fetchForms, refreshKey, page, search, statusFilter, sort, groupFilter, ownershipFilter, dateFrom, dateTo]);
 
   const selectedForms     = forms.filter((f) => selected.has(f.form_id));
   const selectedDrafts    = selectedForms.filter((f) => f.status === 'DRAFT');
+  const selectedOwnedForms = selectedForms.filter((f) => String(f.created_by || '') === String(currentUser?.user_id || ''));
   const selectedPublished = selectedForms.filter((f) => f.status === 'PUBLISHED');
+  const selectedDeletable = selectedOwnedForms.filter((f) => f.status !== 'PUBLISHED');
+
+  const getUnpublishableGroups = (form) => {
+    const ids = Array.isArray(form?.deployed_group_ids) ? form.deployed_group_ids : [];
+    const names = Array.isArray(form?.deployed_groups) ? form.deployed_groups : [];
+    return ids
+      .map((groupId, index) => {
+        const groupIdStr = String(groupId);
+        const deployedBy = form?.deployed_group_deployers?.[groupIdStr] || null;
+        const deployedAt = form?.deployed_group_deployed_at?.[groupIdStr] || null;
+        const isAuthor = String(form?.created_by || '') === String(currentUser?.user_id || '');
+        const isMine = deployedBy === String(currentUser?.user_id || '');
+        if (!isAuthor && !isMine) return null;
+        return {
+          group_id: groupId,
+          name: names[index] || 'Group',
+          deployed_by: deployedBy,
+          deployed_at: deployedAt,
+          isMine,
+        };
+      })
+      .filter(Boolean);
+  };
+
+  const getHistorySnapshot = (form, history = []) => {
+    const isAuthor = String(form?.created_by || '') === String(currentUser?.user_id || '');
+    const groupIds = Array.isArray(form?.deployed_group_ids) ? form.deployed_group_ids : [];
+    const groupNames = Array.isArray(form?.deployed_groups) ? form.deployed_groups : [];
+    const deploymentEvents = groupIds
+      .map((groupId, index) => {
+        const groupIdStr = String(groupId);
+        const deployedBy = form?.deployed_group_deployers?.[groupIdStr] || null;
+        const deployedAt = form?.deployed_group_deployed_at?.[groupIdStr] || null;
+        const mine = deployedBy === String(currentUser?.user_id || '');
+        return {
+          key: `deploy-${groupIdStr}`,
+          tone: mine ? 'emerald' : 'blue',
+          label: `Published to ${groupNames[index] || 'Group'}`,
+          detail: `${mine ? 'by you' : 'by another researcher'}${deployedAt ? ` on ${formatShortDate(deployedAt)}` : ''}`,
+        };
+      })
+      .slice(0, 2);
+
+    return [
+      {
+        key: 'created',
+        tone: isAuthor ? 'violet' : 'slate',
+        label: `Created ${isAuthor ? 'by you' : 'by another researcher'}`,
+        detail: formatShortDate(form.created_at),
+      },
+      ...(history.length > 0
+        ? [{
+            key: 'versions',
+            tone: 'amber',
+            label: `${history.length + 1} saved version${history.length > 0 ? 's' : ''} in this survey family`,
+            detail: `Current v${form.version || 1}${history.length > 0 ? ` with ${history.length} older version${history.length > 1 ? 's' : ''}` : ''}`,
+          }]
+        : []),
+      ...deploymentEvents,
+      ...(groupIds.length > 2
+        ? [{
+            key: 'more-groups',
+            tone: 'slate',
+            label: `${groupIds.length - 2} more deployed group${groupIds.length - 2 > 1 ? 's' : ''}`,
+            detail: 'Open the card to see the full deployment list',
+          }]
+        : []),
+    ];
+  };
 
   const handleConfirmDelete = (deleteAll = false) => {
     modal.ids.forEach((id) => onDelete(id, deleteAll));
@@ -258,24 +348,29 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
     const groupIds = [...publishGroups];
     modal.ids.forEach((id) => {
       const f = forms.find((x) => x.form_id === id);
-      if (f && (f.status === 'DRAFT' || f.status === 'ARCHIVED')) onPublish(id, groupIds);
+      if (f && (f.status === 'DRAFT' || f.status === 'ARCHIVED')) onPublish(id, groupIds, publishCadence);
     });
     setSelected((prev) => { const n = new Set(prev); modal.ids.forEach((id) => n.delete(id)); return n; });
     setModal(null);
     setPublishGroups(new Set());
+    setPublishGroupSearch('');
+    setPublishCadence('once');
   };
   const handleConfirmUnpublish = () => {
+    if (unpublishGroups.size === 0) return;
     modal.ids.forEach((id) => {
       const f = forms.find((x) => x.form_id === id);
-      if (f && f.status === 'PUBLISHED') onUnpublish(id);
+      if (f && f.status === 'PUBLISHED') onUnpublish(id, [...unpublishGroups]);
     });
     setSelected((prev) => { const n = new Set(prev); modal.ids.forEach((id) => n.delete(id)); return n; });
     setModal(null);
+    setUnpublishGroups(new Set());
   };
 
 
   /* #9 — Empty state */
-  if (forms.length === 0) {
+  const hasActiveQuery = Boolean(search || dateFrom || dateTo || groupFilter !== 'ALL' || ownershipFilter !== 'ALL' || statusFilter !== 'ALL');
+  if (!listLoading && totalCount === 0 && !hasActiveQuery) {
     return (
       <div>
         <div className="flex items-center justify-between mb-6">
@@ -301,15 +396,15 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
   return (
     <div>
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-1.5 text-xs mb-1">
             <span className="text-slate-400">Dashboard</span><span className="text-slate-300">/</span><span className="text-slate-600 font-medium">Surveys</span>
           </div>
           <h2 className="text-2xl font-bold text-slate-900">{pageTitle}</h2>
-          <p className="text-sm text-slate-500 mt-0.5">{families.length} form{families.length !== 1 ? 's' : ''} total</p>
+          <p className="text-sm text-slate-500 mt-0.5">{totalCount} form{totalCount !== 1 ? 's' : ''} total</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full flex-col gap-2 shrink-0 sm:w-auto sm:flex-row sm:items-center">
           <button onClick={() => setShowHelp(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition">
             <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">?</span>
             How it works
@@ -354,7 +449,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
       {/* Search + Status + Sort + Filters */}
       <div className="flex flex-col gap-3 mb-5">
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex flex-col gap-3 lg:flex-row">
           <div className="relative flex-1">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><SearchIco /></span>
             <input value={search} onChange={(e) => setSearch(e.target.value)}
@@ -363,7 +458,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
           </div>
 
           {/* #6 — Tabs with counts */}
-          <div className="flex gap-0.5 bg-slate-100 p-1 rounded-xl shrink-0 self-start">
+          <div className="flex max-w-full gap-0.5 overflow-x-auto rounded-xl bg-slate-100 p-1 shrink-0 self-start">
             {['ALL', 'DRAFT', 'PUBLISHED', 'ARCHIVED'].map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
                 className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${statusFilter === f ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
@@ -408,29 +503,29 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
         {showFilters && (
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-            <div className="flex flex-wrap items-end gap-4">
-              <div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="min-w-0">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Created After</label>
                 <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-                  className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                  className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Created On or Before</label>
                 <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-                  className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                  className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
               </div>
-              <div className="relative" ref={groupDropdownRef}>
+              <div className="relative min-w-0" ref={groupDropdownRef}>
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Group</label>
                 <button
                   onClick={() => setGroupDropdownOpen((o) => !o)}
-                  className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400 transition min-w-[200px] w-full">
+                  className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400 transition">
                   <span className="truncate text-slate-700">
                     {groupFilter === 'ALL' ? 'All Groups' : (groups.find((g) => String(g.group_id) === groupFilter)?.name ?? 'All Groups')}
                   </span>
                   <Svg size={14} d="M6 9l6 6 6-6" className="shrink-0 text-slate-400" />
                 </button>
                 {groupDropdownOpen && (
-                  <div className="absolute z-20 mt-1 w-full min-w-[220px] bg-white border border-slate-200 rounded-xl shadow-lg">
+                  <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg">
                     <div className="p-2 border-b border-slate-100">
                       <input
                         autoFocus
@@ -462,10 +557,23 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                   </div>
                 )}
               </div>
-              {(hasDateFilter || hasGroupFilter) && (
-                <button onClick={clearFilters} className="text-xs text-slate-400 hover:text-rose-500 font-medium transition pb-1">Clear all filters</button>
-              )}
+              <div className="min-w-0">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Ownership / Publisher</label>
+                <select
+                  value={ownershipFilter}
+                  onChange={(e) => setOwnershipFilter(e.target.value)}
+                  className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 transition">
+                  <option value="ALL">All forms</option>
+                  <option value="CREATED_BY_ME">Created by you</option>
+                  <option value="CREATED_BY_OTHERS">Created by others</option>
+                  <option value="PUBLISHED_BY_ME">Published by you</option>
+                  <option value="PUBLISHED_BY_OTHERS">Published by others</option>
+                </select>
+              </div>
             </div>
+            {(hasDateFilter || hasGroupFilter || hasOwnershipFilter) && (
+              <button onClick={clearFilters} className="mt-4 text-xs text-slate-400 hover:text-rose-500 font-medium transition">Clear all filters</button>
+            )}
           </div>
         )}
       </div>
@@ -477,46 +585,81 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
       )}
 
       {/* Multi-select toolbar */}
-      <div className={`flex items-center justify-between bg-white border rounded-xl px-4 py-2.5 mb-3 transition-all ${
+      <div className={`flex flex-col gap-3 bg-white border rounded-xl px-4 py-2.5 mb-3 transition-all sm:flex-row sm:items-center sm:justify-between ${
         selected.size > 0 ? 'border-blue-200 bg-blue-50/50' : 'border-slate-200'
       }`}>
         <label className="flex items-center gap-2.5 text-sm text-slate-600 cursor-pointer select-none">
-          <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={selectAll}
+          <input type="checkbox" checked={selected.size === families.length && families.length > 0} onChange={selectAll}
             className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-400" />
           {selected.size > 0
             ? <span className="font-medium text-blue-700">{selected.size} form{selected.size > 1 ? 's' : ''} selected</span>
             : <span className="text-slate-400">Select forms</span>}
         </label>
         {selected.size > 0 && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {selectedDrafts.length > 0 && (
-              <button onClick={() => setModal({ type: 'publish', ids: [...selected] })}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition">
+              <button
+                onClick={() => {
+                  setPublishCadence('once');
+                  setModal({ type: 'publish', ids: selectedDrafts.map((f) => f.form_id), cadenceLocked: false });
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition text-emerald-700 bg-emerald-100 hover:bg-emerald-200">
                 <CheckIco /> Publish{selectedDrafts.length > 1 ? ` (${selectedDrafts.length})` : ''}
               </button>
             )}
-            {selectedPublished.length > 0 && (
-              <button onClick={() => setModal({ type: 'unpublish', ids: [...selected] })}
+            {statusFilter === 'PUBLISHED' && selectedPublished.length === 1 && (
+              <button onClick={() => {
+                const form = selectedPublished[0];
+                const availableGroups = getUnpublishableGroups(form);
+                setUnpublishGroups(new Set(availableGroups.map((g) => g.group_id)));
+                setModal({ type: 'unpublish', ids: [form.form_id], formTitle: form.title, availableGroups });
+              }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-lg transition">
-                <UnpublishIco /> Unpublish{selectedPublished.length > 1 ? ` (${selectedPublished.length})` : ''}
+                <UnpublishIco /> Unpublish
               </button>
             )}
+            {statusFilter === 'PUBLISHED' && selected.size > 0 && selectedPublished.length !== 1 && (
+              <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                Select exactly 1 published form to unpublish
+              </span>
+            )}
             {selectedPublished.length === 0 && (
-              <button onClick={() => setModal({ type: 'delete', ids: [...selected], isPublished: false })}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-600 bg-rose-100 hover:bg-rose-200 rounded-lg transition">
-                <TrashIco /> Delete{selected.size > 1 ? ` (${selected.size})` : ''}
+              <button onClick={() => setModal({ type: 'delete', ids: selectedDeletable.map((f) => f.form_id), isPublished: false })}
+                disabled={selectedDeletable.length === 0}
+                title={selectedDeletable.length === 0 ? 'Only the form author can delete selected forms' : undefined}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                  selectedDeletable.length === 0
+                    ? 'text-slate-400 bg-slate-100 cursor-not-allowed'
+                    : 'text-rose-600 bg-rose-100 hover:bg-rose-200'
+                }`}>
+                <TrashIco /> Delete{selectedDeletable.length > 1 ? ` (${selectedDeletable.length})` : ''}
               </button>
             )}
           </div>
         )}
       </div>
 
+      {listLoading && (
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="bg-white rounded-xl border border-slate-200 p-5 animate-pulse">
+              <div className="flex items-center gap-2.5 mb-2"><div className="h-5 w-2/3 bg-slate-200 rounded" /><div className="h-5 w-16 bg-slate-100 rounded-full" /></div>
+              <div className="h-4 w-full bg-slate-100 rounded mb-3" />
+              <div className="h-20 w-full bg-slate-50 rounded-xl" />
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Form cards */}
+      {!listLoading && (
       <div className="space-y-3">
-        {paginated.map(({ latest: form, history, rootId }) => {
+        {families.map(({ latest: form, history, rootId }) => {
           const isSel = selected.has(form.form_id);
+          const isAuthor = String(form.created_by || '') === String(currentUser?.user_id || '');
           const fieldCount = form.field_count ?? (form.fields ? form.fields.length : 0);
           const histExpanded = expandedHistory.has(rootId);
+          const historySnapshot = getHistorySnapshot(form, history);
           return (
             <div key={rootId}
               className={`bg-white rounded-xl border shadow-sm transition-all group ${
@@ -525,28 +668,46 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                 'border-slate-200 hover:border-slate-300 hover:shadow-md'
               }`}>
               {/* Main card row */}
-              <div className="p-4 sm:p-5 flex items-start gap-3 cursor-pointer" onClick={() => onEdit(form)}>
+              <div className="cursor-pointer p-4 sm:p-5 flex flex-col gap-3 sm:flex-row sm:items-start" onClick={() => onEdit(form, { locked: !isAuthor })}>
                 <input type="checkbox" checked={isSel}
                   onChange={() => toggleSelect(form.form_id)}
                   onClick={(e) => e.stopPropagation()}
                   className="w-4 h-4 mt-1 rounded border-slate-300 text-blue-600 focus:ring-blue-400 shrink-0 cursor-pointer" />
 
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2.5 mb-1">
-                    <h3 className="text-sm font-bold text-slate-900 truncate group-hover:text-blue-600 transition-colors">{toTitleCase(form.title)}</h3>
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <h3 className="min-w-0 text-sm font-bold text-slate-900 transition-colors group-hover:text-blue-600 sm:truncate">{form.title}</h3>
                     <StatusBadge status={form.status} />
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 shrink-0">
                       v{form.version || 1}
                     </span>
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border shrink-0 ${
+                      isAuthor ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}>
+                      {isAuthor ? 'Owned by you' : 'Owned by another researcher'}
+                    </span>
                   </div>
                   {form.description && <p className="text-xs text-slate-500 line-clamp-1">{form.description}</p>}
                   {form.deployed_groups?.length > 0 && (
-                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                      {form.deployed_groups.map((g) => (
-                        <span key={g} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                          <UsersIco />{g}
-                        </span>
-                      ))}
+                    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                      {(form.deployed_group_ids || []).map((groupId, index) => {
+                        const groupIdStr = String(groupId);
+                        const groupName = form.deployed_groups?.[index] || 'Group';
+                        const deployedBy = form.deployed_group_deployers?.[groupIdStr];
+                        const deployedAt = form.deployed_group_deployed_at?.[groupIdStr];
+                        const mine = deployedBy === String(currentUser?.user_id || '');
+                        return (
+                          <span key={groupIdStr} className={`inline-flex max-w-full items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${
+                            mine ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>
+                            <UsersIco />
+                            <span className="truncate">{groupName}</span>
+                            <span className="hidden opacity-70 sm:inline">
+                              {mine ? 'by you' : 'by another researcher'}{deployedAt ? ` · ${new Date(deployedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+                            </span>
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                   <div className="flex items-center gap-3 mt-2 text-xs text-slate-400 flex-wrap">
@@ -565,12 +726,49 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                       <AlertIco /> Only {fieldCount} question{fieldCount !== 1 ? 's' : ''} — add more before publishing
                     </div>
                   )}
+                  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5">
+                    <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                        <InfoIco />
+                        Survey history
+                      </div>
+                      <span className="text-[11px] text-slate-400">
+                        Current state and ownership
+                      </span>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {historySnapshot.map((item) => (
+                        <div key={item.key} className={`rounded-lg border px-2.5 py-2 bg-white ${
+                          item.tone === 'emerald' ? 'border-emerald-200' :
+                          item.tone === 'blue' ? 'border-blue-200' :
+                          item.tone === 'violet' ? 'border-violet-200' :
+                          item.tone === 'amber' ? 'border-amber-200' :
+                          'border-slate-200'
+                        }`}>
+                          <div className={`text-[11px] font-semibold ${
+                            item.tone === 'emerald' ? 'text-emerald-700' :
+                            item.tone === 'blue' ? 'text-blue-700' :
+                            item.tone === 'violet' ? 'text-violet-700' :
+                            item.tone === 'amber' ? 'text-amber-700' :
+                            'text-slate-700'
+                          }`}>
+                            {item.label}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            {item.detail}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Quick actions on hover */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-1 opacity-100 transition-opacity shrink-0 sm:opacity-0 sm:group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
                   {form.status === 'DRAFT' && (
-                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition" title="Publish"
+                    <button
+                      className="p-1.5 rounded-lg transition text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                      title="Publish"
                       onClick={(e) => {
                         e.stopPropagation();
                         const count = form.field_count ?? (form.fields ? form.fields.length : 0);
@@ -580,46 +778,53 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                           return;
                         }
                         setPublishError('');
-                        setModal({ type: 'publish', ids: [form.form_id], formTitle: form.title });
+                        setPublishCadence(form.cadence || 'once');
+                        setModal({
+                          type: 'publish',
+                          ids: [form.form_id],
+                          formTitle: form.title,
+                          cadenceLocked: false,
+                        });
                       }}>
                       <CheckIco />
                     </button>
                   )}
                   {form.status === 'PUBLISHED' && (
                     <>
-                      <button className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition" title="Unpublish"
-                        onClick={(e) => { e.stopPropagation(); setModal({ type: 'unpublish', ids: [form.form_id], formTitle: form.title }); }}>
-                        <UnpublishIco />
-                      </button>
-                      <button className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition text-[10px] font-bold px-2" title="Archive"
+                      <button className={`p-1.5 rounded-lg transition text-[10px] font-bold px-2 ${isAuthor ? 'text-slate-400 hover:text-slate-600 hover:bg-slate-100' : 'text-slate-300 bg-slate-50 cursor-not-allowed'}`} title={isAuthor ? 'Archive' : 'Only the form author can archive'}
+                        disabled={!isAuthor}
                         onClick={(e) => { e.stopPropagation(); setModal({ type: 'archive', ids: [form.form_id], formTitle: form.title, isPublished: true }); }}>
                         Archive
                       </button>
-                      <button className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition text-[10px] font-bold px-2" title="Update survey"
+                      <button className="p-1.5 rounded-lg transition text-[10px] font-bold px-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50"
+                        title={isAuthor ? 'Update survey' : 'Duplicate survey'}
                         onClick={(e) => { e.stopPropagation(); onBranch(form); }}>
-                        Update
+                        {isAuthor ? 'Update' : 'Duplicate'}
                       </button>
                     </>
                   )}
                   {form.status === 'DRAFT' && (
-                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition" title="Edit"
+                    <button className={`p-1.5 rounded-lg transition ${isAuthor ? 'text-slate-400 hover:text-blue-600 hover:bg-blue-50' : 'text-slate-300 bg-slate-50 cursor-not-allowed'}`} title={isAuthor ? 'Edit' : 'Only the form author can edit'}
+                      disabled={!isAuthor}
                       onClick={(e) => { e.stopPropagation(); onEdit(form); }}>
                       <EditIco />
                     </button>
                   )}
                   {form.status === 'ARCHIVED' && (
-                    <button className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition text-[10px] font-bold px-2" title="Create new version"
+                    <button className="p-1.5 rounded-lg transition text-[10px] font-bold px-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50"
+                      title={isAuthor ? 'Create new version' : 'Duplicate survey'}
                       onClick={(e) => { e.stopPropagation(); onBranch(form); }}>
-                      New Version
+                      {isAuthor ? 'New Version' : 'Duplicate'}
                     </button>
                   )}
-                  <button className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition" title="Delete"
+                  <button className={`p-1.5 rounded-lg transition ${isAuthor ? 'text-slate-400 hover:text-rose-500 hover:bg-rose-50' : 'text-slate-300 bg-slate-50 cursor-not-allowed'}`} title={isAuthor ? 'Delete' : 'Only the form author can delete'}
+                    disabled={!isAuthor}
                     onClick={(e) => { e.stopPropagation(); setModal({ type: 'delete', ids: [form.form_id], formTitle: form.title, isPublished: form.status === 'PUBLISHED', hasFamily: history.length > 0, version: form.version || 1 }); }}>
                     <TrashIco />
                   </button>
                 </div>
 
-                <span className="text-slate-300 group-hover:text-blue-500 transition-colors mt-1 shrink-0">
+                <span className="self-end text-slate-300 transition-colors sm:mt-1 sm:self-auto shrink-0 group-hover:text-blue-500">
                   <Svg size={18} d="M9 5l7 7-7 7" />
                 </span>
               </div>
@@ -641,7 +846,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                           <div className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer" onClick={() => onEdit(v, { locked: true })}>
                             <span className="font-bold text-violet-700 bg-violet-50 border border-violet-100 px-1.5 py-0.5 rounded text-[10px] shrink-0">v{v.version || 1}</span>
                             <StatusBadge status={v.status} />
-                            <span className="flex-1 truncate font-medium">{toTitleCase(v.title)}</span>
+                            <span className="flex-1 truncate font-medium">{v.title}</span>
                             <span className="text-slate-400 shrink-0">{new Date(v.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                             {v.submission_count > 0 && <span className="text-slate-400 shrink-0">{v.submission_count} responses</span>}
                           </div>
@@ -663,7 +868,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
           );
         })}
 
-        {sorted.length === 0 && (
+        {families.length === 0 && (
           <div className="text-center py-16 text-slate-400">
             <p className="text-3xl mb-2">🔍</p>
             <p className="font-semibold">No forms found</p>
@@ -671,14 +876,15 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
           </div>
         )}
       </div>
+      )}
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between pt-2">
+      {!listLoading && totalPages > 1 && (
+        <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-xs text-slate-400">
-            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} of {sorted.length} forms
+            Showing {totalCount === 0 ? 0 : ((page - 1) * PAGE_SIZE + 1)}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} forms
           </span>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
@@ -718,7 +924,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
               </h3>
               <p className="text-sm text-slate-500 mb-4">
                 {modal.formTitle
-                  ? `You are about to delete "${toTitleCase(modal.formTitle)}". This cannot be undone.`
+                  ? `You are about to delete "${modal.formTitle}". This cannot be undone.`
                   : `You are about to delete ${modal.ids.length} form${modal.ids.length > 1 ? 's' : ''}. This cannot be undone.`}
               </p>
               {modal.isPublished && (
@@ -764,7 +970,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
                 </div>
               )}
             </div>
-            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+            <div className="px-6 py-4 border-t border-slate-100 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button onClick={() => setModal(null)} className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
                 Cancel
               </button>
@@ -780,12 +986,31 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
       {/* ── PUBLISH MODAL (multi-group) ── */}
       {modal?.type === 'publish' && (
-        <ConfirmModal title={modal.formTitle ? `Publish "${toTitleCase(modal.formTitle)}"` : 'Publish Forms'}
-          message={modal.formTitle ? `Assign "${toTitleCase(modal.formTitle)}" to one or more groups.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select groups to assign.`}
+        <ConfirmModal title={modal.formTitle ? `Publish "${modal.formTitle}"` : 'Publish Forms'}
+          message={modal.formTitle ? `Assign "${modal.formTitle}" to one or more groups.` : `Publish ${selectedDrafts.length} draft form${selectedDrafts.length > 1 ? 's' : ''}? Select groups to assign.`}
           confirmLabel={publishGroups.size > 1 ? `Publish to ${publishGroups.size} Groups` : 'Publish'}
           confirmClass="bg-emerald-600 hover:bg-emerald-700" onConfirm={handleConfirmPublish}
-          onClose={() => { setModal(null); setPublishGroups(new Set()); setPublishGroupSearch(''); }} disabled={publishGroups.size === 0}>
+          onClose={() => { setModal(null); setPublishGroups(new Set()); setPublishGroupSearch(''); setPublishCadence('once'); }} disabled={publishGroups.size === 0}>
           <div className="mb-1">
+            <div className="mb-3">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">Survey cadence</label>
+              <select
+                value={publishCadence}
+                disabled={modal.cadenceLocked}
+                onChange={(e) => setPublishCadence(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 transition disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                <option value="once">One-time</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+              <p className="mt-1.5 text-xs text-slate-400">
+                {modal.cadenceLocked
+                  ? 'This survey already has active deployments. Unpublish it everywhere before changing cadence.'
+                  : 'Participants can complete the survey once per selected cycle.'}
+              </p>
+            </div>
             <input
               autoFocus
               value={publishGroupSearch}
@@ -832,13 +1057,45 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
       {/* ── UNPUBLISH MODAL ── */}
       {modal?.type === 'unpublish' && (
-        <ConfirmModal title={modal.formTitle ? `Unpublish "${toTitleCase(modal.formTitle)}"` : 'Unpublish Forms'}
-          message={modal.formTitle ? `Unpublish "${toTitleCase(modal.formTitle)}"? It will be archived.` : `Unpublish ${selectedPublished.length} form${selectedPublished.length > 1 ? 's' : ''}?`}
-          confirmLabel="Unpublish" confirmClass="bg-amber-600 hover:bg-amber-700" onConfirm={handleConfirmUnpublish} onClose={() => setModal(null)}>
-          <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600">
-            <div className="flex items-start gap-2">
-              <span className="shrink-0 mt-0.5"><InfoIco /></span>
-              <span>Unpublished forms are archived. Participants will lose access.</span>
+        <ConfirmModal title={modal.formTitle ? `Unpublish "${modal.formTitle}"` : 'Unpublish Form'}
+          message={modal.formTitle ? `Choose which deployed groups to remove from "${modal.formTitle}".` : 'Choose deployed groups to unpublish from.'}
+          confirmLabel={unpublishGroups.size > 1 ? `Unpublish ${unpublishGroups.size} Groups` : 'Unpublish'}
+          confirmClass="bg-amber-600 hover:bg-amber-700" onConfirm={handleConfirmUnpublish}
+          onClose={() => { setModal(null); setUnpublishGroups(new Set()); }} disabled={unpublishGroups.size === 0}>
+          <div className="space-y-3 text-sm text-slate-600">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600">
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 mt-0.5"><InfoIco /></span>
+                <span>
+                  {String(forms.find((f) => f.form_id === modal.ids[0])?.created_by || '') === String(currentUser?.user_id || '')
+                    ? 'As the form author, you can unpublish any deployed group.'
+                    : 'You can only unpublish groups you deployed to.'}
+                </span>
+              </div>
+            </div>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              {(modal.availableGroups || []).map((g) => {
+                const checked = unpublishGroups.has(g.group_id);
+                return (
+                  <label key={g.group_id}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
+                      checked ? 'border-amber-300 bg-amber-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}>
+                    <input type="checkbox" checked={checked}
+                      onChange={() => setUnpublishGroups((prev) => { const n = new Set(prev); n.has(g.group_id) ? n.delete(g.group_id) : n.add(g.group_id); return n; })}
+                      className="w-4 h-4 rounded border-slate-300 text-amber-600 focus:ring-amber-400" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-slate-700 truncate">{g.name}</div>
+                      <div className="text-xs text-slate-500">
+                        {g.isMine ? 'Deployed by you' : 'Deployed by another researcher'}{g.deployed_at ? ` · ${new Date(g.deployed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+              {(modal.availableGroups || []).length === 0 && (
+                <p className="text-xs text-slate-400 px-1 py-2">No deployed groups are available for you to unpublish.</p>
+              )}
             </div>
           </div>
         </ConfirmModal>
@@ -846,7 +1103,7 @@ function FormListView({ forms, onEdit, onBranch, onCreate, onDelete, onPublish, 
 
       {/* ── ARCHIVE MODAL ── */}
       {modal?.type === 'archive' && (
-        <ConfirmModal title={`Archive "${toTitleCase(modal.formTitle)}"`}
+        <ConfirmModal title={`Archive "${modal.formTitle}"`}
           message={null}
           confirmLabel="Archive" confirmClass="bg-slate-600 hover:bg-slate-700"
           onConfirm={() => { onArchive(modal.ids[0]); setModal(null); }}
@@ -953,21 +1210,30 @@ function PreviewView({ title, description, fields }) {
    PUBLISH MODAL — multi-group checkbox select
    Used by BuilderView; fetches groups via api.listGroups()
    ══════════════════════════════════════════════ */
-function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds = [], formId }) {
-  const [groups, setGroups] = useState([]);
+function PublishModal({
+  onClose,
+  onConfirm,
+  title: formTitle,
+  deployedGroupIds = [],
+  formId,
+  groups = [],
+  initialCadence = 'once',
+  cadenceLocked = false,
+}) {
   const [selectedGroups, setSelectedGroups] = useState(new Set());
   const [groupSearch, setGroupSearch] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [cadence, setCadence] = useState(initialCadence || 'once');
   const [preview, setPreview] = useState({}); // { groupId: inProgressCount }
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api.listGroups().then((data) => {
-      setGroups(data);
-      setSelectedGroups(new Set(deployedGroupIds.map(String)));
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, []);
+    setSelectedGroups(new Set(deployedGroupIds.map(String)));
+  }, [deployedGroupIds]);
+
+  useEffect(() => {
+    setCadence(initialCadence || 'once');
+  }, [initialCadence]);
 
   // Fetch in-progress counts whenever selection changes (only if form has a parent, i.e. is a version)
   useEffect(() => {
@@ -1005,17 +1271,34 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
         <p className="text-sm text-slate-500 mb-4">
           {formTitle ? `Assign "${formTitle}" to one or more groups.` : 'Select groups to assign this survey to.'}
         </p>
-        {loading ? (
-          <div className="space-y-2 mb-4">
-            {[1, 2, 3].map((i) => <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />)}
-          </div>
-        ) : groups.length === 0 ? (
+        {groups.length === 0 ? (
           <div className="text-center py-6 mb-4">
             <p className="text-sm text-slate-400">No groups available.</p>
             <p className="text-xs text-slate-400 mt-1">Create a participant group first.</p>
           </div>
         ) : (
           <div className="mb-4">
+            <div className="mb-3">
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Survey cadence
+              </label>
+              <select
+                value={cadence}
+                disabled={cadenceLocked}
+                onChange={(e) => setCadence(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                <option value="once">One-time</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+              <p className="mt-1.5 text-xs text-slate-400">
+                {cadenceLocked
+                  ? 'This survey already has an active cadence. Unpublish it everywhere before changing recurrence.'
+                  : 'Participants can submit once per selected cycle, and it becomes available again in the next cycle.'}
+              </p>
+            </div>
             <input
               autoFocus
               value={groupSearch}
@@ -1074,10 +1357,18 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 font-medium hover:text-slate-700 transition">Cancel</button>
           <button
-            onClick={() => onConfirm([...selectedGroups], new Set(deployedGroupIds.map(String)))}
-            disabled={(selectedGroups.size === 0 && deployedGroupIds.length === 0) || previewLoading}
+            onClick={async () => {
+              if (saving) return;
+              setSaving(true);
+              try {
+                await onConfirm([...selectedGroups], new Set(deployedGroupIds.map(String)), cadence);
+              } finally {
+                setSaving(false);
+              }
+            }}
+            disabled={(selectedGroups.size === 0 && deployedGroupIds.length === 0) || previewLoading || saving}
             className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">
-            {previewLoading ? 'Checking…' : 'Save'}
+            {saving ? 'Saving…' : previewLoading ? 'Checking…' : 'Save'}
           </button>
         </div>
       </div>
@@ -1090,14 +1381,13 @@ function PublishModal({ onClose, onConfirm, title: formTitle, deployedGroupIds =
    BUILDER VIEW
    #1 unsaved changes, #2 auto-save, #3 drag reorder, #4 validation
    ══════════════════════════════════════════════ */
-function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onArchive, dataElements, onDataElementCreated }) {
+function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onArchive, dataElements, onDataElementCreated, groups, currentUser }) {
   const [title, setTitle]       = useState(form?.title || '');
   const [desc, setDesc]         = useState(form?.description || '');
   const [fields, setFields]     = useState(form?.fields || []);
   const [expanded, setExpanded] = useState(null);
   const [showAdd, setShowAdd]   = useState(false);
   const [mode, setMode]         = useState('edit');
-  const [showPublish, setShowPublish] = useState(false);
   const [showDelete, setShowDelete]   = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [validationErrors, setValidationErrors] = useState([]);
@@ -1107,9 +1397,11 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const isLocked = !!form?._locked;
   const isDraft = !isLocked && (!form?.status || form.status === 'DRAFT');
+  const canEditFields = isDraft;
   const autoSaveTimer = useRef(null);
   const isDirtyRef = useRef(false);
 
@@ -1135,7 +1427,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
     }, 5000);
   }, [title, desc, fields, form]);
 
-  const handleTitleChange = (v) => { setTitle(v.toLowerCase()); triggerAutoSave(); };
+  const handleTitleChange = (v) => { setTitle(v); triggerAutoSave(); };
   const handleDescChange = (v) => { setDesc(v); triggerAutoSave(); };
 
   /* #1 — Unsaved changes warning */
@@ -1182,6 +1474,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   const MAX_FIELDS = 30;
 
   const addField = (type) => {
+    if (!canEditFields) return;
     if (fields.length >= MAX_FIELDS) return;
     const f = newField(type);
     f.display_order = fields.length;
@@ -1191,17 +1484,20 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   };
 
   const updateField = (id, data) => {
+    if (!canEditFields) return;
     setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...data } : f)));
     triggerAutoSave();
   };
 
   const removeField = (id) => {
+    if (!canEditFields) return;
     setFields((prev) => prev.filter((f) => f.id !== id));
     if (expanded === id) setExpanded(null);
     triggerAutoSave();
   };
 
   const duplicateField = (id) => {
+    if (!canEditFields) return;
     const src = fields.find((f) => f.id === id);
     if (!src) return;
     const dup = { ...src, id: uid(), label: src.label + ' (copy)', options: src.options.map((o) => ({ ...o, id: uid() })) };
@@ -1214,6 +1510,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   };
 
   const moveField = (index, dir) => {
+    if (!canEditFields) return;
     const target = index + dir;
     if (target < 0 || target >= fields.length) return;
     const next = [...fields];
@@ -1226,6 +1523,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   const dragIdx = useRef(null);
   const onDragStart = (i) => { dragIdx.current = i; };
   const onDrop = (i) => {
+    if (!canEditFields) return;
     if (dragIdx.current === null || dragIdx.current === i) return;
     const n = [...fields];
     const [item] = n.splice(dragIdx.current, 1);
@@ -1236,33 +1534,37 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
   };
 
   const toggleSelect = (id) => {
+    if (!canEditFields) return;
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
   const selectAll = () => {
+    if (!canEditFields) return;
     if (selected.size === fields.length) setSelected(new Set());
     else setSelected(new Set(fields.map((f) => f.id)));
   };
   const deleteSelected = () => {
+    if (!canEditFields) return;
     setFields((prev) => prev.filter((f) => !selected.has(f.id)).map((f, i) => ({ ...f, display_order: i })));
     setSelected(new Set());
     setExpanded(null);
     triggerAutoSave();
   };
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
+    if (saving) return;
     if (!validate()) return;
-    onSave({ ...form, title, description: desc, fields });
-    isDirtyRef.current = false;
-  };
-
-  const handlePublishClick = () => {
-    if (!validate({ requireElementLinks: true })) return;
-    setShowPublish(true);
+    setSaving(true);
+    try {
+      await onSave({ ...form, title, description: desc, fields });
+      isDirtyRef.current = false;
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <button onClick={handleBackClick} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 font-medium transition">
             <BackIco /> All Forms
@@ -1298,8 +1600,8 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                     <button onClick={() => setMode('edit')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'edit' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Edit</button>
                     <button onClick={() => setMode('preview')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${mode === 'preview' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Preview</button>
                   </div>
-                  <button onClick={handleSaveDraft} className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm flex items-center gap-1.5">
-                    <SaveIco /> Save Draft
+                  <button onClick={handleSaveDraft} disabled={saving} className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <SaveIco /> {saving ? 'Saving…' : 'Save Draft'}
                   </button>
                 </>
               ) : (
@@ -1316,7 +1618,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                   {onBranch && (
                     <button onClick={() => onBranch(form)}
                       className="px-4 py-2 text-sm font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-xl hover:bg-violet-100 transition shadow-sm">
-                      Update
+                      {String(form?.created_by || '') === String(currentUser?.user_id || '') ? 'Update' : 'Duplicate'}
                     </button>
                   )}
                 </>
@@ -1326,9 +1628,6 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                   Delete
                 </button>
               )}
-              <button onClick={handlePublishClick} className={`px-4 py-2 text-sm font-semibold text-white rounded-xl transition shadow-sm ${isDraft ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                {isDraft ? 'Publish' : 'Manage Groups'}
-              </button>
             </>
           )}
         </div>
@@ -1347,20 +1646,23 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
       {isLocked && (
         <div className="bg-slate-100 border border-slate-300 rounded-xl px-4 py-3 mb-4 text-xs text-slate-600 flex items-center gap-3">
           <Svg size={15} sw={2} stroke="#64748b" d={<><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>} />
-          <span>This is an older version — it is read-only. Open the latest version to make changes.</span>
+          <span>This survey is read-only. You can duplicate it to create your own editable draft.</span>
         </div>
       )}
       {!isDraft && !isLocked && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-xs text-amber-800 flex items-center justify-between gap-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-xs text-amber-800 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
           <span>This form is {form?.status === 'ARCHIVED' ? 'archived' : 'published'} and cannot be edited directly. Create a new version to make changes — the original and its responses are preserved.</span>
           {onBranch && (
             <button onClick={() => onBranch(form)}
               className="shrink-0 px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 transition">
-              Update
+              {String(form?.created_by || '') === String(currentUser?.user_id || '') ? 'Update' : 'Duplicate'}
             </button>
           )}
         </div>
       )}
+      <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
+        Survey publishing now happens from <span className="font-semibold">Groups / Cohorts</span>, where you pick the cohort first and then assign one of your surveys with its cadence.
+      </div>
 
       {mode === 'edit' ? (
         <div className="flex-1 overflow-y-auto pr-1">
@@ -1374,8 +1676,8 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
           </div>
 
           {/* Multi-select toolbar for questions */}
-          {fields.length > 0 && (
-            <div className={`flex items-center justify-between bg-white border rounded-xl px-4 py-2.5 mb-3 transition-all ${
+          {canEditFields && fields.length > 0 && (
+            <div className={`flex flex-col gap-3 bg-white border rounded-xl px-4 py-2.5 mb-3 transition-all sm:flex-row sm:items-center sm:justify-between ${
               selected.size > 0 ? 'border-rose-200 bg-rose-50/50' : 'border-slate-200'
             }`}>
               <label className="flex items-center gap-2.5 text-sm text-slate-600 cursor-pointer select-none">
@@ -1407,7 +1709,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                 isExpanded={expanded === f.id}
                 isSelected={selected.has(f.id)}
                 hasError={validationErrorIds.has(f.id)}
-                readOnly={!isDraft || isLocked}
+                readOnly={!canEditFields}
                 onToggle={() => setExpanded(expanded === f.id ? null : f.id)}
                 onSelect={() => toggleSelect(f.id)}
                 onUpdate={(data) => updateField(f.id, data)}
@@ -1421,7 +1723,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                 onDataElementCreated={onDataElementCreated} />
             ))}
           </div>
-          {!isLocked && (fields.length < MAX_FIELDS ? (
+          {canEditFields && (fields.length < MAX_FIELDS ? (
             <button onClick={() => setShowAdd(true)} className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm font-semibold text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-all flex items-center justify-center gap-2">
               <PlusIco /> Add Question <span className="text-xs font-normal opacity-60">{fields.length} / {MAX_FIELDS}</span>
             </button>
@@ -1434,10 +1736,6 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto"><PreviewView title={title} description={desc} fields={fields} /></div>
-      )}
-
-      {showPublish && (
-        <PublishModal title={title} formId={form?.form_id} onClose={() => setShowPublish(false)} deployedGroupIds={form?.deployed_group_ids || []} onConfirm={(groupIds, prevDeployed) => onPublish({ ...form, title, description: desc, fields }, groupIds, prevDeployed)} />
       )}
 
       {showDelete && (
@@ -1477,7 +1775,7 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
                 </div>
               </div>
             </div>
-            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+            <div className="px-6 py-4 border-t border-slate-100 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button onClick={() => setShowArchiveModal(false)}
                 className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
                 Cancel
@@ -1502,9 +1800,9 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
               <p className="text-sm text-slate-500 text-center">You have changes that haven't been saved. What would you like to do?</p>
             </div>
             <div className="flex flex-col gap-2 px-6 pb-6">
-              <button onClick={() => { handleSaveDraft(); setShowUnsavedModal(false); }}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition">
-                Save &amp; Leave
+              <button onClick={() => { handleSaveDraft(); setShowUnsavedModal(false); }} disabled={saving}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed">
+                {saving ? 'Saving…' : 'Save & Leave'}
               </button>
               <button onClick={() => { setShowUnsavedModal(false); isDirtyRef.current = false; onBack(); }}
                 className="w-full py-2.5 text-sm font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition">
@@ -1527,59 +1825,75 @@ function BuilderView({ form, onSave, onBack, onPublish, onDelete, onBranch, onAr
    MAIN PAGE EXPORT
    ══════════════════════════════════════════════ */
 export default function SurveyBuilderPage() {
-  const [forms, setForms]             = useState([]);
-  const [groups, setGroups]           = useState([]);
-  const [loading, setLoading]         = useState(true);
+  const BUILDER_SESSION_KEY = 'hdb_builder_session';
+  const BUILDER_RESTORE_KEY = 'hdb_builder_restore_pending';
+  const { user } = useAuth();
+  const [bootstrapping, setBootstrapping] = useState(true);
   const [view, setView]               = useState('list');
   const [editingForm, setEditingForm] = useState(null);
   const [toast, setToast]             = useState(null);
-  const [dataElements, setDataElements] = useState([]);
+  const [createdElements, setCreatedElements] = useState([]);
   const [branchModal, setBranchModal] = useState(null); // { form }
   const [branching, setBranching]     = useState(false);
+  const [refreshKey, setRefreshKey]   = useState(0);
+  const {
+    groups,
+    elements: metaElements,
+    loading: metaLoading,
+  } = useResearcherMeta({
+    includeGroups: true,
+    includeElements: true,
+  });
 
-  useEffect(() => { api.listElements().then(setDataElements).catch(() => {}); }, []);
-
-  const loadForms = async () => {
-    try {
-      const data = await api.listForms();
-      setForms(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadGroups = async () => {
-    try {
-      const data = await api.listGroups();
-      setGroups(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const dataElements = useMemo(() => {
+    if (createdElements.length === 0) return metaElements;
+    const merged = [...metaElements];
+    const seen = new Set(metaElements.map((element) => String(element.element_id)));
+    createdElements.forEach((element) => {
+      const key = String(element?.element_id || '');
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      merged.push(element);
+    });
+    return merged;
+  }, [createdElements, metaElements]);
 
   useEffect(() => {
-    loadForms();
-    loadGroups();
-    // Restore builder session after a page refresh
+    // Restore the editor only after a real page refresh while the builder was open.
     try {
-      const session = localStorage.getItem('hdb_builder_session');
-      if (session) {
-        const { formId, form } = JSON.parse(session);
-        // For new forms, restore from draft if available
-        const draftKey = `hdb_builder_draft_${formId}`;
-        const draft = localStorage.getItem(draftKey);
-        if (draft) {
-          const { title, description, fields } = JSON.parse(draft);
-          setEditingForm({ ...(form || {}), title, description, fields });
-        } else {
-          setEditingForm(form);
+      const shouldRestore = sessionStorage.getItem(BUILDER_RESTORE_KEY) === '1';
+      if (shouldRestore) {
+        sessionStorage.removeItem(BUILDER_RESTORE_KEY);
+        const session = localStorage.getItem(BUILDER_SESSION_KEY);
+        if (session) {
+          const { formId, form } = JSON.parse(session);
+          // For new forms, restore from draft if available
+          const draftKey = `hdb_builder_draft_${formId}`;
+          const draft = localStorage.getItem(draftKey);
+          if (draft) {
+            const { title, description, fields } = JSON.parse(draft);
+            setEditingForm({ ...(form || {}), title, description, fields });
+          } else {
+            setEditingForm(form);
+          }
+          setView('builder');
         }
-        setView('builder');
       }
     } catch { /* ignore */ }
-  }, []);
+    setBootstrapping(false);
+  }, [BUILDER_RESTORE_KEY, BUILDER_SESSION_KEY]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (view === 'builder') {
+        sessionStorage.setItem(BUILDER_RESTORE_KEY, '1');
+      } else {
+        sessionStorage.removeItem(BUILDER_RESTORE_KEY);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [view, BUILDER_RESTORE_KEY]);
 
   /* Infer role context from URL path for display purposes */
   const isAdminContext = window.location.pathname.startsWith('/surveys');
@@ -1594,11 +1908,12 @@ export default function SurveyBuilderPage() {
     try {
       const fullForm = await api.getFormDetail(form.form_id);
       const transformed = { ...transformForEdit(fullForm), _locked: locked };
-      localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: fullForm.form_id, form: transformed }));
+      localStorage.setItem(BUILDER_SESSION_KEY, JSON.stringify({ formId: fullForm.form_id, form: transformed }));
+      sessionStorage.removeItem(BUILDER_RESTORE_KEY);
       setEditingForm(transformed);
       setView('builder');
     } catch (err) {
-      showToast('Error loading form');
+      showToast(getApiErrorMessage(err, 'Error loading form'));
     }
   };
 
@@ -1615,26 +1930,29 @@ export default function SurveyBuilderPage() {
       showToast(`v${result.version} created — opening draft…`);
       const fullForm = await api.getFormDetail(result.form_id);
       const transformed = transformForEdit(fullForm);
-      localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: fullForm.form_id, form: transformed }));
+      localStorage.setItem(BUILDER_SESSION_KEY, JSON.stringify({ formId: fullForm.form_id, form: transformed }));
+      sessionStorage.removeItem(BUILDER_RESTORE_KEY);
       setEditingForm(transformed);
       setView('builder');
     } catch (err) {
-      showToast(err.message || 'Error creating new version');
+      showToast(getApiErrorMessage(err, 'Error creating new version'));
     } finally {
       setBranching(false);
     }
   };
 
   const handleCreate = () => {
-    localStorage.setItem('hdb_builder_session', JSON.stringify({ formId: 'new', form: null }));
+    localStorage.setItem(BUILDER_SESSION_KEY, JSON.stringify({ formId: 'new', form: null }));
+    sessionStorage.removeItem(BUILDER_RESTORE_KEY);
     setEditingForm(null);
     setView('builder');
   };
   const handleBack = () => {
-    localStorage.removeItem('hdb_builder_session');
+    localStorage.removeItem(BUILDER_SESSION_KEY);
+    sessionStorage.removeItem(BUILDER_RESTORE_KEY);
     setView('list');
     setEditingForm(null);
-    loadForms();
+    setRefreshKey((v) => v + 1);
   };
 
   const handleSave = async (formData) => {
@@ -1648,11 +1966,16 @@ export default function SurveyBuilderPage() {
       showToast('Draft saved!');
       handleBack();
     } catch (err) {
-      showToast(err.message || 'Error saving form');
+      showToast(getApiErrorMessage(err, 'Error saving form'));
     }
   };
 
-  const handlePublishFromBuilder = async (formData, groupIds, prevDeployed = new Set()) => {
+  const handlePublishFromBuilder = async (
+    formData,
+    groupIds,
+    prevDeployed = new Set(),
+    cadence = 'once',
+  ) => {
     try {
       let formId = formData.form_id;
       if (!formId || formId.startsWith('tmp-')) {
@@ -1663,18 +1986,20 @@ export default function SurveyBuilderPage() {
       const finalIds = new Set(Array.isArray(groupIds) ? groupIds : [groupIds]);
       const toPublish   = [...finalIds].filter((gid) => !prevDeployed.has(gid));
       const toUnpublish = [...prevDeployed].filter((gid) => !finalIds.has(gid));
+      const toUpdateCadence = [...finalIds].filter((gid) => prevDeployed.has(gid));
       if (finalIds.size === 0 && prevDeployed.size > 0) {
         await api.unpublishForm(formId);
       } else {
         await Promise.all([
-          ...toPublish.map((gid) => api.publishForm(formId, gid)),
+          ...toPublish.map((gid) => api.publishForm(formId, { groupId: gid, cadence })),
           ...toUnpublish.map((gid) => api.unpublishFormFromGroup(formId, gid)),
+          ...toUpdateCadence.map((gid) => api.publishForm(formId, { groupId: gid, cadence })),
         ]);
       }
       showToast('Group assignments saved!');
       handleBack();
     } catch (err) {
-      showToast(err.message || 'Error saving group assignments');
+      showToast(getApiErrorMessage(err, 'Error saving group assignments'));
     }
   };
 
@@ -1682,39 +2007,39 @@ export default function SurveyBuilderPage() {
     try {
       if (deleteAll) {
         await api.deleteFormFamily(formId);
-        // Remove all forms in the same family
-        const target = forms.find((f) => f.form_id === formId);
-        const rootId = target?.parent_form_id || formId;
-        setForms((prev) => prev.filter((f) => f.form_id !== rootId && f.parent_form_id !== rootId && f.form_id !== formId));
       } else {
         await api.deleteForm(formId);
-        setForms((prev) => prev.filter((f) => f.form_id !== formId));
       }
       if (view === 'builder') handleBack();
+      else setRefreshKey((v) => v + 1);
       showToast('Form deleted');
     } catch (err) {
-      showToast('Error deleting form');
+      showToast(getApiErrorMessage(err, 'Error deleting form'));
     }
   };
 
-  const handlePublishFromList = async (formId, groupIds) => {
+  const handlePublishFromList = async (formId, groupIds, cadence = 'once') => {
     try {
       const ids = Array.isArray(groupIds) ? groupIds : [groupIds];
-      await Promise.all(ids.map((gid) => api.publishForm(formId, gid)));
+      await Promise.all(ids.map((gid) => api.publishForm(formId, { groupId: gid, cadence })));
       showToast(ids.length > 1 ? `Published to ${ids.length} groups!` : 'Form published!');
-      loadForms();
+      setRefreshKey((v) => v + 1);
     } catch (err) {
-      showToast('Error publishing form');
+      showToast(getApiErrorMessage(err, 'Error publishing form'));
     }
   };
 
-  const handleUnpublish = async (formId) => {
+  const handleUnpublish = async (formId, groupIds = null) => {
     try {
-      await api.unpublishForm(formId);
+      if (Array.isArray(groupIds) && groupIds.length > 0) {
+        await Promise.all(groupIds.map((groupId) => api.unpublishFormFromGroup(formId, groupId)));
+      } else {
+        await api.unpublishForm(formId);
+      }
       showToast('Form unpublished');
-      loadForms();
+      setRefreshKey((v) => v + 1);
     } catch (err) {
-      showToast('Error unpublishing form');
+      showToast(getApiErrorMessage(err, 'Error unpublishing form'));
     }
   };
 
@@ -1723,19 +2048,20 @@ export default function SurveyBuilderPage() {
       await api.archiveForm(formId);
       showToast('Form archived');
       if (view === 'builder') {
-        localStorage.removeItem('hdb_builder_session');
+        localStorage.removeItem(BUILDER_SESSION_KEY);
+        sessionStorage.removeItem(BUILDER_RESTORE_KEY);
         setView('list');
         setEditingForm(null);
       }
-      loadForms();
+      setRefreshKey((v) => v + 1);
     } catch (err) {
-      showToast(err.message || 'Error archiving form');
+      showToast(getApiErrorMessage(err, 'Error archiving form'));
     }
   };
 
 
-  if (loading) return (
-    <div className="max-w-4xl mx-auto">
+  if (bootstrapping || metaLoading) return (
+    <div className="max-w-4xl mx-auto px-4 sm:px-0">
       <div className="flex items-center justify-between mb-6"><div className="h-7 w-40 bg-slate-200 rounded-lg animate-pulse" /><div className="h-10 w-28 bg-slate-200 rounded-xl animate-pulse" /></div>
       <div className="space-y-3">
         {[1, 2, 3].map((i) => (
@@ -1750,11 +2076,13 @@ export default function SurveyBuilderPage() {
   );
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-4xl mx-auto px-4 sm:px-0">
       {view === 'list' && (
         <FormListView
-          forms={forms}
+          fetchForms={api.listFormsPaged}
+          refreshKey={refreshKey}
           groups={groups}
+          currentUser={user}
           onEdit={handleEdit}
           onBranch={handleBranch}
           onCreate={handleCreate}
@@ -1776,7 +2104,9 @@ export default function SurveyBuilderPage() {
           onBranch={handleBranch}
           onArchive={handleArchive}
           dataElements={dataElements}
-          onDataElementCreated={(el) => setDataElements((prev) => [...prev, el])}
+          onDataElementCreated={(el) => setCreatedElements((prev) => [...prev, el])}
+          groups={groups}
+          currentUser={user}
         />
       )}
 
@@ -1815,7 +2145,7 @@ export default function SurveyBuilderPage() {
               </div>
             </div>
 
-            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+            <div className="px-6 py-4 border-t border-slate-100 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button onClick={() => setBranchModal(null)} disabled={branching}
                 className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition disabled:opacity-50">
                 Cancel
@@ -1830,8 +2160,8 @@ export default function SurveyBuilderPage() {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-[toastSlideUp_0.3s_ease-out]">
-          <div className="bg-slate-800 text-white px-5 py-2.5 rounded-xl shadow-lg text-sm font-medium">{toast}</div>
+        <div className="fixed bottom-6 left-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 animate-[toastSlideUp_0.3s_ease-out]">
+          <div className="bg-slate-800 text-white px-5 py-2.5 rounded-xl shadow-lg text-center text-sm font-medium">{toast}</div>
         </div>
       )}
     </div>

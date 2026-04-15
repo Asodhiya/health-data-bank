@@ -1,6 +1,26 @@
 services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: healthdatabank
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - hdb-network
+
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
     networks:
@@ -18,6 +38,12 @@ services:
       - ./backend:/backend
     command: bash -c "./start.sh --reload"
     environment:
+      - user=postgres
+      - password=postgres
+      - host=postgres
+      - port=5432
+      - dbname=healthdatabank
+      - DB_SSLMODE=disable
       - WATCHFILES_FORCE_POLLING=true
       - RATE_LIMIT_BACKEND=redis
       - REDIS_URL=redis://redis:6379/0
@@ -28,7 +54,10 @@ services:
       - SESSION_IDLE_TIMEOUT_MINUTES=30
       - SESSION_TOKEN_EXPIRE_MINUTES=10080
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - hdb-network
 
@@ -48,6 +77,9 @@ services:
       - backend
     networks:
       - hdb-network
+
+volumes:
+  pgdata:
 
 networks:
   hdb-network:

@@ -1,13 +1,10 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { useParams, useNavigate, useOutletContext } from "react-router-dom";
+import { useParams, useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 import { api } from "../../services/api";
+import { usePolling } from "../../hooks/usePolling";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-
-// ─── Utilities ──────────────────────────────────────────────────────────────────
-
-function fmt(d) { if (!d) return "—"; return new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" }); }
-function getAge(dob) { if (!dob) return null; const t = new Date(); const b = new Date(dob); let a = t.getFullYear() - b.getFullYear(); if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) a--; return a; }
-function daysSince(d) { if (!d) return null; const diff = Math.floor((Date.now() - new Date(d).getTime()) / 86400000); if (diff === 0) return "Today"; if (diff === 1) return "Yesterday"; return `${diff}d ago`; }
+import { fmt, getAge, daysSince } from "../../utils/dateFormatters";
+import FlagBadge from "../../components/FlagBadge";
 
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const CHART_TT = { borderRadius: "10px", border: "none", boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)", fontSize: "12px" };
@@ -15,7 +12,12 @@ const CHART_TT = { borderRadius: "10px", border: "none", boxShadow: "0 4px 12px 
 // ─── Data transformers ──────────────────────────────────────────────────────────
 
 function transformParticipant(listItem, groupName, enrolledAt) {
-  const nameParts = (listItem.name || "").split(" ");
+  // We keep firstName/lastName for backwards compat with the Avatar component
+  // and any future structured uses, but `fullName` is the source of truth for
+  // display because we can't reliably split "Mary Anne Smith" or "Jean van der
+  // Berg" into first/last without structured fields from the backend.
+  const fullName = (listItem.name || "").trim();
+  const nameParts = fullName.split(/\s+/).filter(Boolean);
   const firstName = nameParts[0] || "";
   const lastName = nameParts.slice(1).join(" ") || "";
   const isActive = listItem.status !== "inactive";
@@ -31,7 +33,7 @@ function transformParticipant(listItem, groupName, enrolledAt) {
   if (listItem.survey_progress === "not_started") flags.push("No surveys completed");
   return {
     id: listItem.participant_id,
-    firstName, lastName,
+    firstName, lastName, fullName,
     email: listItem.email || null,
     phone: listItem.phone || null,
     dob: listItem.dob || null,
@@ -90,21 +92,26 @@ function ChevronIcon({ direction = "down", className = "" }) {
   );
 }
 
-function Avatar({ firstName, lastName, size = "md" }) {
-  const i = `${firstName?.[0] ?? ""}${lastName?.[0] ?? ""}`.toUpperCase();
-  const p = ["bg-blue-500","bg-emerald-500","bg-indigo-500","bg-rose-500","bg-amber-500","bg-violet-500"];
-  const c = p[(firstName?.charCodeAt(0) ?? 0) % p.length];
-  const s = size === "xl" ? "w-16 h-16 text-xl" : size === "lg" ? "w-14 h-14 text-lg" : "w-9 h-9 text-xs";
-  return <div className={`rounded-full ${c} text-white flex items-center justify-center font-bold shrink-0 ${s}`}>{i}</div>;
+function Avatar({ fullName, size = "md" }) {
+  // Compute initials from the first two whitespace-separated tokens.
+  // For single-token names ("Sarah") fall back to the first two characters.
+  const tokens = (fullName || "").trim().split(/\s+/).filter(Boolean);
+  let initials;
+  if (tokens.length >= 2) {
+    initials = `${tokens[0][0] ?? ""}${tokens[1][0] ?? ""}`;
+  } else if (tokens.length === 1) {
+    initials = tokens[0].slice(0, 2);
+  } else {
+    initials = "?";
+  }
+  initials = initials.toUpperCase();
+  const palette = ["bg-blue-500","bg-emerald-500","bg-indigo-500","bg-rose-500","bg-amber-500","bg-violet-500"];
+  const color = palette[(fullName?.charCodeAt(0) ?? 0) % palette.length];
+  const sizeClass = size === "xl" ? "w-16 h-16 text-xl" : size === "lg" ? "w-14 h-14 text-lg" : "w-9 h-9 text-xs";
+  return <div className={`rounded-full ${color} text-white flex items-center justify-center font-bold shrink-0 ${sizeClass}`}>{initials}</div>;
 }
 function StatusDot({ status }) { return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${status === "active" ? "bg-emerald-400" : "bg-slate-300"}`} />; }
 function InfoRow({ label, value }) { return (<div className="flex justify-between gap-4 py-2.5 border-b border-slate-100 last:border-0"><span className="text-xs text-slate-400 font-medium shrink-0">{label}</span><span className="text-xs font-semibold text-slate-700 text-right">{value || "—"}</span></div>); }
-function FlagBadge({ text }) {
-  const cr = text.toLowerCase().includes("high"); const w = text.toLowerCase().includes("inactive") || text.toLowerCase().includes("no ");
-  const cl = cr ? "bg-rose-50 text-rose-700 border-rose-100" : w ? "bg-amber-50 text-amber-700 border-amber-100" : "bg-slate-50 text-slate-600 border-slate-100";
-  return <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full border ${cl}`}>{text}</span>;
-}
-
 function EmptyPlaceholder({ icon, title, description }) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
@@ -241,12 +248,14 @@ function SubmissionsTab({ submissions, participantId, participantName }) {
   const [viewingSubmission, setViewingSubmission] = useState(null);
   const [submissionDetail, setSubmissionDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState({ field: "date", dir: "desc" });
 
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
+  const [feedbackError, setFeedbackError] = useState(null);
 
   const filtered = useMemo(() => {
     let list = submissions.filter(s => {
@@ -269,14 +278,16 @@ function SubmissionsTab({ submissions, participantId, participantName }) {
   async function handleViewSubmission(s) {
     setViewingSubmission(s);
     setSubmissionDetail(null);
+    setDetailError(null);
     setDetailLoading(true);
     setFeedbackText("");
     setFeedbackSuccess(false);
+    setFeedbackError(null);
     try {
       const detail = await api.caretakerGetSubmissionDetail(participantId, s.id);
       setSubmissionDetail(detail);
     } catch (err) {
-      console.warn("Could not fetch submission detail:", err.message);
+      setDetailError(err.message || "Could not load submission details. Please try again.");
       setSubmissionDetail(null);
     } finally {
       setDetailLoading(false);
@@ -286,13 +297,14 @@ function SubmissionsTab({ submissions, participantId, participantName }) {
   async function handleSendFeedback() {
     if (!feedbackText.trim() || !viewingSubmission) return;
     setFeedbackSaving(true);
+    setFeedbackError(null);
     try {
       await api.caretakerCreateFeedback(participantId, viewingSubmission.id, feedbackText.trim());
       setFeedbackSuccess(true);
       setFeedbackText("");
       setTimeout(() => setFeedbackSuccess(false), 3000);
     } catch (err) {
-      console.warn("Feedback save failed:", err.message);
+      setFeedbackError(err.message || "Failed to send feedback. Please try again.");
     } finally {
       setFeedbackSaving(false);
     }
@@ -304,7 +316,7 @@ function SubmissionsTab({ submissions, participantId, participantName }) {
     const detail = submissionDetail;
     return (
       <div className="space-y-4">
-        <button onClick={() => { setViewingSubmission(null); setSubmissionDetail(null); setFeedbackText(""); setFeedbackSuccess(false); }}
+        <button onClick={() => { setViewingSubmission(null); setSubmissionDetail(null); setDetailError(null); setFeedbackText(""); setFeedbackSuccess(false); setFeedbackError(null); }}
           className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           Back to Submissions
@@ -329,6 +341,18 @@ function SubmissionsTab({ submissions, participantId, participantName }) {
             <div className="animate-pulse space-y-4">
               {[...Array(4)].map((_, i) => <div key={i} className="h-14 bg-slate-200 rounded-xl" />)}
             </div>
+          </div>
+        ) : detailError ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-rose-200 px-6 py-10 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center mx-auto mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            </div>
+            <p className="text-sm font-semibold text-rose-700">Couldn't load submission details</p>
+            <p className="text-xs text-rose-500 mt-1.5 max-w-sm mx-auto">{detailError}</p>
+            <button onClick={() => handleViewSubmission(s)}
+              className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-rose-600 rounded-lg hover:bg-rose-700 transition-colors">
+              Retry
+            </button>
           </div>
         ) : detail && detail.answers && detail.answers.length > 0 ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
@@ -379,6 +403,9 @@ function SubmissionsTab({ submissions, participantId, participantName }) {
           <textarea value={feedbackText} onChange={e => setFeedbackText(e.target.value)} rows={3}
             placeholder={`Write feedback for ${participantName} about this submission...`}
             className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 placeholder:text-slate-300 resize-none" />
+          {feedbackError && (
+            <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2.5 rounded-xl">{feedbackError}</p>
+          )}
           <div className="flex items-center justify-between gap-3">
             {feedbackSuccess && (
               <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
@@ -684,14 +711,16 @@ function TrendsTab({ trends, loading: trendsLoading }) {
 
 // ─── Tab: Notes & Feedback (unchanged — already working) ────────────────────────
 
-function NotesTab({ participantId, participantName, feedbackItems, noteItems }) {
+function NotesTab({ participantId, participantName, feedbackItems, noteItems, highlightNoteId = null }) {
   const [notes, setNotes] = useState([...(feedbackItems || []), ...(noteItems || [])]);
   const [generalFeedbackText, setGeneralFeedbackText] = useState("");
   const [generalFeedbackSaving, setGeneralFeedbackSaving] = useState(false);
   const [generalFeedbackSuccess, setGeneralFeedbackSuccess] = useState(false);
+  const [generalFeedbackError, setGeneralFeedbackError] = useState(null);
   const [newNote, setNewNote] = useState("");
   const [writeTag, setWriteTag] = useState("check-in");
   const [saving, setSaving] = useState(false);
+  const [noteError, setNoteError] = useState(null);
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("all");
   const [sortDir, setSortDir] = useState("desc");
@@ -700,24 +729,36 @@ function NotesTab({ participantId, participantName, feedbackItems, noteItems }) 
     setNotes([...(feedbackItems || []), ...(noteItems || [])]);
   }, [feedbackItems, noteItems]);
 
+  useEffect(() => {
+    if (!highlightNoteId) return;
+    const target = document.getElementById(`note-${highlightNoteId}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlightNoteId, notes]);
+
   async function handleSendGeneralFeedback() {
     if (!generalFeedbackText.trim()) return;
     setGeneralFeedbackSaving(true);
+    setGeneralFeedbackError(null);
     try {
-      await api.caretakerCreateGeneralFeedback(participantId, generalFeedbackText.trim());
-      const createdAt = new Date().toISOString();
-      setNotes(prev => [{
-        id: `f${Date.now()}`,
-        text: generalFeedbackText.trim(),
-        createdAt,
-        tag: "feedback",
-        submissionId: null,
-      }, ...prev]);
+      const created = await api.caretakerCreateGeneralFeedback(participantId, generalFeedbackText.trim());
+      // Use the API response so the new row has the real feedback_id, not a fake.
+      // Falls back to a synthetic shape only if the backend response is unexpectedly empty.
+      const newRow = created
+        ? { ...transformFeedback(created), tag: "feedback" }
+        : {
+            id: `f${Date.now()}`,
+            text: generalFeedbackText.trim(),
+            createdAt: new Date().toISOString(),
+            tag: "feedback",
+            submissionId: null,
+          };
+      setNotes(prev => [newRow, ...prev]);
       setGeneralFeedbackSuccess(true);
       setGeneralFeedbackText("");
       setTimeout(() => setGeneralFeedbackSuccess(false), 3000);
     } catch (err) {
-      console.warn("General feedback save failed:", err.message);
+      setGeneralFeedbackError(err.message || "Failed to send feedback. Please try again.");
     } finally {
       setGeneralFeedbackSaving(false);
     }
@@ -726,12 +767,13 @@ function NotesTab({ participantId, participantName, feedbackItems, noteItems }) 
   async function handleSave() {
     if (!newNote.trim()) return;
     setSaving(true);
+    setNoteError(null);
     try {
       const created = await api.caretakerCreateNote(participantId, newNote.trim(), writeTag);
       setNotes(prev => [transformNote(created), ...prev]);
       setNewNote("");
     } catch (err) {
-      console.warn("Note save failed:", err.message);
+      setNoteError(err.message || "Failed to save note. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -762,6 +804,7 @@ function NotesTab({ participantId, participantName, feedbackItems, noteItems }) 
     "initial": "bg-slate-100 text-slate-600 border-slate-200",
     "concern": "bg-rose-50 text-rose-700 border-rose-100",
     "feedback": "bg-violet-50 text-violet-700 border-violet-100",
+    "participant-message": "bg-amber-50 text-amber-700 border-amber-100",
   };
 
   return (
@@ -775,6 +818,9 @@ function NotesTab({ participantId, participantName, feedbackItems, noteItems }) 
           placeholder={`Write feedback for ${participantName} (not tied to a specific submission)...`}
           className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 placeholder:text-slate-300 resize-none"
         />
+        {generalFeedbackError && (
+          <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2.5 rounded-xl">{generalFeedbackError}</p>
+        )}
         <div className="flex items-center justify-between gap-3">
           {generalFeedbackSuccess && (
             <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
@@ -797,6 +843,9 @@ function NotesTab({ participantId, participantName, feedbackItems, noteItems }) 
         <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">New Note</p>
         <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={3} placeholder={`Write a note about ${participantName}...`}
           className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 placeholder:text-slate-300 resize-none" />
+        {noteError && (
+          <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2.5 rounded-xl">{noteError}</p>
+        )}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex gap-1.5 overflow-x-auto">
             {["check-in", "recommendation", "progress", "concern"].map(t => (
@@ -854,7 +903,11 @@ function NotesTab({ participantId, participantName, feedbackItems, noteItems }) 
           ) : (
             <div className="space-y-3">
               {filtered.map(n => (
-                <div key={n.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+                <div
+                  key={n.id}
+                  id={`note-${n.id}`}
+                  className={`bg-white rounded-2xl shadow-sm border p-5 ${String(n.id) === String(highlightNoteId) ? "border-blue-300 ring-2 ring-blue-100" : "border-slate-100"}`}
+                >
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-xs text-slate-400">{fmt(n.createdAt)}</span>
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${tagColors[n.tag] || tagColors["check-in"]}`}>{n.tag}</span>
@@ -884,8 +937,11 @@ export default function ParticipantDetailPage() {
   const { id: participantId } = useParams();
   const navigate = useNavigate();
   const { user } = useOutletContext();
+  const [searchParams] = useSearchParams();
 
-  const [activeTab, setActiveTab] = useState("overview");
+  const requestedTab = searchParams.get("tab");
+  const highlightedNoteId = searchParams.get("note");
+  const [activeTab, setActiveTab] = useState(requestedTab || "overview");
   const [participant, setParticipant] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [feedbackItems, setFeedbackItems] = useState([]);
@@ -898,45 +954,68 @@ export default function ParticipantDetailPage() {
   const [error, setError] = useState(null);
 
   // ──────────────────────────────────────────────────────────────────────────────
-  // Data fetching — uses real backend endpoints only, no mock fallbacks.
+  // Data fetching
   //
-  //   GET /caretaker/groups                                    → group name
-  //   GET /caretaker/participants                              → rich participant data
-  //   GET /caretaker/groups/{id}/members                       → enrolled date (joined_at)
-  //   GET /caretaker/participants/{id}/submissions             → submission list
-  //   GET /caretaker/participants/{id}/feedback                → feedback items
-  //   GET /caretaker/participants/{id}/goals                   → health goals
-  //   GET /caretaker/participants/{id}/health-trends           → trend data points
+  // B12: previously these 6 fetches ran strictly sequentially —
+  //   groups → list → group members → submissions → feedback → notes
+  // — meaning the page took ~6× round-trip latency to render. The fetches
+  // don't actually depend on each other (each one only needs participantId
+  // or the auth context), with the single exception that we need to know
+  // the participant's group_id before we can fetch group members for the
+  // joined_at field.
   //
-  // If the backend returns nothing, placeholders are shown in the UI.
+  // The fix is to run everything that has no inter-dependency in ONE
+  // Promise.allSettled, then do ONE follow-up fetch for group members. Net
+  // result: 2 sequential rounds of API latency instead of 6, plus the
+  // already-parallel goals/trends fetches running alongside.
+  //
+  // Each sub-fetch still has its own try/catch (or settled-state check) so
+  // a single broken endpoint doesn't blank the whole page.
   // ──────────────────────────────────────────────────────────────────────────────
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const fetchData = useCallback(async ({ background = false } = {}) => {
+    if (!background) {
+      setLoading(true);
+      setError(null);
+    }
     try {
-      // 1. Fetch groups → get group id + name
-      const groups = await api.caretakerGetGroups();
-      const firstGroup = Array.isArray(groups) && groups.length > 0 ? groups[0] : null;
+      // Phase 1: fire all 5 caretaker-scoped fetches in parallel.
+      const [groupsResult, listResult, subsResult, fbResult, notesResult] = await Promise.allSettled([
+        api.caretakerGetGroups(),
+        api.caretakerListParticipants(),
+        api.caretakerListSubmissions(participantId),
+        api.caretakerListFeedback(participantId),
+        api.caretakerListNotes(participantId),
+      ]);
 
+      const groups = groupsResult.status === "fulfilled" && Array.isArray(groupsResult.value)
+        ? groupsResult.value
+        : [];
+      const firstGroup = groups.length > 0 ? groups[0] : null;
       if (!firstGroup) {
-        setError("You are not assigned to any groups.");
-        setLoading(false);
+        if (!background) {
+          setError("You are not assigned to any groups.");
+          setLoading(false);
+        }
         return;
       }
 
-      // 2. Fetch all participants from the list endpoint (richer data than detail)
-      const allParticipants = await api.caretakerListParticipants();
-      const thisParticipant = Array.isArray(allParticipants)
-        ? allParticipants.find(p => p.participant_id === participantId)
-        : null;
-
+      // B8: caretakerListParticipants returns { items, total_count } — find
+      // this participant in the items list.
+      const allParticipantsResponse = listResult.status === "fulfilled" ? listResult.value : null;
+      const allParticipants = Array.isArray(allParticipantsResponse?.items)
+        ? allParticipantsResponse.items
+        : [];
+      const thisParticipant = allParticipants.find(p => p.participant_id === participantId) || null;
       if (!thisParticipant) {
-        setError("Participant not found.");
-        setLoading(false);
+        if (!background) {
+          setError("Participant not found.");
+          setLoading(false);
+        }
         return;
       }
 
-      // 3. Get joined_at from group members
+      // Phase 2: ONE follow-up fetch for group members (needed for joined_at).
+      // Sequential because it depends on the participant's group_id from Phase 1.
       let enrolledAt = null;
       try {
         const targetGroupId = thisParticipant.group_id || firstGroup.group_id;
@@ -951,66 +1030,58 @@ export default function ParticipantDetailPage() {
         // Non-critical — enrolledAt will show "—"
       }
 
-      // 4. Transform and set participant — look up the correct group for this participant
-      const participantGroup = Array.isArray(groups) ? groups.find(g => String(g.group_id) === String(thisParticipant.group_id)) : null;
+      // Apply Phase 1 results to state.
+      const participantGroup = groups.find(g => String(g.group_id) === String(thisParticipant.group_id));
       setParticipant(transformParticipant(thisParticipant, participantGroup?.name || firstGroup.name, enrolledAt));
 
-      // 5. Fetch submissions
-      try {
-        const subData = await api.caretakerListSubmissions(participantId);
-        setSubmissions(Array.isArray(subData) ? subData.map(transformSubmission) : []);
-      } catch {
-        setSubmissions([]);
-      }
-
-      // 6. Fetch existing feedback (shown in Notes tab as seed data)
-      try {
-        const fbData = await api.caretakerListFeedback(participantId);
-        setFeedbackItems(Array.isArray(fbData) ? fbData.map(transformFeedback) : []);
-      } catch {
-        setFeedbackItems([]);
-      }
-
-      // 7. Fetch saved caretaker notes
-      try {
-        const notesData = await api.caretakerListNotes(participantId);
-        setNoteItems(Array.isArray(notesData) ? notesData.map(transformNote) : []);
-      } catch {
-        setNoteItems([]);
-      }
-
+      setSubmissions(
+        subsResult.status === "fulfilled" && Array.isArray(subsResult.value)
+          ? subsResult.value.map(transformSubmission)
+          : []
+      );
+      setFeedbackItems(
+        fbResult.status === "fulfilled" && Array.isArray(fbResult.value)
+          ? fbResult.value.map(transformFeedback)
+          : []
+      );
+      setNoteItems(
+        notesResult.status === "fulfilled" && Array.isArray(notesResult.value)
+          ? notesResult.value.map(transformNote)
+          : []
+      );
     } catch (err) {
       console.error("Failed to load participant data:", err);
-      setError("Something went wrong loading participant data.");
+      if (!background) setError("Something went wrong loading participant data.");
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   }, [participantId]);
 
   // Fetch goals (non-blocking, separate loading state)
-  const fetchGoals = useCallback(async () => {
-    setGoalsLoading(true);
+  const fetchGoals = useCallback(async ({ background = false } = {}) => {
+    if (!background) setGoalsLoading(true);
     try {
       const data = await api.caretakerGetGoals(participantId);
       setGoals(Array.isArray(data) ? data : []);
     } catch {
-      setGoals([]);
+      // Leave existing goals in place on background refresh errors.
+      if (!background) setGoals([]);
     } finally {
-      setGoalsLoading(false);
+      if (!background) setGoalsLoading(false);
     }
   }, [participantId]);
 
   // Fetch trends (non-blocking, separate loading state)
-  const fetchTrends = useCallback(async () => {
-    setTrendsLoading(true);
+  const fetchTrends = useCallback(async ({ background = false } = {}) => {
+    if (!background) setTrendsLoading(true);
     try {
       const data = await api.caretakerGetHealthTrends(participantId);
       // Filter out elements with no data points
       setTrends(Array.isArray(data) ? data.filter(t => t.points && t.points.length > 0) : []);
     } catch {
-      setTrends([]);
+      if (!background) setTrends([]);
     } finally {
-      setTrendsLoading(false);
+      if (!background) setTrendsLoading(false);
     }
   }, [participantId]);
 
@@ -1019,6 +1090,29 @@ export default function ParticipantDetailPage() {
     fetchGoals();
     fetchTrends();
   }, [fetchData, fetchGoals, fetchTrends]);
+
+  // ── Auto-refresh ────────────────────────────────────────────────────────────
+  //
+  // Re-pulls participant data, goals, and trends every 30s in the background.
+  // Skips the very first call (initial fetch is handled by the useEffect
+  // above). Sub-components like NotesTab re-sync their internal state from
+  // props via their own useEffects, so new data flows through without
+  // remounting and without clobbering any draft/modal state inside them.
+  const backgroundRefresh = useCallback(async ({ background = false } = {}) => {
+    if (!background) return;
+    await Promise.all([
+      fetchData({ background: true }),
+      fetchGoals({ background: true }),
+      fetchTrends({ background: true }),
+    ]);
+  }, [fetchData, fetchGoals, fetchTrends]);
+
+  usePolling(backgroundRefresh, 30_000);
+
+  useEffect(() => {
+    if (!requestedTab) return;
+    setActiveTab(requestedTab);
+  }, [requestedTab]);
 
   // ── Loading state ──
   if (loading) {
@@ -1078,10 +1172,10 @@ export default function ParticipantDetailPage() {
           Back to My Participants
         </button>
         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-          <Avatar firstName={p.firstName} lastName={p.lastName} size="xl" />
+          <Avatar fullName={p.fullName} size="xl" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl font-bold text-slate-800">{p.firstName} {p.lastName}</h1>
+              <h1 className="text-2xl font-bold text-slate-800">{p.fullName}</h1>
               <StatusDot status={p.status} />
               <span className="text-xs text-slate-400 capitalize">{p.activityLabel}</span>
             </div>
@@ -1108,15 +1202,16 @@ export default function ParticipantDetailPage() {
 
       {/* Tab content */}
       {activeTab === "overview" && <OverviewTab p={p} trends={trends} />}
-      {activeTab === "submissions" && <SubmissionsTab submissions={submissions} participantId={p.id} participantName={`${p.firstName} ${p.lastName}`} />}
+      {activeTab === "submissions" && <SubmissionsTab submissions={submissions} participantId={p.id} participantName={p.fullName} />}
       {activeTab === "goals" && <GoalsTab goals={goals} loading={goalsLoading} />}
       {activeTab === "trends" && <TrendsTab trends={trends} loading={trendsLoading} />}
       {activeTab === "notes" && (
         <NotesTab
           participantId={p.id}
-          participantName={`${p.firstName} ${p.lastName}`}
+          participantName={p.fullName}
           feedbackItems={feedbackItems}
           noteItems={noteItems}
+          highlightNoteId={highlightedNoteId}
         />
       )}
     </div>

@@ -41,6 +41,41 @@ export const FIELD_TYPES = [
   { value: 'dropdown',      label: 'Dropdown',         icon: '▾',  desc: 'Select menu' },
 ];
 
+// Which datatypes are compatible with each field type.
+// null means no restriction (text fields can collect anything).
+const FIELD_DATATYPE_COMPAT = {
+  number:        ['integer', 'float', 'numeric', 'number'],
+  likert:        ['integer', 'float', 'numeric', 'number'],
+  single_select: ['text'],
+  dropdown:      ['text'],
+  multi_select:  ['text'],
+  date:          ['date'],
+  text:          null, // unrestricted
+};
+
+const NUMERIC_DATATYPES = new Set(['integer', 'float', 'numeric', 'number']);
+
+function isNumericDatatype(dt) {
+  return NUMERIC_DATATYPES.has((dt || '').toLowerCase());
+}
+
+function getAllowedDatatypes(fieldType) {
+  return FIELD_DATATYPE_COMPAT[fieldType] ?? null;
+}
+
+function isCompatible(fieldType, datatype) {
+  const allowed = getAllowedDatatypes(fieldType);
+  if (!allowed) return true;
+  return allowed.includes((datatype || '').toLowerCase());
+}
+
+function defaultDatatypeFor(fieldType) {
+  if (fieldType === 'number' || fieldType === 'likert') return 'float';
+  if (fieldType === 'single_select' || fieldType === 'dropdown' || fieldType === 'multi_select') return 'text';
+  if (fieldType === 'date') return 'date';
+  return 'float';
+}
+
 
 /* ═══════════════════════════════════════════
    FACTORY — create a blank field
@@ -193,10 +228,10 @@ function LikertConfig({ field, onChange }) {
 /* ═══════════════════════════════════════════
    DATA ELEMENT SELECTOR — searchable dropdown
    ═══════════════════════════════════════════ */
-export function CreateDataElementModal({ onClose, onCreated, onLinked }) {
+export function CreateDataElementModal({ onClose, onCreated, onLinked, defaultDatatype = null, lockedDatatype = false }) {
   const [newLabel, setNewLabel] = useState('');
   const [newCode, setNewCode] = useState('');
-  const [newDatatype, setNewDatatype] = useState('numeric');
+  const [newDatatype, setNewDatatype] = useState(defaultDatatype || 'float');
   const [newDescription, setNewDescription] = useState('');
   const [newUnit, setNewUnit] = useState('');
   const [saving, setSaving] = useState(false);
@@ -211,7 +246,7 @@ export function CreateDataElementModal({ onClose, onCreated, onLinked }) {
 
   useEffect(() => () => clearTimeout(errorTimer.current), []);
 
-  const supportsUnit = newDatatype === 'numeric';
+  const supportsUnit = isNumericDatatype(newDatatype);
 
   const handleCreate = async () => {
     if (!newLabel.trim() || !newCode.trim()) { showError('Label and code are required.'); return; }
@@ -237,7 +272,7 @@ export function CreateDataElementModal({ onClose, onCreated, onLinked }) {
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col min-h-[70vh] max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh] sm:max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-5 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-800">Create Data Element</h3>
           <p className="text-sm text-slate-500 mt-0.5">Define a data element to link to this question. This tells the system what kind of health data this question collects, so responses can be tracked and analysed over time.</p>
@@ -257,20 +292,25 @@ export function CreateDataElementModal({ onClose, onCreated, onLinked }) {
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition" />
             <p className="text-xs text-slate-400 mt-1">Unique identifier — lowercase, underscores only.</p>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">Data Type</label>
               <select value={newDatatype} onChange={(e) => {
                 const nextType = e.target.value;
                 setNewDatatype(nextType);
-                if (nextType !== 'numeric') setNewUnit('');
+                if (!isNumericDatatype(nextType)) setNewUnit('');
               }}
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition bg-white">
-                <option value="numeric">Numeric</option>
+                disabled={lockedDatatype}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition bg-white disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed">
+                <option value="float">Float (decimal numbers)</option>
+                <option value="integer">Integer (whole numbers)</option>
                 <option value="text">Text</option>
                 <option value="boolean">Boolean</option>
                 <option value="date">Date</option>
               </select>
+              {lockedDatatype && (
+                <p className="text-xs text-amber-600 mt-1">Data type is fixed by the field type.</p>
+              )}
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">Unit</label>
@@ -294,7 +334,7 @@ export function CreateDataElementModal({ onClose, onCreated, onLinked }) {
         {createError && (
           <p className="text-xs text-rose-500 px-5 pt-3">{createError}</p>
         )}
-        <div className="p-4 border-t border-slate-100 flex justify-end gap-2 mt-2">
+        <div className="mt-2 flex flex-col-reverse gap-2 border-t border-slate-100 p-4 sm:flex-row sm:justify-end">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg transition">Cancel</button>
           <button onClick={handleCreate} disabled={saving}
             className="px-4 py-2 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 transition">
@@ -306,16 +346,29 @@ export function CreateDataElementModal({ onClose, onCreated, onLinked }) {
   );
 }
 
-export function SearchDataElementModal({ value, dataElements, onChange, onCreated, onClose }) {
+export function SearchDataElementModal({ value, dataElements, onChange, onCreated, onClose, fieldType = null }) {
   const [search, setSearch] = useState('');
+  const [showAll, setShowAll] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  const allowedDatatypes = getAllowedDatatypes(fieldType);
+  const hasRestriction = allowedDatatypes !== null;
+
+  const compatible = useMemo(() => {
+    if (!hasRestriction) return dataElements;
+    return dataElements.filter((e) => isCompatible(fieldType, e.datatype));
+  }, [dataElements, fieldType, hasRestriction]);
+
+  const pool = showAll ? dataElements : compatible;
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return dataElements.filter(
+    return pool.filter(
       (e) => e.label?.toLowerCase().includes(q) || e.code?.toLowerCase().includes(q) || e.description?.toLowerCase().includes(q)
     );
-  }, [search, dataElements]);
+  }, [search, pool]);
+
+  const hiddenCount = dataElements.length - compatible.length;
 
   if (showCreateModal) {
     return (
@@ -323,16 +376,32 @@ export function SearchDataElementModal({ value, dataElements, onChange, onCreate
         onClose={() => setShowCreateModal(false)}
         onCreated={onCreated}
         onLinked={(id) => { onChange(id); onClose(); }}
+        defaultDatatype={defaultDatatypeFor(fieldType)}
+        lockedDatatype={hasRestriction}
       />
     );
   }
 
   return (
     <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col min-h-[70vh] max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh] sm:max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-5 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-800">Link Data Element</h3>
           <p className="text-sm text-slate-500 mt-0.5">Select an existing element that this question measures, or create a new one.</p>
+
+          {hasRestriction && (
+            <div className="mt-2 flex items-center justify-between gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-xs text-amber-700 font-medium">
+                Showing <span className="font-bold">{allowedDatatypes.join(' / ')}</span> elements only — required for this field type.
+              </p>
+              {hiddenCount > 0 && (
+                <button onClick={() => setShowAll((v) => !v)} className="text-xs text-amber-700 underline shrink-0">
+                  {showAll ? 'Show compatible only' : `Show all (${hiddenCount} hidden)`}
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-2 mt-3">
             <input
               autoFocus
@@ -358,18 +427,26 @@ export function SearchDataElementModal({ value, dataElements, onChange, onCreate
           )}
           {filtered.map((e) => {
             const isSelected = e.element_id === value;
+            const incompatible = hasRestriction && !isCompatible(fieldType, e.datatype);
             return (
               <button key={e.element_id}
                 onClick={() => { onChange(e.element_id); onClose(); }}
                 className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${
-                  isSelected ? 'border-blue-300 bg-blue-50 ring-1 ring-blue-200' : 'border-slate-200 hover:border-blue-200 hover:bg-blue-50/40'
+                  isSelected
+                    ? 'border-blue-300 bg-blue-50 ring-1 ring-blue-200'
+                    : incompatible
+                    ? 'border-slate-200 bg-slate-50 opacity-50 hover:opacity-75'
+                    : 'border-slate-200 hover:border-blue-200 hover:bg-blue-50/40'
                 }`}>
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <span className="text-sm font-semibold text-slate-800 truncate">{e.label || e.code}</span>
                   <div className="flex items-center gap-1.5 shrink-0">
                     {e.unit && <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{e.unit}</span>}
-                    <span className="text-xs text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded">{e.datatype || 'numeric'}</span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded border ${incompatible ? 'text-amber-600 bg-amber-50 border-amber-200' : 'text-blue-600 bg-blue-50 border-blue-100'}`}>
+                      {e.datatype || 'float'}
+                    </span>
                     {isSelected && <span className="text-xs text-emerald-600 font-semibold">✓ Linked</span>}
+                    {incompatible && <span className="text-xs text-amber-600 font-semibold">Incompatible</span>}
                   </div>
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5 font-mono">{e.code}</p>
@@ -381,7 +458,7 @@ export function SearchDataElementModal({ value, dataElements, onChange, onCreate
           })}
         </div>
 
-        <div className="p-4 border-t border-slate-100 flex justify-end">
+        <div className="flex flex-col-reverse gap-2 border-t border-slate-100 p-4 sm:flex-row sm:justify-end">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg transition">Cancel</button>
         </div>
       </div>
@@ -389,11 +466,12 @@ export function SearchDataElementModal({ value, dataElements, onChange, onCreate
   );
 }
 
-function DataElementSelector({ value, dataElements = [], onChange, onCreated, readOnly = false }) {
+function DataElementSelector({ value, dataElements = [], onChange, onCreated, readOnly = false, fieldType = null }) {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   const selected = dataElements.find((e) => e.element_id === value);
+  const linkedIncompatible = selected && fieldType && !isCompatible(fieldType, selected.datatype);
 
   if (readOnly) {
     const deactivated = value && !selected;
@@ -428,7 +506,7 @@ function DataElementSelector({ value, dataElements = [], onChange, onCreated, re
           <div
             onClick={() => setShowSearchModal(true)}
             className={`flex-1 flex items-center justify-between px-3 py-2 text-sm border rounded-lg cursor-pointer transition
-              ${value ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'}`}>
+              ${linkedIncompatible ? 'border-amber-300 bg-amber-50 text-amber-800' : value ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'}`}>
             <span className="truncate">{selected ? `${selected.label || selected.code}` : 'Select a data element…'}</span>
             <Svg size={14} d="M6 9l6 6 6-6" />
           </div>
@@ -441,6 +519,11 @@ function DataElementSelector({ value, dataElements = [], onChange, onCreated, re
             </button>
           )}
         </div>
+        {linkedIncompatible && (
+          <p className="text-xs text-amber-600 mt-1">
+            Warning: <span className="font-semibold">{selected.datatype}</span> element linked to a <span className="font-semibold">{fieldType}</span> field — answers won't display correctly.
+          </p>
+        )}
       </div>
 
       {showSearchModal && (
@@ -450,6 +533,7 @@ function DataElementSelector({ value, dataElements = [], onChange, onCreated, re
           onChange={onChange}
           onCreated={onCreated}
           onClose={() => setShowSearchModal(false)}
+          fieldType={fieldType}
         />
       )}
 
@@ -458,6 +542,8 @@ function DataElementSelector({ value, dataElements = [], onChange, onCreated, re
           onClose={() => setShowCreateModal(false)}
           onCreated={onCreated}
           onLinked={(id) => { onChange(id); }}
+          defaultDatatype={defaultDatatypeFor(fieldType)}
+          lockedDatatype={getAllowedDatatypes(fieldType) !== null}
         />
       )}
     </>
@@ -613,6 +699,7 @@ export function FieldCard({
             onChange={readOnly ? undefined : (id) => onUpdate({ element_id: id })}
             onCreated={readOnly ? undefined : onDataElementCreated}
             readOnly={readOnly}
+            fieldType={field.field_type}
           />
 
           {readOnly ? (
@@ -661,7 +748,7 @@ export function AddFieldPanel({ onAdd, onClose }) {
           <h3 className="text-base font-bold text-slate-800">Add a Field</h3>
           <p className="text-xs text-slate-500 mt-0.5">Choose a field type for your question</p>
         </div>
-        <div className="p-3 grid grid-cols-2 gap-2 max-h-80 overflow-y-auto">
+        <div className="grid grid-cols-1 gap-2 max-h-80 overflow-y-auto p-3 sm:grid-cols-2">
           {FIELD_TYPES.map((t) => (
             <button key={t.value} onClick={() => { onAdd(t.value); onClose(); }}
               className="flex items-start gap-3 p-3 rounded-xl border border-slate-200

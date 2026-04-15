@@ -74,10 +74,11 @@ class UserSignup(BaseModel):
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, value: str) -> str:
-        digits_only = re.sub(r"\D", "", value)
-        if len(digits_only) != 10:
-            raise ValueError("phone number must contain exactly 10 digits")
-        return digits_only
+        cleaned = value.strip()
+        # ITU E.164: "+" followed by 8-15 digits, first digit 1-9
+        if not re.match(r"^\+[1-9]\d{7,14}$", cleaned):
+            raise ValueError("phone number must be in international E.164 format (e.g. +19025550147)")
+        return cleaned
 
     @model_validator(mode="after")
     def validate_passwords_match(self):
@@ -113,7 +114,15 @@ class UpdatePersonalInfoPayload(BaseModel):
     new_password:Optional[str] = None
 
 class ForgotPasswordIn(BaseModel):
-    email: EmailStr
+    identifier: str
+
+    @field_validator("identifier")
+    @classmethod
+    def validate_identifier(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Username or email is required.")
+        return cleaned
 
 class ResetPasswordIn(BaseModel):
     token: str
@@ -155,6 +164,7 @@ class GoalTemplateCreate(BaseModel):
 class GoalTemplateUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    element_id: Optional[UUID] = None
     default_target: Optional[float] = None
     progress_mode: Optional[ProgressMode] = None
     direction: Optional[GoalDirection] = None

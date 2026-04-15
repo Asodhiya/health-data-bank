@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import FieldInput from "../../components/survey/FieldInput";
+import SVGIcon from "../../components/SVGIcon";
 import { api } from "../../services/api";
 
 /*
@@ -77,22 +78,7 @@ const answersFromBackend = (answerList) => {
   return obj;
 };
 
-/* ── SVG helper ── */
-const Svg = ({ d, size = 18, sw = 1.8, ...rest }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth={sw}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    {...rest}
-  >
-    {typeof d === "string" ? <path d={d} /> : d}
-  </svg>
-);
+const Svg = (props) => <SVGIcon size={18} {...props} />;
 
 const SaveIco = () => (
   <Svg

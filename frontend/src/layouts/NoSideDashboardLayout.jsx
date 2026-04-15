@@ -2,6 +2,8 @@ import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { PARTICIPANT_NAV } from "../config/navigation";
 import NotificationBell from "../components/NotificationBell";
+import HDBLogo from "../components/HDBLogo";
+import { GuideToggle } from "../components/GuideTooltip";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function NoSidebarDashboardLayout() {
@@ -65,12 +67,7 @@ export default function NoSidebarDashboardLayout() {
             </svg>
           </button>
           {/* Logo is clickable that redirects to dashboard */}
-          <Link
-            to="/participant"
-            className="font-bold text-xl text-blue-600 hover:text-blue-700 transition-colors"
-          >
-            Health Data Bank
-          </Link>
+          <HDBLogo to="/participant" size="md" />
         </div>
 
         {/* CENTER: Desktop Navigation (Hidden on Mobile) */}
@@ -94,6 +91,7 @@ export default function NoSidebarDashboardLayout() {
         </nav>
         {/* RIGHT: Notifications & Profile Settings */}
         <div className="flex items-center gap-4 relative">
+          <GuideToggle />
           <NotificationBell role="participant" />
 
           {/* Profile Dropdown Container */}
@@ -175,7 +173,7 @@ export default function NoSidebarDashboardLayout() {
       </header>
 
       {/* --- BODY --- */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 min-h-0 relative overflow-hidden">
         {/* Mobile Backdrop */}
         {isMobileMenuOpen && (
           <div
@@ -211,10 +209,19 @@ export default function NoSidebarDashboardLayout() {
           </nav>
         </aside>
 
-        {/* Main Content Area */}
-        <main className="h-full overflow-y-auto p-6">
-          <Outlet context={{ user }} />
-        </main>
+        {/* Main Content Area + Footer */}
+        <div className="h-full min-h-0 flex flex-col">
+          <main className="flex-1 min-h-0 overflow-y-auto p-6">
+            <Outlet context={{ user }} />
+          </main>
+          <footer className="shrink-0 border-t border-slate-200 bg-white px-6 py-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+            <Link to="/feedback/send" className="hover:text-slate-600 transition-colors">Send feedback</Link>
+            <span>·</span>
+            <Link to="/terms" className="hover:text-slate-600 transition-colors">Terms and conditions</Link>
+            <span>·</span>
+            <span>© 2026 University of Prince Edward Island</span>
+          </footer>
+        </div>
       </div>
     </div>
   );

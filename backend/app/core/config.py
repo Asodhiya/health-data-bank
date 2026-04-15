@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     RATE_LIMIT_BACKEND: str = "memory"
     REDIS_URL: str = "redis://localhost:6379/0"
     RATE_LIMIT_ALERT_THRESHOLD: int = 5
+    MIN_COHORT_SIZE: int = 5
+    MIN_COHORT_SIZE_RAW: int = 5
     SCHEDULED_BACKUPS_ENABLED: bool = True
     SCHEDULED_BACKUP_HOUR_UTC: int = 2
     SCHEDULED_BACKUP_MINUTE_UTC: int = 0

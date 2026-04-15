@@ -8,10 +8,7 @@ const proxyTarget = process.env.VITE_API_PROXY_TARGET || "http://localhost:8000"
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    allowedHosts: [
-      "poet-danny-isp-laptop.trycloudflare.com",
-    ],
-    host: true, // Listen on all network interfaces
+    host: true,
     port: 5173, // Ensure this matches your Docker EXPOSE and ports
     proxy: {
       "/api": {

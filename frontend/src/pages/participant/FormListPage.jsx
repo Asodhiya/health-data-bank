@@ -1,6 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useCallback } from "react";
+import { usePolling } from "../../hooks/usePolling";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
+import SVGIcon from "../../components/SVGIcon";
 
 /*
   FormListPage — participant's survey list.
@@ -12,7 +14,6 @@ import { api } from "../../services/api";
   with search, sort, date filters, and urgency-based ordering.
 
   Data source:  GET /api/v1/participant/surveys/assigned
-  Fallback:     mock data + localStorage hydration (when backend unavailable)
 */
 
 /* ── Transform backend response → frontend shape ── */
@@ -31,6 +32,9 @@ const transformAssigned = (item) => ({
   question_count: item.question_count || 0,
   version: item.version || 1,
   status: STATUS_MAP[item.status] || item.status || "pending",
+  cadence: item.cadence || "once",
+  cycle_key: item.cycle_key || null,
+  cycle_label: item.cycle_label || null,
   category: item.category || "",
   answered: item.answered_count ?? item.answered ?? 0,
   deployed_at: fmtDateStr(item.deployed_at),
@@ -38,74 +42,8 @@ const transformAssigned = (item) => ({
   submitted_at: fmtDateStr(item.submitted_at),
 });
 
-// /* ── Mock data — replace with API call when backend is ready ── */
-// const MOCK_DEPLOYED_FORMS = [
-//   {
-//     form_id: '1',
-//     title: 'Perceived Stress Scale (PSS)',
-//     description: '10 questions about your stress levels over the last month.',
-//     question_count: 10,
-//     status: 'pending',
-//     category: 'Mental Health',
-//     answered: 0,
-//     deployed_at: '2026-02-18',
-//     due_date: '2026-03-15',
-//   },
-//   {
-//     form_id: '2',
-//     title: 'UCLA Loneliness Scale (Version 3)',
-//     description: '20 items measuring feelings of loneliness and social connection.',
-//     question_count: 20,
-//     status: 'in_progress',
-//     category: 'Social Wellness',
-//     answered: 8,
-//     deployed_at: '2026-02-15',
-//     due_date: '2026-03-01',
-//   },
-//   {
-//     form_id: '3',
-//     title: 'Knowledge Confidence Scale',
-//     description: '18 questions about your confidence across health and wellness topics.',
-//     question_count: 18,
-//     status: 'completed',
-//     category: 'Self-Assessment',
-//     answered: 18,
-//     deployed_at: '2026-02-10',
-//     submitted_at: '2026-02-12',
-//   },
-//   {
-//     form_id: '4',
-//     title: 'Connections Intake Questionnaire',
-//     description: 'Intake form for the Connections program.',
-//     question_count: 10,
-//     status: 'pending',
-//     category: 'Intake',
-//     answered: 0,
-//     deployed_at: '2026-02-08',
-//   },
-// ];
-
 /* ── SVG Icon helper ── */
-const Ico = ({
-  d,
-  size = 20,
-  stroke = "currentColor",
-  fill = "none",
-  sw = 1.8,
-}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill={fill}
-    stroke={stroke}
-    strokeWidth={sw}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    {d}
-  </svg>
-);
+const Ico = SVGIcon;
 
 const ClockIcon = () => (
   <Ico
@@ -275,6 +213,19 @@ function FormRow({ form, onStart }) {
   const dueDays = daysUntil(form.due_date);
   const isOverdue = !isDone && form.due_date && dueDays < 0;
   const isDueSoon = !isDone && form.due_date && dueDays >= 0 && dueDays <= 3;
+  const cadenceLabelMap = {
+    once: "One-time",
+    daily: "Daily",
+    weekly: "Weekly",
+    monthly: "Monthly",
+  };
+  const cadenceLabel = cadenceLabelMap[form.cadence] || "One-time";
+  const cycleCompletionLabel = {
+    daily: "Completed for this day",
+    weekly: "Completed for this week",
+    monthly: "Completed for this month",
+    once: "Submitted",
+  }[form.cadence || "once"];
 
   return (
     <div
@@ -291,6 +242,9 @@ function FormRow({ form, onStart }) {
               {form.category}
             </span>
           )}
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
+            {cadenceLabel}
+          </span>
           {/* #3 — due date pill */}
           {form.due_date && !isDone && (
             <span
@@ -345,7 +299,7 @@ function FormRow({ form, onStart }) {
           </div>
         ) : isDone ? (
           <span className="flex items-center gap-1 text-xs font-bold text-emerald-600">
-            <CheckSmallIco /> Submitted
+            <CheckSmallIco /> {cycleCompletionLabel}
             {/* #12 — submission timestamp */}
             {form.submitted_at && (
               <span className="font-normal text-slate-400 ml-1">
@@ -354,7 +308,11 @@ function FormRow({ form, onStart }) {
             )}
           </span>
         ) : (
-          <div />
+          <span className="text-xs text-slate-400">
+            {form.cadence === "once"
+              ? "Ready to complete"
+              : `${form.cycle_label || cadenceLabel} check-in available`}
+          </span>
         )}
 
         <button
@@ -387,38 +345,21 @@ export default function FormListPage() {
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [showSort, setShowSort] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadForms = async () => {
-      try {
-        setLoading(true);
-        // 🟢 Using the exact same endpoint as your Dashboard!
-        const data = await api.getAssignedSurveys();
-
-        if (!cancelled) {
-          // If data exists, transform it. Otherwise, use an empty array.
-          const validData = Array.isArray(data) ? data : [];
-          setForms(validData.map(transformAssigned));
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error("🚨 API Error fetching survey list:", err);
-          setForms([]); // Show empty state if API fails
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    loadForms();
-
-    return () => {
-      cancelled = true;
-    };
+  const loadForms = useCallback(async ({ background = false } = {}) => {
+    try {
+      if (!background) setLoading(true);
+      const data = await api.getAssignedSurveys();
+      const validData = Array.isArray(data) ? data : [];
+      setForms(validData.map(transformAssigned));
+    } catch (err) {
+      console.error("API Error fetching survey list:", err);
+      setForms([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  usePolling(loadForms, 60_000);
 
   const handleStart = (formId) => navigate(`/participant/surveys/${formId}`);
 

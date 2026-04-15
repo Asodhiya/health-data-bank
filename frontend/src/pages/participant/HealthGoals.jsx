@@ -1,14 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
+import GuideTooltip from "../../components/GuideTooltip";
+import SVGIcon from "../../components/SVGIcon";
+import { getLastNDays, fmtShortDay, fmtEntryStamp, isSameDay } from "../../utils/dateFormatters";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 
-const Svg = ({ d, size = 20, sw = 1.8, stroke = "currentColor", fill = "none", ...rest }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke}
-    strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" {...rest}>
-    {typeof d === "string" ? <path d={d} /> : d}
-  </svg>
-);
+const Svg = SVGIcon;
 
 const PlusIco    = () => <Svg d="M12 5v14M5 12h14" size={18} />;
 const TrashIco   = () => <Svg d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" size={15} />;
@@ -16,6 +15,8 @@ const CloseIco   = () => <Svg d="M18 6L6 18M6 6l12 12" size={20} />;
 const AlertIco   = () => <Svg size={13} d={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />;
 const TargetIco  = ({ size = 22 }) => <Svg size={size} d={<><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></>} />;
 const PencilIco  = () => <Svg d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" size={14} />;
+const MenuIco    = () => <Svg d="M4 6h16M4 12h16M4 18h16" size={18} />;
+const ChevronIco = () => <Svg d="M9 18l6-6-6-6" size={16} sw={2.5} />;
 const GripIco    = () => (
   <Svg size={12} stroke="none" fill="currentColor" d={
     <>
@@ -32,38 +33,51 @@ const normalizeDatatype = (raw) => {
   const n = String(raw || "number").trim().toLowerCase();
   if (n === "string") return "text";
   if (n === "bool") return "boolean";
-  if (["int","integer","float","double","decimal","numeric"].includes(n)) return "number";
-  if (!["text","number","boolean"].includes(n)) return "number";
+  if (["int", "integer"].includes(n)) return "integer";
+  if (["float", "double", "decimal", "numeric"].includes(n)) return "float";
+  if (!["text", "number", "boolean", "integer", "float"].includes(n)) return "number";
   return n;
 };
 
-function getLastNDays(n) {
-  return Array.from({ length: n }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (n - 1 - i));
-    return d;
-  });
-}
-function fmtShortDay(date) {
-  return date.toLocaleDateString("en-US", { weekday: "short" });
-}
-function fmtEntryStamp(isoStr) {
-  if (!isoStr) return "";
-  const d = new Date(isoStr);
-  if (isSameDay(d, new Date())) {
-    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  }
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
-    " " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-}
-function isSameDay(d1, d2) {
-  return d1.getFullYear() === d2.getFullYear() &&
-    d1.getMonth() === d2.getMonth() &&
-    d1.getDate() === d2.getDate();
-}
-
 function usesBooleanLogging(datatype) {
   return normalizeDatatype(datatype) === "boolean";
+}
+
+function usesIntegerLogging(datatype) {
+  return normalizeDatatype(datatype) === "integer";
+}
+
+function isNumericDatatype(datatype) {
+  return ["number", "integer", "float"].includes(normalizeDatatype(datatype));
+}
+
+// Both manual goal logs and survey submissions for the same element count as readings
+const GOAL_PROGRESS_SOURCE_TYPES = new Set(["goal", "survey"]);
+
+function getGoalTrackingPoints(points = []) {
+  return (points || []).filter((point) =>
+    GOAL_PROGRESS_SOURCE_TYPES.has(String(point?.source_type || "").toLowerCase())
+  );
+}
+
+function getCompletedGoalMessage(goal) {
+  const windowType = String(goal?.completion_context?.window || goal?.window || "daily").toLowerCase();
+  if (windowType === "none") {
+    return "This goal is already completed and no longer accepts entries.";
+  }
+  return `This ${windowType} goal is already completed for the current window.`;
+}
+
+function getGoalUsagePercent(current, target, direction) {
+  const numericCurrent = Number.isFinite(Number(current)) ? Number(current) : 0;
+  const numericTarget = Number.isFinite(Number(target)) ? Number(target) : 0;
+  if (numericTarget <= 0) return 0;
+
+  if (direction === "at_most") {
+    return Math.min(100, Math.max(0, Math.round((numericCurrent / numericTarget) * 100)));
+  }
+
+  return Math.min(100, Math.max(0, Math.round((numericCurrent / numericTarget) * 100)));
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────
@@ -71,6 +85,8 @@ function usesBooleanLogging(datatype) {
 export default function HealthGoals() {
   const [activeGoals, setActiveGoals]     = useState([]);
   const [templates, setTemplates]         = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const templatesFetched                  = useRef(false);
   const [timeseries, setTimeseries]       = useState([]);
   const [loading, setLoading]             = useState(true);
   const [activeGoalId, setActiveGoalId]   = useState(null);
@@ -93,23 +109,21 @@ export default function HealthGoals() {
   });
   const [draggedId, setDraggedId]         = useState(null);
   const [dragOverId, setDragOverId]       = useState(null);
+  const [isGoalSheetOpen, setIsGoalSheetOpen] = useState(false);
 
   const MAX_GOALS = 10;
   const isAtLimit = activeGoals.length >= MAX_GOALS;
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async ({ background = false } = {}) => {
     try {
-      setLoading(true);
-      const [goalsData, templatesData, tsData] = await Promise.all([
+      if (!background) setLoading(true);
+      const [goalsData, tsData] = await Promise.all([
         api.listParticipantGoals().catch(() => []),
-        api.browseGoalTemplates().catch(() => []),
         api.getMyHealthTimeseries().catch(() => []),
       ]);
       const goals = Array.isArray(goalsData) ? goalsData : [];
       setActiveGoals(goals);
-      setTemplates(Array.isArray(templatesData) ? templatesData : []);
       setTimeseries(Array.isArray(tsData) ? tsData : []);
-      // Sync order: keep custom positions, append new goals, drop deleted ones
       setGoalOrder((prev) => {
         const ids = goals.map((g) => g.goal_id);
         const kept = prev.filter((id) => ids.includes(id));
@@ -123,9 +137,36 @@ export default function HealthGoals() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchData(); }, []);
+  usePolling(fetchData, 30_000);
+
+  // Lazy-load goal templates only when the drawer opens — avoids shipping the
+  // full template library on initial dashboard load, and skips it from polling.
+  useEffect(() => {
+    if (!isDrawerOpen || templatesFetched.current) return;
+    let cancelled = false;
+    setTemplatesLoading(true);
+    api.browseGoalTemplates()
+      .then((data) => {
+        if (cancelled) return;
+        setTemplates(Array.isArray(data) ? data : []);
+        templatesFetched.current = true;
+      })
+      .catch(() => { if (!cancelled) setTemplates([]); })
+      .finally(() => { if (!cancelled) setTemplatesLoading(false); });
+    return () => { cancelled = true; };
+  }, [isDrawerOpen]);
+
+  // Refresh templates after a goal is added/removed so stale availability
+  // flags don't linger if the drawer stays open.
+  const refreshTemplates = useCallback(async () => {
+    if (!templatesFetched.current) return;
+    try {
+      const data = await api.browseGoalTemplates();
+      setTemplates(Array.isArray(data) ? data : []);
+    } catch { /* ignore */ }
+  }, []);
 
   // Sorted goals — respects user-defined drag order
   const sortedGoals = [...activeGoals].sort((a, b) => {
@@ -142,7 +183,7 @@ export default function HealthGoals() {
   const activeGoal = sortedGoals.find((g) => g.goal_id === resolvedGoalId) || sortedGoals[0];
 
   const tsMap = {};
-  timeseries.forEach((ts) => { tsMap[ts.element_id] = ts.points || []; });
+  timeseries.forEach((ts) => { tsMap[ts.element_id] = getGoalTrackingPoints(ts.points); });
 
   // ── Drag handlers ─────────────────────────────────────────────────────────
 
@@ -201,6 +242,7 @@ export default function HealthGoals() {
       setCustomTargets((p) => ({ ...p, [templateId]: "" }));
       setCustomWindows((p) => ({ ...p, [templateId]: "daily" }));
       await fetchData();
+      refreshTemplates();
     } catch (err) {
       const msg = err?.response?.status === 409
         ? "You already track this metric with another goal."
@@ -216,6 +258,11 @@ export default function HealthGoals() {
   const handleLogProgress = async (goalId, customValue = 1) => {
     if (customValue === "" || customValue === null) return;
     setLogErrors((p) => ({ ...p, [goalId]: null }));
+    const goal = activeGoals.find((item) => item.goal_id === goalId);
+    if (goal?.is_completed) {
+      setLogErrors((p) => ({ ...p, [goalId]: getCompletedGoalMessage(goal) }));
+      return;
+    }
     if (typeof customValue === "string" && !isNaN(customValue) && customValue.trim() !== "") {
       if (Number(customValue) < 0) {
         setLogErrors((p) => ({ ...p, [goalId]: "Value cannot be negative." }));
@@ -251,6 +298,7 @@ export default function HealthGoals() {
       setConfirmDeleteId(null);
       if (resolvedGoalId === goalId) setActiveGoalId(null);
       await fetchData();
+      refreshTemplates();
     } catch (err) {
       console.error("Failed to delete goal:", err);
       setConfirmDeleteId(null);
@@ -282,18 +330,22 @@ export default function HealthGoals() {
           <p className="text-sm text-slate-500 mt-1">Track and log your daily wellness habits.</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="px-4 py-2 bg-white rounded-xl border border-slate-200 flex items-center gap-2 shadow-sm">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Active</span>
-            <span className={`text-sm font-bold ${isAtLimit ? "text-rose-500" : "text-slate-800"}`}>
-              {activeGoals.length} / {MAX_GOALS}
-            </span>
-          </div>
-          <button
-            onClick={() => setIsDrawerOpen(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5"
-          >
-            <PlusIco /> Browse Goals
-          </button>
+          <GuideTooltip tip="How many goals you currently have active. You can have up to 10 at a time." position="bottom">
+            <div className="px-4 py-2 bg-white rounded-xl border border-slate-200 flex items-center gap-2 shadow-sm">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Active</span>
+              <span className={`text-sm font-bold ${isAtLimit ? "text-rose-500" : "text-slate-800"}`}>
+                {activeGoals.length} / {MAX_GOALS}
+              </span>
+            </div>
+          </GuideTooltip>
+          <GuideTooltip tip="Browse the goal library to add new wellness habits recommended for your health plan." position="bottom">
+            <button
+              onClick={() => setIsDrawerOpen(true)}
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5"
+            >
+              <PlusIco /> Browse Goals
+            </button>
+          </GuideTooltip>
         </div>
       </div>
 
@@ -316,12 +368,134 @@ export default function HealthGoals() {
         </div>
       ) : (
         /* ── Sidebar + Detail layout ── */
-        <div className="flex gap-4 min-h-[520px]">
+        <div className="flex flex-col lg:flex-row gap-4 min-h-[520px]">
 
-          {/* Sidebar */}
-          <div className="w-48 shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+          {/* ── Mobile goal selector bar (tap to open bottom sheet) ── */}
+          <div className="lg:hidden">
+            <button
+              onClick={() => setIsGoalSheetOpen(true)}
+              className="w-full flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-2xl px-4 py-3 shadow-sm"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <MenuIco />
+                <div className="min-w-0 text-left">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-0.5">Current Goal</p>
+                  <p className="text-sm font-bold text-slate-800 truncate">
+                    {activeGoal?.name ?? activeGoal?.element?.label ?? "Select a goal"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-semibold text-slate-400">
+                  {sortedGoals.filter((g) => g.is_completed).length}/{sortedGoals.length}
+                </span>
+                <ChevronIco />
+              </div>
+            </button>
+          </div>
+
+          {/* ── Mobile bottom sheet backdrop ── */}
+          {isGoalSheetOpen && (
+            <div
+              className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 lg:hidden"
+              onClick={() => setIsGoalSheetOpen(false)}
+            />
+          )}
+
+          {/* ── Mobile bottom sheet ── */}
+          <div className={`fixed inset-x-0 bottom-0 z-50 lg:hidden bg-white rounded-t-2xl shadow-2xl border-t border-slate-200 flex flex-col transition-transform duration-300 ease-out ${isGoalSheetOpen ? "translate-y-0" : "translate-y-full"}`}
+            style={{ maxHeight: "75vh" }}>
+            {/* Sheet header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">My Goals</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {sortedGoals.filter((g) => g.is_completed).length} of {sortedGoals.length} completed
+                </p>
+              </div>
+              <button
+                onClick={() => setIsGoalSheetOpen(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 transition-all"
+              >
+                <CloseIco />
+              </button>
+            </div>
+            {/* Progress bar */}
+            <div className="px-5 py-2 border-b border-slate-100">
+              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-400 rounded-full transition-all duration-500"
+                  style={{ width: `${sortedGoals.length ? (sortedGoals.filter((g) => g.is_completed).length / sortedGoals.length) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+            {/* Goal list */}
+            <div className="flex-1 overflow-y-auto py-2">
+              {sortedGoals.map((g) => {
+                const isActive = g.goal_id === resolvedGoalId;
+                const done = g.is_completed;
+                const isConfirming = confirmDeleteId === g.goal_id;
+                const isDragging = draggedId === g.goal_id;
+                const isOver = dragOverId === g.goal_id;
+                return (
+                  <div
+                    key={g.goal_id}
+                    className="relative group"
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, g.goal_id)}
+                    onDragOver={(e) => handleDragOver(e, g.goal_id)}
+                    onDrop={(e) => handleDrop(e, g.goal_id)}
+                    onDragEnd={handleDragEnd}
+                    style={{ opacity: isDragging ? 0.4 : 1 }}
+                  >
+                    {isOver && !isDragging && (
+                      <div className="absolute top-0 left-3 right-3 h-0.5 bg-blue-500 rounded-full z-10" />
+                    )}
+                    <button
+                      onClick={() => { setActiveGoalId(g.goal_id); setConfirmDeleteId(null); setIsGoalSheetOpen(false); }}
+                      className={`w-full text-left px-5 py-3.5 flex items-center gap-3 transition-all border-l-2 ${
+                        isActive ? "bg-blue-50 border-blue-500" : "border-transparent hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className="text-slate-300 shrink-0 cursor-grab active:cursor-grabbing"><GripIco /></span>
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${done ? "bg-emerald-400" : "bg-blue-400"}`} />
+                      <span className={`text-sm leading-tight flex-1 text-left ${isActive ? "font-bold text-blue-700" : "font-medium text-slate-700"}`}>
+                        {g.name ?? g.element?.label ?? "Goal"}
+                      </span>
+                      {done && <span className="text-xs font-bold text-emerald-600 shrink-0">✓ Done</span>}
+                    </button>
+                    {/* Delete in sheet */}
+                    {!isConfirming ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(g.goal_id); setActiveGoalId(g.goal_id); }}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
+                      >
+                        <TrashIco />
+                      </button>
+                    ) : (
+                      <div className="px-5 pb-3 flex items-center gap-2">
+                        <span className="text-xs text-slate-500 font-semibold">Remove this goal?</span>
+                        <button onClick={() => setConfirmDeleteId(null)} className="text-xs font-bold text-slate-400 hover:text-slate-600 px-2 py-0.5 rounded-lg hover:bg-slate-100 transition-all">Cancel</button>
+                        <button
+                          onClick={() => { handleDeleteGoal(g.goal_id); setIsGoalSheetOpen(false); }}
+                          className="text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 px-3 py-1 rounded-lg transition-all"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Sidebar — hidden on mobile, shown on lg+ */}
+          <div className="hidden lg:flex w-48 shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex-col">
             <div className="px-4 py-3 border-b border-slate-100">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">My Goals</p>
+              <GuideTooltip tip="Click a goal to see its details. Drag the grip handle ⠿ to reorder your goals." position="right">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-default">My Goals</p>
+              </GuideTooltip>
             </div>
             <div className="flex-1 overflow-y-auto py-2">
               {sortedGoals.map((g) => {
@@ -467,35 +641,16 @@ export default function HealthGoals() {
             </div>
           )}
 
-          {(() => {
-            const filteredTemplates = templates.filter((t) => {
-              const name = (t.name || t.element?.label || "").toLowerCase();
-              const desc = (t.description || t.element?.description || "").toLowerCase();
-              const q = drawerSearch.toLowerCase();
-              return name.includes(q) || desc.includes(q);
-            });
-            const totalPages = Math.max(1, Math.ceil(filteredTemplates.length / DRAWER_PAGE_SIZE));
-            const safePage = Math.min(drawerPage, totalPages);
-            const paginated = filteredTemplates.slice((safePage - 1) * DRAWER_PAGE_SIZE, safePage * DRAWER_PAGE_SIZE);
-
-            if (templates.length === 0) {
-              return (
-                <div className="text-center py-10">
-                  <p className="text-sm text-slate-500">No templates available.</p>
-                </div>
-              );
-            }
-            if (filteredTemplates.length === 0) {
-              return (
-                <div className="text-center py-10 space-y-2">
-                  <p className="text-sm font-semibold text-slate-600">No results for "{drawerSearch}"</p>
-                  <p className="text-xs text-slate-400">Try a different keyword.</p>
-                </div>
-              );
-            }
-            return (
-              <>
-                {paginated.map((template) => {
+          {templatesLoading && templates.length === 0 ? (
+            <div className="text-center py-10">
+              <p className="text-sm text-slate-500">Loading templates…</p>
+            </div>
+          ) : templates.length === 0 ? (
+            <div className="text-center py-10">
+              <p className="text-sm text-slate-500">No templates available.</p>
+            </div>
+          ) : (
+            templates.map((template) => {
               const tId = template.template_id;
               const name = template.name || template.element?.label || "Wellness Goal";
               const desc = template.description || template.element?.description || "";
@@ -503,7 +658,10 @@ export default function HealthGoals() {
               const target = template.default_target ?? 1;
               const unit = template.element?.unit || "";
               const customTarget = customTargets[tId] ?? "";
-              const selectedWindow = customWindows[tId] ?? "daily";
+              const templateWindow = (template.window || "daily").toLowerCase();
+              const isTrackedTemplate = (template.progress_mode || "incremental").toLowerCase() === "absolute";
+              // For absolute goals, window is fixed to the template's window; participants can't change it
+              const selectedWindow = isTrackedTemplate ? templateWindow : (customWindows[tId] ?? "daily");
               const isAlreadyAdded = activeGoals.some((g) => g.template_id === tId);
               const isLoading = actionLoading === tId;
               const addError = addErrors[tId];
@@ -523,27 +681,36 @@ export default function HealthGoals() {
                   </div>
                   {desc && <p className="text-sm text-slate-500 mb-4 line-clamp-2">{desc}</p>}
                   <div className="mb-4 space-y-2">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
-                        Time Frame
-                      </label>
-                      <select
-                        value={selectedWindow}
-                        onChange={(e) =>
-                          setCustomWindows((p) => ({ ...p, [tId]: e.target.value }))
-                        }
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="monthly">Monthly</option>
-                        <option value="none">No reset</option>
-                      </select>
-                    </div>
+                    {isTrackedTemplate ? (
+                      <div className="flex items-center gap-2 px-3 py-2 bg-violet-50 border border-violet-100 rounded-xl">
+                        <span className="text-[10px] font-bold text-violet-500 uppercase tracking-widest">
+                          {templateWindow === "none" ? "Track until reached" : `${templateWindow.charAt(0).toUpperCase() + templateWindow.slice(1)} tracked goal`}
+                        </span>
+                        <span className="text-xs text-violet-500 ml-auto">1 reading/day</span>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
+                          Time Frame
+                        </label>
+                        <select
+                          value={selectedWindow}
+                          onChange={(e) =>
+                            setCustomWindows((p) => ({ ...p, [tId]: e.target.value }))
+                          }
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="monthly">Monthly</option>
+                          <option value="none">No reset</option>
+                        </select>
+                      </div>
+                    )}
                     <p className="text-xs text-blue-600 font-semibold">
                       Default target: {target}{unit ? ` ${unit}` : ""}
                     </p>
-                    {datatype === "number" && (
+                    {isNumericDatatype(datatype) && (
                       <div>
                         <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
                           Your Target
@@ -551,7 +718,7 @@ export default function HealthGoals() {
                         <input
                           type="number"
                           min="0.01"
-                          step="any"
+                          step={usesIntegerLogging(datatype) ? "1" : "any"}
                           value={customTarget}
                           onChange={(e) =>
                             setCustomTargets((p) => ({ ...p, [tId]: e.target.value }))
@@ -562,6 +729,11 @@ export default function HealthGoals() {
                         <p className="mt-1 text-[10px] text-slate-400">
                           Leave blank to use the default target.
                         </p>
+                        {usesIntegerLogging(datatype) && (
+                          <p className="mt-1 text-[10px] text-slate-400">
+                            Whole numbers only.
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -572,11 +744,13 @@ export default function HealthGoals() {
                   )}
                   <button
                     onClick={() => handleAddGoal(tId)}
-                    disabled={isAlreadyAdded || isAtLimit || isLoading}
+                    disabled={isAlreadyAdded || isAtLimit || actionLoading === tId}
                     className={`w-full py-2.5 rounded-xl text-sm font-bold transition-all ${
                       isAlreadyAdded
                         ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                        : isAtLimit
+                      : isAtLimit
+                        ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                        : actionLoading === tId
                           ? "bg-slate-100 text-slate-400 cursor-not-allowed"
                           : "bg-blue-600 hover:bg-blue-700 text-white shadow-sm hover:shadow-md"
                     }`}
@@ -658,12 +832,17 @@ function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actio
   const direction    = ctx.direction    || goal.direction    || "at_least";
   const windowType   = ctx.window       || goal.window       || "daily";
   const isConfirming = confirmDeleteId === goal.goal_id;
+  const completionMessage = getCompletedGoalMessage(goal);
 
-  const pct = Math.min(100, Math.max(0, target > 0
-    ? direction === "at_most"
-      ? current <= target ? 100 : Math.round((target / current) * 100)
-      : Math.round((current / target) * 100)
-    : 0));
+  // Absolute goals: latest reading = progress, max 1 log per calendar day
+  const isTrackedMode = progressMode === "absolute";
+
+  // Check if already logged today (applies to all absolute goals)
+  const loggedToday = isTrackedMode && tsPoints.some(
+    (p) => p.observed_at && isSameDay(new Date(p.observed_at), new Date())
+  );
+
+  const pct = getGoalUsagePercent(current, target, direction);
 
   // Last 7 days bar chart
   const days = getLastNDays(7);
@@ -692,36 +871,50 @@ function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actio
     : windowEntries;
   const entriesLabel = selectedBarData
     ? `${fmtShortDay(selectedBarData.day)} ${selectedBarData.day.toLocaleDateString("en-US", { month: "short", day: "numeric" })} (${displayedEntries.length})`
-    : `This ${windowType} window (${windowEntries.length})`;
+    : isTrackedMode && windowType === "none"
+      ? `All readings (${windowEntries.length})`
+      : `This ${windowType} window (${windowEntries.length})`;
 
   // Tags
-  const windowTag   = { daily: "Daily goal", weekly: "Weekly goal", monthly: "Monthly goal" }[windowType] ?? `${windowType} goal`;
+  const windowTagText = isTrackedMode
+    ? windowType === "none"
+      ? "Track until reached"
+      : { weekly: "Weekly tracked", monthly: "Monthly tracked" }[windowType] ?? `${windowType} tracked`
+    : { daily: "Daily goal", weekly: "Weekly goal", monthly: "Monthly goal" }[windowType] ?? `${windowType} goal`;
   const directionTag = direction === "at_most"
     ? `Stay under ${Number(target).toLocaleString()}${unit ? " " + unit : ""}`
     : `Reach ${Number(target).toLocaleString()}${unit ? " " + unit : ""}`;
-  const statusTag   = done ? "Done ✓" : "In progress";
-  const tags        = [windowTag, directionTag, statusTag];
+  const statusTag   = done ? "Done ✓" : (loggedToday) ? "Logged today ✓" : "In progress";
+  const tags        = [windowTagText, directionTag, statusTag];
   const tagColors   = {
-    "Done ✓":      "bg-emerald-50 text-emerald-600 border-emerald-100",
-    "In progress": "bg-blue-50 text-blue-600 border-blue-100",
+    "Done ✓":           "bg-emerald-50 text-emerald-600 border-emerald-100",
+    "Logged today ✓":   "bg-teal-50 text-teal-600 border-teal-100",
+    "In progress":      "bg-blue-50 text-blue-600 border-blue-100",
+    "Track until reached": "bg-violet-50 text-violet-600 border-violet-100",
+    "Weekly tracked":   "bg-violet-50 text-violet-600 border-violet-100",
+    "Monthly tracked":  "bg-violet-50 text-violet-600 border-violet-100",
   };
 
-  const contextNote = progressMode === "incremental"
-    ? windowType === "daily"
+  const contextNote = isTrackedMode
+    ? windowType === "none"
+      ? "Log your reading once per day. Progress is tracked until you permanently reach your target."
+      : `Log your reading once per day. Your latest reading counts toward this ${windowType} goal.`
+    : windowType === "daily"
       ? "Each log counts toward your daily total and resets at midnight."
-      : `Each log counts toward your ${windowType} total.`
-    : "Your most recent log is used as your current progress value.";
+      : `Each log counts toward your ${windowType} total.`;
 
   return (
     <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-w-0">
       {/* Header */}
-      <div className="px-6 py-5 border-b border-slate-100">
-        <div className="flex items-start justify-between gap-3">
+      <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 className="text-lg font-bold text-slate-800 leading-tight truncate">{name}</h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Today, {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-              {windowType === "daily" ? " · resets midnight" : ""}
+              {isTrackedMode
+                ? windowType === "none" ? " · one reading per day, no reset" : ` · one reading per day · ${windowType} window`
+                : windowType === "daily" ? " · resets midnight" : ""}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -747,12 +940,29 @@ function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actio
                 <TrashIco />
               </button>
             )}
-            <button
-              onClick={onLogEntry}
-              className="flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-xl hover:bg-blue-100 transition-all"
+            <GuideTooltip
+              tip={
+                done ? completionMessage
+                : loggedToday ? "A reading for this metric was already recorded today (via survey or manual log). Come back tomorrow."
+                : "Record today's reading for this goal."
+              }
+              position="bottom"
             >
-              <PencilIco /> Log entry
-            </button>
+              <button
+                onClick={(done || loggedToday) ? undefined : onLogEntry}
+                disabled={done || loggedToday}
+                className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
+                  done
+                    ? "text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed"
+                    : loggedToday
+                      ? "text-teal-600 bg-teal-50 border-teal-100 cursor-not-allowed"
+                      : "text-blue-600 bg-blue-50 border-blue-100 hover:bg-blue-100"
+                }`}
+              >
+                <PencilIco />
+                {done ? "Completed" : loggedToday ? "Logged today" : "Log entry"}
+              </button>
+            </GuideTooltip>
           </div>
         </div>
 
@@ -776,103 +986,222 @@ function GoalDetail({ goal, tsPoints, confirmDeleteId, setConfirmDeleteId, actio
           </div>
         )}
 
-        {/* Big value + circular progress */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Current progress</p>
-            <div className="flex items-end gap-1.5">
-              <p className={`text-4xl font-black leading-none tracking-tight ${done ? "text-emerald-600" : "text-blue-600"}`}>
-                {Number(current).toLocaleString()}
-              </p>
-              {unit && <p className="text-sm font-semibold text-slate-400 mb-1">{unit}</p>}
-            </div>
-            <p className="text-xs text-slate-400 mt-1">of {Number(target).toLocaleString()} {unit} target</p>
-          </div>
-          <div className="shrink-0 relative w-16 h-16">
-            <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-              <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f1f5f9" strokeWidth="3" />
-              <circle cx="18" cy="18" r="15.9" fill="none"
-                stroke={done ? "#22c55e" : "#3b82f6"} strokeWidth="3"
-                strokeDasharray={`${pct} ${100 - pct}`} strokeLinecap="round" />
-            </svg>
-            <span className="absolute inset-0 flex items-center justify-center text-xs font-black text-slate-700">{pct}%</span>
-          </div>
-        </div>
-
-        {/* Progress bar */}
-        <div>
-          <div className="flex justify-between text-xs text-slate-400 mb-1.5">
-            <span>{pct}% complete</span>
-            <span>target: {Number(target).toLocaleString()} {unit}</span>
-          </div>
-          <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-700 ${done ? "bg-emerald-400" : "bg-blue-500"}`}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Last 7 days bars */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Last 7 Days</p>
-            {selectedDay != null && (
-              <button onClick={() => setSelectedDay(null)} className="text-[10px] font-bold text-blue-500 hover:text-blue-700 transition-all">
-                Clear ✕
-              </button>
-            )}
-          </div>
-          <div className="flex items-end gap-1.5" style={{ height: "88px" }}>
-            {barData.map(({ day, total, isToday }, idx) => {
-              const barPct  = barMax > 0 ? (total / barMax) * 100 : 0;
-              const metTarget = total >= target;
-              const isHovered  = hoveredBar === idx;
-              const isSelected = selectedDay === idx;
-              const animPct    = mounted ? Math.max(barPct, total > 0 ? 6 : 0) : 0;
-              return (
-                <div
-                  key={day.toISOString()}
-                  className="flex-1 flex flex-col items-center gap-1 cursor-pointer group relative"
-                  onMouseEnter={() => setHoveredBar(idx)}
-                  onMouseLeave={() => setHoveredBar(null)}
-                  onClick={() => setSelectedDay(selectedDay === idx ? null : idx)}
-                >
-                  {isHovered && (
-                    <div className="absolute -top-9 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] font-bold px-2 py-1 rounded-lg whitespace-nowrap z-10 shadow-lg">
-                      {total > 0 ? `${Number(total).toLocaleString()} ${unit}` : "No data"}
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
-                    </div>
-                  )}
-                  <div className="w-full flex items-end justify-center" style={{ height: "60px" }}>
-                    <div
-                      className={`w-full rounded-t-lg ${isSelected ? "ring-2 ring-offset-1 ring-blue-400" : ""} ${
-                        isToday
-                          ? metTarget ? "bg-emerald-400" : "bg-blue-500"
-                          : metTarget
-                            ? isHovered ? "bg-emerald-300" : "bg-emerald-200"
-                            : isHovered ? "bg-slate-300" : "bg-slate-200"
-                      }`}
-                      style={{
-                        height: `${animPct}%`,
-                        transition: "height 0.5s cubic-bezier(0.34,1.56,0.64,1), background-color 0.15s",
-                      }}
-                    />
+        {isTrackedMode ? (
+          /* ── Absolute goal UI ─────────────────────────────────────────── */
+          <>
+            {/* Latest reading vs target */}
+            <div className={`flex items-center justify-between rounded-2xl px-5 py-4 border ${done ? "bg-emerald-50 border-emerald-100" : loggedToday ? "bg-teal-50 border-teal-100" : "bg-slate-50 border-slate-100"}`}>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest mb-1 text-slate-400">Latest reading</p>
+                {current > 0 ? (
+                  <div className="flex items-end gap-1.5">
+                    <span className={`text-4xl font-black leading-none tracking-tight ${done ? "text-emerald-600" : "text-slate-800"}`}>
+                      {Number(current).toLocaleString()}
+                    </span>
+                    {unit && <span className="text-sm font-semibold text-slate-400 mb-1">{unit}</span>}
                   </div>
-                  <span className={`text-[9px] font-bold ${isSelected ? "text-blue-600" : isToday ? "text-blue-500" : "text-slate-400"}`}>
-                    {isToday ? "Today" : fmtShortDay(day)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+                ) : (
+                  <span className="text-2xl font-bold text-slate-300">No reading yet</span>
+                )}
+                <p className="text-xs text-slate-400 mt-1">
+                  Target: {direction === "at_most" ? "≤" : "≥"} {Number(target).toLocaleString()}{unit ? ` ${unit}` : ""}
+                </p>
+              </div>
+              <div className={`w-14 h-14 rounded-full flex items-center justify-center shrink-0 ${done ? "bg-emerald-100" : current > 0 ? "bg-rose-50" : "bg-slate-100"}`}>
+                {done ? (
+                  <svg className="w-7 h-7 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : current > 0 ? (
+                  <svg className="w-7 h-7 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                ) : (
+                  <svg className="w-7 h-7 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                )}
+              </div>
+            </div>
 
-        {/* Context note */}
-        <div className="flex items-start gap-2 bg-slate-50 rounded-xl px-4 py-3 text-xs text-slate-500 border border-slate-100">
-          <span className="mt-0.5 shrink-0">⏱</span>
-          <p>{contextNote}</p>
-        </div>
+            {/* Last 7 days — dot strip showing each day's reading vs target */}
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Last 7 Days</p>
+              <div className="flex items-stretch gap-1.5">
+                {barData.map(({ day, isToday, pts }, idx) => {
+                  const reading = pts.length
+                    ? pts.reduce((latest, p) =>
+                        !latest || new Date(p.observed_at) > new Date(latest.observed_at) ? p : latest
+                      , null)?.value_number
+                    : null;
+                  const hasReading = reading != null && Number.isFinite(reading);
+                  const met = hasReading && (direction === "at_most" ? reading <= target : reading >= target);
+                  const isHovered = hoveredBar === idx;
+                  return (
+                    <div
+                      key={day.toISOString()}
+                      className="flex-1 flex flex-col items-center gap-1.5 group relative cursor-default"
+                      onMouseEnter={() => setHoveredBar(idx)}
+                      onMouseLeave={() => setHoveredBar(null)}
+                    >
+                      {isHovered && hasReading && (
+                        <div className="absolute -top-9 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] font-bold px-2 py-1 rounded-lg whitespace-nowrap z-10 shadow-lg">
+                          {Number(reading).toLocaleString()} {unit}
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+                        </div>
+                      )}
+                      <div className={`w-full h-10 rounded-lg flex items-center justify-center transition-all ${
+                        !hasReading
+                          ? "bg-slate-50 border border-slate-100"
+                          : met
+                            ? isToday ? "bg-emerald-400" : "bg-emerald-100"
+                            : isToday ? "bg-rose-400" : "bg-rose-100"
+                      }`}>
+                        {hasReading && (
+                          <span className={`text-[10px] font-black ${
+                            met
+                              ? isToday ? "text-white" : "text-emerald-700"
+                              : isToday ? "text-white" : "text-rose-600"
+                          }`}>
+                            {Number(reading).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                      <span className={`text-[9px] font-bold ${isToday ? "text-blue-500" : "text-slate-400"}`}>
+                        {isToday ? "Today" : fmtShortDay(day)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-3 mt-2.5">
+                <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                  <span className="w-3 h-3 rounded bg-emerald-200 inline-block" /> Met target
+                </span>
+                <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                  <span className="w-3 h-3 rounded bg-rose-200 inline-block" /> Missed target
+                </span>
+                <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                  <span className="w-3 h-3 rounded bg-slate-100 border border-slate-200 inline-block" /> No reading
+                </span>
+              </div>
+            </div>
+
+            {/* Context note */}
+            <div className="flex items-start gap-2 bg-slate-50 rounded-xl px-4 py-3 text-xs text-slate-500 border border-slate-100">
+              <span className="mt-0.5 shrink-0">⏱</span>
+              <p>
+                {done
+                  ? `Target reached${windowType === "none" ? " — this goal is permanently complete." : `. This ${windowType} window will reset soon.`}`
+                  : contextNote
+                }
+              </p>
+            </div>
+          </>
+        ) : (
+          /* ── Incremental goal UI (unchanged) ─────────────────────────── */
+          <>
+            {/* Big value + circular progress */}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Current progress</p>
+                <div className="flex items-end gap-1.5">
+                  <p className={`text-4xl font-black leading-none tracking-tight ${done ? "text-emerald-600" : "text-blue-600"}`}>
+                    {Number(current).toLocaleString()}
+                  </p>
+                  {unit && <p className="text-sm font-semibold text-slate-400 mb-1">{unit}</p>}
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  {direction === "at_most" ? "out of" : "of"} {Number(target).toLocaleString()} {unit} {direction === "at_most" ? "max" : "target"}
+                </p>
+              </div>
+              <div className="shrink-0 relative w-16 h-16">
+                <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f1f5f9" strokeWidth="3" />
+                  <circle cx="18" cy="18" r="15.9" fill="none"
+                    stroke={done ? "#22c55e" : "#3b82f6"} strokeWidth="3"
+                    strokeDasharray={`${pct} ${100 - pct}`} strokeLinecap="round" />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-xs font-black text-slate-700">{pct}%</span>
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            <div>
+              <div className="flex justify-between text-xs text-slate-400 mb-1.5">
+                <span>{direction === "at_most" ? `${pct}% of limit used` : `${pct}% complete`}</span>
+                <span>target: {Number(target).toLocaleString()} {unit}</span>
+              </div>
+              <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-700 ${done ? "bg-emerald-400" : "bg-blue-500"}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Last 7 days bars */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Last 7 Days</p>
+                {selectedDay != null && (
+                  <button onClick={() => setSelectedDay(null)} className="text-[10px] font-bold text-blue-500 hover:text-blue-700 transition-all">
+                    Clear ✕
+                  </button>
+                )}
+              </div>
+              <div className="flex items-end gap-1.5" style={{ height: "88px" }}>
+                {barData.map(({ day, total, isToday }, idx) => {
+                  const barPct    = barMax > 0 ? (total / barMax) * 100 : 0;
+                  const metTarget = direction === "at_most" ? total <= target : total >= target;
+                  const isHovered  = hoveredBar === idx;
+                  const isSelected = selectedDay === idx;
+                  const animPct    = mounted ? Math.max(barPct, total > 0 ? 6 : 0) : 0;
+                  return (
+                    <div
+                      key={day.toISOString()}
+                      className="flex-1 flex flex-col items-center gap-1 cursor-pointer group relative"
+                      onMouseEnter={() => setHoveredBar(idx)}
+                      onMouseLeave={() => setHoveredBar(null)}
+                      onClick={() => setSelectedDay(selectedDay === idx ? null : idx)}
+                    >
+                      {isHovered && (
+                        <div className="absolute -top-9 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] font-bold px-2 py-1 rounded-lg whitespace-nowrap z-10 shadow-lg">
+                          {total > 0 ? `${Number(total).toLocaleString()} ${unit}` : "No data"}
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+                        </div>
+                      )}
+                      <div className="w-full flex items-end justify-center" style={{ height: "60px" }}>
+                        <div
+                          className={`w-full rounded-t-lg ${isSelected ? "ring-2 ring-offset-1 ring-blue-400" : ""} ${
+                            isToday
+                              ? metTarget ? "bg-emerald-400" : "bg-blue-500"
+                              : metTarget
+                                ? isHovered ? "bg-emerald-300" : "bg-emerald-200"
+                                : isHovered ? "bg-slate-300" : "bg-slate-200"
+                          }`}
+                          style={{
+                            height: `${animPct}%`,
+                            transition: "height 0.5s cubic-bezier(0.34,1.56,0.64,1), background-color 0.15s",
+                          }}
+                        />
+                      </div>
+                      <span className={`text-[9px] font-bold ${isSelected ? "text-blue-600" : isToday ? "text-blue-500" : "text-slate-400"}`}>
+                        {isToday ? "Today" : fmtShortDay(day)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Context note */}
+            <div className="flex items-start gap-2 bg-slate-50 rounded-xl px-4 py-3 text-xs text-slate-500 border border-slate-100">
+              <span className="mt-0.5 shrink-0">⏱</span>
+              <p>{done ? `${completionMessage} It will open again in the next window.` : contextNote}</p>
+            </div>
+          </>
+        )}
 
         {/* Entries list */}
         {displayedEntries.length > 0 && (
@@ -914,7 +1243,9 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
   const done     = goal.is_completed;
   const isLogging = actionLoading === `log_${goalId}`;
   const isBooleanGoal = usesBooleanLogging(datatype);
-  const isNumericGoal = datatype === "number";
+  const isNumericGoal = isNumericDatatype(datatype);
+  const isIntegerGoal = usesIntegerLogging(datatype);
+  const completionMessage = getCompletedGoalMessage(goal);
 
   const inputVal = logInputs[goalId] || "";
   const setVal = (v) => {
@@ -958,6 +1289,12 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
             </span>
           </div>
 
+          {done && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {completionMessage}
+            </div>
+          )}
+
           {/* Input area */}
           <div className="space-y-2">
             {datatype === "text" && (
@@ -967,6 +1304,7 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
                 placeholder="Write your entry..."
                 value={inputVal}
                 onChange={(e) => setVal(e.target.value)}
+                disabled={done}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
               />
             )}
@@ -976,13 +1314,20 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
                   type="number"
                   autoFocus
                   min="0"
+                  step={isIntegerGoal ? "1" : "any"}
                   placeholder={progressMode === "absolute" ? `Current value${unit ? ` (${unit})` : ""}` : `Add amount${unit ? ` (${unit})` : ""}`}
                   value={inputVal}
                   onChange={(e) => setVal(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && submit()}
+                  disabled={done}
                   className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
                 />
               </div>
+            )}
+            {isIntegerGoal && (
+              <p className="text-xs text-slate-400">
+                Whole numbers only for this goal.
+              </p>
             )}
             {isBooleanGoal && (
               <p className="text-sm text-slate-500 text-center py-2">
@@ -1008,14 +1353,14 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
             <>
               <button
                 onClick={() => submit(false)}
-                disabled={isLogging}
+                disabled={isLogging || done}
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-700 bg-slate-200 hover:bg-slate-300 disabled:opacity-50 transition-all shadow-sm"
               >
                 {isLogging ? "Saving…" : "No"}
               </button>
               <button
                 onClick={() => submit(true)}
-                disabled={isLogging}
+                disabled={isLogging || done}
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm"
               >
                 {isLogging ? "Saving…" : "Yes"}
@@ -1024,7 +1369,7 @@ function LogEntryModal({ goal, logInputs, setLogInputs, logErrors, setLogErrors,
           ) : (
             <button
               onClick={() => submit(inputVal)}
-              disabled={isLogging || inputVal === ""}
+              disabled={isLogging || done || inputVal === ""}
               className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm"
             >
               {isLogging ? "Saving…" : progressMode === "absolute" ? "Set value" : "Log amount"}

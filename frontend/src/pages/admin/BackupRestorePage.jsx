@@ -1,65 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../../services/api";
 
-// ── Backup scope definitions ─────────────────────────────────────────────────
-// NOTE: The backend currently only supports "full" backups.
-// Selective scopes are shown in the UI for future implementation.
-// When the backend gains a `scope` query param on GET /admin_only/backup,
-// simply pass selectedScope to the API call.
-const BACKUP_SCOPES = [
-  {
-    id: "full",
-    label: "Full Backup",
-    description: "Complete database — all tables, all data",
-    badge: "Recommended",
-    badgeColor: "bg-emerald-100 text-emerald-700",
-    icon: "M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4",
-    tables: "All 32 tables",
-    includes: ["Users & profiles", "Forms & submissions", "Health data & goals", "Groups & membership", "Audit logs & notifications", "System configuration"],
-  },
-  {
-    id: "health_data",
-    label: "Health Data Only",
-    description: "Participant health records, submissions, and goals",
-    badge: "Compliance",
-    badgeColor: "bg-blue-100 text-blue-700",
-    icon: "M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z",
-    tables: "12 tables",
-    includes: ["Form submissions & answers", "Health data points", "Health goals & progress", "Data elements & mappings", "Goal templates", "Reports"],
-  },
-  {
-    id: "forms_surveys",
-    label: "Forms & Surveys",
-    description: "Survey templates, fields, options, and deployments",
-    badge: "Portable",
-    badgeColor: "bg-violet-100 text-violet-700",
-    icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
-    tables: "6 tables",
-    includes: ["Survey forms", "Form fields & options", "Field-element mappings", "Form deployments", "Data elements"],
-  },
-  {
-    id: "system_config",
-    label: "System Configuration",
-    description: "Users, roles, permissions, and group structure",
-    badge: "Lightweight",
-    badgeColor: "bg-amber-100 text-amber-700",
-    icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z",
-    tables: "7 tables",
-    includes: ["Users & profiles", "Roles & permissions", "Groups & membership"],
-  },
-  {
-    id: "audit_logs",
-    label: "Audit & Activity Logs",
-    description: "Security logs, notifications, and system events",
-    badge: "Archival",
-    badgeColor: "bg-slate-200 text-slate-600",
-    icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01",
-    tables: "3 tables",
-    includes: ["Audit log entries", "Notifications", "Reminders"],
-  },
-];
+const FULL_BACKUP_SCOPE = {
+  id: "full",
+  label: "Full Backup",
+  description: "Complete database — all tables, all data",
+  badge: "Recommended",
+  badgeColor: "bg-emerald-100 text-emerald-700",
+  icon: "M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4",
+  tables: "All 32 tables",
+  includes: ["Users & profiles", "Forms & submissions", "Health data & goals", "Groups & membership", "Audit logs & notifications", "System configuration"],
+};
 
-const SCOPE_LABELS = Object.fromEntries(BACKUP_SCOPES.map((s) => [s.id, s.label]));
+const SCOPE_LABELS = { full: FULL_BACKUP_SCOPE.label };
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 const SvgIcon = ({ d, className = "h-5 w-5" }) => (
@@ -198,7 +151,7 @@ function BackupDetail({ backup, onUploadLegacy }) {
         )}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         {[
           { label: "Snapshot name", value: backup.storage_path || backup.snapshot_name || "—" },
           { label: "Created at", value: backup.created_at ? formatDate(backup.created_at) : "—" },
@@ -546,7 +499,7 @@ function AutoBackupPanel({ showToast }) {
 
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Retention Policy</label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
               {[{ value: "3", label: "Keep last 3" }, { value: "5", label: "Keep last 5" }, { value: "10", label: "Keep last 10" }, { value: "0", label: "Keep all" }].map((opt) => (
                 <button key={opt.value} onClick={() => setRetention(opt.value)} className={`px-3 py-2.5 text-sm font-medium rounded-xl border transition-all ${selClass(opt.value, retention)}`}>{opt.label}</button>
               ))}
@@ -621,8 +574,6 @@ export default function BackupRestorePage() {
   const [backups, setBackups] = useState([]);
   const [backupsLoading, setBackupsLoading] = useState(true);
   const [backupLoading, setBackupLoading] = useState(false);
-  const [selectedScope, setSelectedScope] = useState("full");
-  const [scopeExpanded, setScopeExpanded] = useState(false);
   const [restoreFile, setRestoreFile] = useState(null);
   const [restorePreview, setRestorePreview] = useState(null);
   const [dragOver, setDragOver] = useState(false);
@@ -641,7 +592,7 @@ export default function BackupRestorePage() {
     setTimeout(() => setToast((t) => ({ ...t, show: false })), 5000);
   };
 
-  const currentScope = BACKUP_SCOPES.find((s) => s.id === selectedScope);
+  const currentScope = FULL_BACKUP_SCOPE;
 
   // ── Load backup history on mount ───────────────────────────────────────────
   const fetchBackups = useCallback(async () => {
@@ -808,7 +759,7 @@ export default function BackupRestorePage() {
           </div>
           <div className="flex-1 space-y-3">
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Backup Scope</label>
-            <button onClick={() => setScopeExpanded(!scopeExpanded)} className="w-full text-left bg-slate-50 border border-slate-200 rounded-xl p-3 hover:bg-slate-100 transition-colors flex items-center gap-3">
+            <div className="w-full text-left bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-white border border-slate-100 flex items-center justify-center shrink-0 text-slate-600"><SvgIcon d={currentScope.icon} className="h-4 w-4" /></div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -817,48 +768,18 @@ export default function BackupRestorePage() {
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5">{currentScope.tables} · {currentScope.description}</p>
               </div>
-              <IconChevron open={scopeExpanded} />
-            </button>
+            </div>
 
-            {scopeExpanded && (
-              <div className="space-y-2 animate-fade-in">
-                {BACKUP_SCOPES.map((scope) => {
-                  const active = selectedScope === scope.id;
-                  return (
-                    <button key={scope.id} onClick={() => { setSelectedScope(scope.id); setScopeExpanded(false); }}
-                      className={`w-full text-left rounded-xl p-3 border transition-all flex items-start gap-3 ${active ? "bg-blue-50 border-blue-300 ring-1 ring-blue-200" : "bg-white border-slate-100 hover:border-slate-200 hover:bg-slate-50"}`}>
-                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${active ? "bg-blue-100 text-blue-600" : "bg-slate-50 text-slate-400"}`}><SvgIcon d={scope.icon} className="h-4 w-4" /></div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-sm font-semibold ${active ? "text-blue-800" : "text-slate-700"}`}>{scope.label}</span>
-                          <span className={`text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${scope.badgeColor}`}>{scope.badge}</span>
-                          {scope.id !== "full" && <span className="text-[9px] text-slate-400 italic">coming soon</span>}
-                        </div>
-                        <p className="text-xs text-slate-400 mt-0.5">{scope.description}</p>
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {scope.includes.map((item) => <span key={item} className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{item}</span>)}
-                        </div>
-                      </div>
-                      {active && <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 mt-1"><IconCheck /></div>}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {!scopeExpanded && (
-              <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-sm">
-                {[["Format", "JSON"], ["Verification", "SHA-256 checksum"], ["Tables", currentScope.tables]].map(([k, v]) => (
-                  <div key={k} className="flex justify-between"><span className="text-slate-400">{k}</span><span className="font-medium text-slate-700">{v}</span></div>
-                ))}
-              </div>
-            )}
+            <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-sm">
+              {[["Format", "JSON"], ["Verification", "SHA-256 checksum"], ["Tables", currentScope.tables]].map(([k, v]) => (
+                <div key={k} className="flex justify-between"><span className="text-slate-400">{k}</span><span className="font-medium text-slate-700">{v}</span></div>
+              ))}
+            </div>
           </div>
 
-          <button onClick={handleCreateBackup} disabled={backupLoading || selectedScope !== "full"} className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+          <button onClick={handleCreateBackup} disabled={backupLoading} className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
             {backupLoading ? <><Spinner /> Creating snapshot…</> : <><IconDownload /> Create & Download Backup</>}
           </button>
-          {selectedScope !== "full" && <p className="text-xs text-center text-slate-400 mt-2">Selective scopes require a backend update. Only Full Backup is active.</p>}
         </div>
 
         {/* Restore */}

@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
+from app.db.base import Base  
+import app.db.models  
+
 load_dotenv()
 
 # Alembic Config object — gives access to alembic.ini values

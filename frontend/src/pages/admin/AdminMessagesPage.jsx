@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import NotificationsPanel from "../../components/NotificationsPanel";
 import { api } from "../../services/api";
+import { usePolling } from "../../hooks/usePolling";
 
 const STATUS_OPTIONS = [
   { value: "new", label: "New" },
@@ -46,27 +47,34 @@ export default function AdminMessagesPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [updatingId, setUpdatingId] = useState(null);
 
-  useEffect(() => {
-    let active = true;
-    async function load() {
-      try {
+  const loadFeedback = useCallback(async ({ background = false } = {}) => {
+    try {
+      if (!background) {
         setError("");
-        const rows = await api.adminListSystemFeedback();
-        if (!active) return;
-        setFeedback(Array.isArray(rows) ? rows : []);
-      } catch (err) {
-        if (!active) return;
+        setLoading(true);
+      }
+      const rows = await api.adminListSystemFeedback();
+      setFeedback(Array.isArray(rows) ? rows : []);
+    } catch (err) {
+      // On background refresh, leave the existing list in place — a transient
+      // error shouldn't wipe the admin's view. Only surface errors on the
+      // initial load.
+      if (!background) {
         setFeedback([]);
         setError(err.message || "Unable to load feedback right now.");
-      } finally {
-        if (active) setLoading(false);
+      } else {
+        console.error("Background feedback refresh failed:", err);
       }
+    } finally {
+      if (!background) setLoading(false);
     }
-    load();
-    return () => {
-      active = false;
-    };
   }, []);
+
+  // Auto-refresh every 30s. usePolling handles tab-visibility pausing,
+  // immediate refetch on tab focus, and refetch on new-notification events.
+  // Skips the loading spinner on background refreshes so the inbox doesn't
+  // flash every half minute.
+  usePolling(loadFeedback, 30_000);
 
   const filteredFeedback = useMemo(() => {
     if (statusFilter === "all") return feedback;

@@ -36,9 +36,9 @@ function Toggle({ checked, onChange, label, description, disabled }) {
 
 function InfoRow({ label, value }) {
   return (
-    <div className="flex justify-between items-center text-sm py-1">
-      <span className="text-slate-400">{label}</span>
-      <span className="font-medium text-slate-700">{value}</span>
+    <div className="flex justify-between items-center text-sm py-1 gap-3">
+      <span className="text-slate-400 shrink-0">{label}</span>
+      <span className="font-medium text-slate-700 text-right">{value}</span>
     </div>
   );
 }
@@ -46,15 +46,15 @@ function InfoRow({ label, value }) {
 function Section({ icon, title, description, badge, badgeColor, children, borderColor = "border-slate-100" }) {
   return (
     <div className={`bg-white rounded-2xl shadow-sm border ${borderColor} overflow-hidden`}>
-      <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 flex items-center justify-center">{icon}</div>
-          <div>
+      <div className="px-6 py-5 border-b border-slate-100 flex items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 flex items-center justify-center shrink-0">{icon}</div>
+          <div className="min-w-0">
             <h2 className="text-lg font-bold text-slate-800">{title}</h2>
             <p className="text-xs text-slate-400">{description}</p>
           </div>
         </div>
-        {badge && <span className={`text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${badgeColor || "bg-slate-100 text-slate-500"}`}>{badge}</span>}
+        {badge && <span className={`text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full shrink-0 ${badgeColor || "bg-slate-100 text-slate-500"}`}>{badge}</span>}
       </div>
       <div className="p-6 space-y-5">{children}</div>
     </div>
@@ -196,7 +196,7 @@ export default function SystemSettingsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {[
             { key: "api", label: "API Server",  desc: "FastAPI application server" },
-            { key: "db",  label: "Database",    desc: "PostgreSQL via Supabase" },
+            { key: "db",  label: "Database",    desc: "PostgreSQL database server" },
           ].map(svc => {
             const s = health[svc.key] ? hc(health[svc.key]) : { dot: "bg-slate-300", bg: "bg-slate-50", text: "text-slate-400", label: "Checking…" };
             return (
@@ -219,7 +219,7 @@ export default function SystemSettingsPage() {
           <InfoRow label="Application"   value="Health Data Bank v1.0.0" />
           <InfoRow label="Environment"   value="Development" />
           <InfoRow label="API Framework" value="FastAPI (Python 3.12)" />
-          <InfoRow label="Database"      value="PostgreSQL 15 (Supabase)" />
+          <InfoRow label="Database"      value="PostgreSQL 15" />
           <InfoRow label="Frontend"      value="React 18 + Vite 5" />
         </div>
 
@@ -317,7 +317,7 @@ export default function SystemSettingsPage() {
                   disabled={maintenanceSaving}
                   className="px-5 py-2 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors flex items-center gap-2 disabled:opacity-70"
                 >
-                  {maintenanceSaving ? <><Spinner /> Saving…</> : <><IconCheck /> Save</>}
+                {maintenanceSaving ? <><Spinner /> Saving…</> : <><IconCheck /> {maintenance.enabled ? (maintenanceOriginal?.enabled ? "Save Changes" : "Start Maintenance Mode") : "Disable Maintenance Mode"}</>}
                 </button>
               </div>
             )}

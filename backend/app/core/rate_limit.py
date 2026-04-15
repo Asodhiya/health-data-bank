@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.dependency import set_rls_context
 from app.db.models import AuditLog, Role, User, UserRole
 from app.db.session import get_db
 from app.services.audit_service import write_audit_log
@@ -128,7 +129,7 @@ def _format_rate_limit_detail(scope: str) -> str:
     messages = {
         "auth:login:identifier": "Too many login attempts for this account. Please try again later.",
         "auth:login:ip": "Too many login attempts from this network. Please try again later.",
-        "auth:forgot-password:email": "Too many password reset requests for this email. Please try again later.",
+        "auth:forgot-password:identifier": "Too many password reset requests for this account. Please try again later.",
         "auth:forgot-password:ip": "Too many password reset requests from this network. Please try again later.",
         "auth:register": "Too many registration attempts. Please try again later.",
         "auth:reset-password": "Too many password reset attempts. Please try again later.",
@@ -161,6 +162,7 @@ async def _count_recent_rate_limit_exceedances(
 
 
 async def _get_admin_user_ids(db: AsyncSession) -> list:
+    await set_rls_context(db, role="system")
     result = await db.execute(
         select(User.user_id)
         .join(UserRole, UserRole.user_id == User.user_id)

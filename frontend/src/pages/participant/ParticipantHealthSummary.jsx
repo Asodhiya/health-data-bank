@@ -1,9 +1,24 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { usePolling } from "../../hooks/usePolling";
 import { api } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { generatePDFReport, generateCSVReport } from "../../utils/healthReportExport";
+import { fmtShortDate } from "../../utils/dateFormatters";
+import GuideTooltip from "../../components/GuideTooltip";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+function isCaretakerMessageElement(item) {
+  const haystack = [item?.code, item?.label, item?.description]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+  if (!["caretaker", "care team", "careteam"].some((token) => haystack.includes(token))) {
+    return false;
+  }
+  return ["note", "notes", "message", "messages"].some((token) => haystack.includes(token));
+}
 
 
 
@@ -92,13 +107,22 @@ export default function ParticipantHealthSummary() {
   const [tab, setTab] = useState("overview");
   const [elements, setElements] = useState([]);
   const [timeseries, setTimeseries] = useState([]);
+  const [goals, setGoals] = useState([]);
   const [vsGroup, setVsGroup] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedElement, setSelectedElement] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [selectedExportElementIds, setSelectedExportElementIds] = useState([]);
 
-  const exportArgs = { user, elements, timeseries, goals: [], vsGroup };
+  const exportArgs = {
+    user,
+    elements,
+    timeseries,
+    goals,
+    vsGroup,
+    selectedElementIds: selectedExportElementIds,
+  };
 
   const handlePDF = () => {
     generatePDFReport(exportArgs);
@@ -111,34 +135,58 @@ export default function ParticipantHealthSummary() {
   };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        setLoading(true);
-        const [elementsData, vsGroupData, timeseriesData] = await Promise.all([
-          api.getMyElementsData(),
-          api.getMyVsGroupStats().catch(() => null),
-          api.getMyHealthTimeseries().catch(() => []),
-        ]);
-        setElements(elementsData || []);
-        setVsGroup(vsGroupData);
-        setTimeseries(timeseriesData || []);
-        if (vsGroupData?.elements?.length) {
-          setSelectedElement(vsGroupData.elements[0].element_id);
-        }
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+    setSelectedExportElementIds((prev) => {
+      const availableIds = (elements || []).map((element) => String(element.element_id));
+      if (availableIds.length === 0) return [];
+      const prevSet = new Set((prev || []).map(String));
+      const kept = availableIds.filter((id) => prevSet.has(id));
+      return kept.length > 0 ? kept : availableIds;
+    });
+  }, [elements]);
+
+  const load = useCallback(async ({ background = false } = {}) => {
+    try {
+      if (!background) setLoading(true);
+      const [elementsData, goalsData, vsGroupData, timeseriesData] = await Promise.all([
+        api.getMyElementsData(),
+        api.listParticipantGoals().catch(() => []),
+        api.getMyVsGroupStats().catch(() => null),
+        api.getMyHealthTimeseries().catch(() => []),
+      ]);
+      const filteredElements = (elementsData || []).filter((element) => !isCaretakerMessageElement(element));
+      const filteredTimeseries = (timeseriesData || []).filter((series) => !isCaretakerMessageElement(series));
+      const filteredVsGroup = vsGroupData
+        ? {
+            ...vsGroupData,
+            elements: Array.isArray(vsGroupData.elements)
+              ? vsGroupData.elements.filter((element) => !isCaretakerMessageElement(element))
+              : [],
+          }
+        : vsGroupData;
+
+      setElements(filteredElements);
+      setGoals(Array.isArray(goalsData) ? goalsData : []);
+      setVsGroup(filteredVsGroup);
+      setTimeseries(filteredTimeseries);
+      if (filteredVsGroup?.elements?.length) {
+        setSelectedElement(filteredVsGroup.elements[0].element_id);
       }
-    };
-    load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  usePolling(load, 60_000);
 
   const totalDataPoints = elements.reduce((s, e) => s + (e.count ?? 0), 0);
   const vsElements = vsGroup?.elements ?? [];
   const activeSelected = vsElements.find(
     (e) => e.element_id === selectedElement,
   );
+  const exportSelectionCount = selectedExportElementIds.length;
+  const allExportSelected = elements.length > 0 && exportSelectionCount === elements.length;
 
   const summaryLine = () => {
     const parts = [];
@@ -184,11 +232,66 @@ export default function ParticipantHealthSummary() {
                 {/* backdrop */}
                 <div className="fixed inset-0 z-10" onClick={() => setExportOpen(false)} />
                 <div className="absolute right-0 top-full mt-2 w-52 bg-white border border-slate-200 rounded-2xl shadow-xl z-20 overflow-hidden">
+                <div className="max-h-[26rem] overflow-y-auto">
                   <div className="px-4 py-3 border-b border-slate-100">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Download report</p>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Choose which metrics to include in your report.
+                    </p>
+                  </div>
+                  <div className="px-4 py-3 border-b border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedExportElementIds(
+                          allExportSelected ? [] : elements.map((element) => String(element.element_id)),
+                        )
+                      }
+                      className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700"
+                    >
+                      <span>{allExportSelected ? "Clear all metrics" : "Select all metrics"}</span>
+                      <span>{exportSelectionCount}/{elements.length}</span>
+                    </button>
+                    <div className="mt-3 max-h-40 space-y-2 overflow-y-auto pr-1">
+                      {elements.map((element) => {
+                        const checked = selectedExportElementIds.some(
+                          (id) => String(id) === String(element.element_id),
+                        );
+                        return (
+                          <label
+                            key={element.element_id}
+                            className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-100 px-3 py-2 hover:bg-slate-50"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setSelectedExportElementIds((prev) => {
+                                  const current = new Set((prev || []).map(String));
+                                  const id = String(element.element_id);
+                                  if (current.has(id)) current.delete(id);
+                                  else current.add(id);
+                                  return elements
+                                    .map((item) => String(item.element_id))
+                                    .filter((idValue) => current.has(idValue));
+                                });
+                              }}
+                              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-700">{element.label}</p>
+                              <p className="text-[10px] text-slate-400">
+                                {element.unit || "No unit"} · {element.count ?? 0} reading{element.count === 1 ? "" : "s"}
+                              </p>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                   <button
                     onClick={handlePDF}
+                    disabled={exportSelectionCount === 0}
                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 transition-colors text-left"
                   >
                     <span className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 text-base">📄</span>
@@ -199,7 +302,8 @@ export default function ParticipantHealthSummary() {
                   </button>
                   <button
                     onClick={handleCSV}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 transition-colors text-left border-t border-slate-100"
+                    disabled={exportSelectionCount === 0}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 transition-colors text-left border-t border-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <span className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0 text-base">📊</span>
                     <div>
@@ -207,6 +311,7 @@ export default function ParticipantHealthSummary() {
                       <p className="text-[10px] text-slate-400">Raw data spreadsheet</p>
                     </div>
                   </button>
+                </div>
                 </div>
               </>
             )}
@@ -222,22 +327,26 @@ export default function ParticipantHealthSummary() {
 
       {/* ── Tab bar ── */}
       <div className="flex gap-2">
-        <TabButton
-          id="overview"
-          activeTab={tab}
-          onClick={setTab}
-          icon={<IcoOverview />}
-          label="Overview"
-          badge={elements.length > 0 ? elements.length : null}
-        />
-        <TabButton
-          id="compare"
-          activeTab={tab}
-          onClick={setTab}
-          icon={<IcoCompare />}
-          label="Compare"
-          badge={null}
-        />
+        <GuideTooltip tip="See all your tracked health metrics as individual charts — one graph per metric over time." position="bottom">
+          <TabButton
+            id="overview"
+            activeTab={tab}
+            onClick={setTab}
+            icon={<IcoOverview />}
+            label="Overview"
+            badge={elements.length > 0 ? elements.length : null}
+          />
+        </GuideTooltip>
+        <GuideTooltip tip="Pick two health metrics and see them side by side on the same chart to spot patterns or relationships." position="bottom">
+          <TabButton
+            id="compare"
+            activeTab={tab}
+            onClick={setTab}
+            icon={<IcoCompare />}
+            label="Compare"
+            badge={null}
+          />
+        </GuideTooltip>
       </div>
 
       {/* ── Tab panels ── */}
@@ -324,8 +433,6 @@ function LineChart({ points, color = "#3b82f6", unit = "" }) {
     Math.round((i / (xCount - 1)) * (filtered.length - 1))
   );
 
-  const fmtDate = (d) =>
-    d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const fmtVal = (v) =>
     `${Number(v).toFixed(range < 10 ? 1 : 0)}${unit ? " " + unit : ""}`;
 
@@ -385,40 +492,38 @@ function LineChart({ points, color = "#3b82f6", unit = "" }) {
         <path d={linePath} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
 
         {/* Max marker */}
-        {maxIdx !== minIdx && (
-          <>
-            <circle cx={pts[maxIdx].x} cy={pts[maxIdx].y} r="4.5" fill="white" stroke={color} strokeWidth="2" />
-            <text
-              x={pts[maxIdx].x}
-              y={pts[maxIdx].y - 9}
-              textAnchor="middle"
-              fontSize="9"
-              fill={color}
-              fontWeight="700"
-              fontFamily="system-ui,sans-serif"
-            >
-              ↑ {fmtVal(vals[maxIdx])}
-            </text>
-          </>
-        )}
+        {maxIdx !== minIdx && (() => {
+          const mx = pts[maxIdx].x;
+          const my = pts[maxIdx].y;
+          // If too close to top, show label below; otherwise above
+          const labelY = my < PT + 16 ? my + 17 : my - 9;
+          const anchor = mx < PL + 30 ? "start" : mx > W - PR - 30 ? "end" : "middle";
+          return (
+            <>
+              <circle cx={mx} cy={my} r="4.5" fill="white" stroke={color} strokeWidth="2" />
+              <text x={mx} y={labelY} textAnchor={anchor} fontSize="9" fill={color} fontWeight="700" fontFamily="system-ui,sans-serif">
+                ↑ {fmtVal(vals[maxIdx])}
+              </text>
+            </>
+          );
+        })()}
 
         {/* Min marker */}
-        {maxIdx !== minIdx && (
-          <>
-            <circle cx={pts[minIdx].x} cy={pts[minIdx].y} r="4.5" fill="white" stroke="#f59e0b" strokeWidth="2" />
-            <text
-              x={pts[minIdx].x}
-              y={pts[minIdx].y + 17}
-              textAnchor="middle"
-              fontSize="9"
-              fill="#f59e0b"
-              fontWeight="700"
-              fontFamily="system-ui,sans-serif"
-            >
-              ↓ {fmtVal(vals[minIdx])}
-            </text>
-          </>
-        )}
+        {maxIdx !== minIdx && (() => {
+          const mx = pts[minIdx].x;
+          const my = pts[minIdx].y;
+          // If too close to bottom (would overlap x-axis), show label above; otherwise below
+          const labelY = my + 17 > PT + CH - 2 ? my - 9 : my + 17;
+          const anchor = mx < PL + 30 ? "start" : mx > W - PR - 30 ? "end" : "middle";
+          return (
+            <>
+              <circle cx={mx} cy={my} r="4.5" fill="white" stroke="#f59e0b" strokeWidth="2" />
+              <text x={mx} y={labelY} textAnchor={anchor} fontSize="9" fill="#f59e0b" fontWeight="700" fontFamily="system-ui,sans-serif">
+                ↓ {fmtVal(vals[minIdx])}
+              </text>
+            </>
+          );
+        })()}
 
         {/* Latest dot */}
         <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="5" fill={color} />
@@ -436,7 +541,7 @@ function LineChart({ points, color = "#3b82f6", unit = "" }) {
             fill="#475569"
             fontFamily="system-ui,sans-serif"
           >
-            {fmtDate(pts[i].date)}
+            {fmtShortDate(pts[i].date)}
           </text>
         ))}
 
@@ -467,11 +572,52 @@ function LineChart({ points, color = "#3b82f6", unit = "" }) {
               textAnchor="middle" fontSize="8.5" fill="#94a3b8"
               fontFamily="system-ui,sans-serif"
             >
-              {fmtDate(hovered.date)}
+              {fmtShortDate(hovered.date)}
             </text>
           </>
         )}
       </svg>
+    </div>
+  );
+}
+
+// ── CategoryChart ──────────────────────────────────────────────────────────
+
+function CategoryChart({ points, color = "#3b82f6" }) {
+  const textPoints = (points || []).filter((p) => p.value_text != null && p.observed_at);
+  if (textPoints.length === 0) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <span className="text-xs text-slate-300">Not enough data to display</span>
+      </div>
+    );
+  }
+
+  // Count frequency of each label
+  const freq = {};
+  textPoints.forEach((p) => {
+    freq[p.value_text] = (freq[p.value_text] || 0) + 1;
+  });
+  const entries = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+  const maxCount = entries[0][1];
+
+  return (
+    <div className="w-full h-full flex flex-col justify-center gap-2 py-1 overflow-y-auto">
+      {entries.map(([label, count]) => {
+        const pct = (count / maxCount) * 100;
+        return (
+          <div key={label} className="flex items-center gap-2 min-w-0">
+            <span className="text-[11px] font-semibold text-slate-500 w-24 shrink-0 truncate text-right">{label}</span>
+            <div className="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{ width: `${pct}%`, backgroundColor: color + "cc" }}
+              />
+            </div>
+            <span className="text-[11px] font-bold text-slate-600 w-6 shrink-0">{count}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -551,8 +697,14 @@ function OverviewTab({ elements, timeseries, loading }) {
   const allPoints = tsMap[activeEl.element_id] || [];
   const points = filterPointsByDays(allPoints, rangeDays);
   const vals = points.map((p) => p.value_number).filter((v) => v != null && Number.isFinite(v));
+  const textPoints = points.filter((p) => p.value_text != null && p.observed_at);
+  const isCategorical = vals.length === 0 && textPoints.length > 0;
+  const readingCount = isCategorical ? textPoints.length : vals.length;
 
   const latest = vals.length ? vals[vals.length - 1] : null;
+  const latestText = isCategorical
+    ? [...textPoints].sort((a, b) => new Date(b.observed_at) - new Date(a.observed_at))[0]?.value_text
+    : null;
   const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : activeEl.avg;
   const min = vals.length ? Math.min(...vals) : activeEl.min;
   const max = vals.length ? Math.max(...vals) : activeEl.max;
@@ -630,10 +782,12 @@ function OverviewTab({ elements, timeseries, loading }) {
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">{activeEl.label}</p>
               <div className="flex items-end gap-2.5">
                 <p className="text-4xl font-black text-slate-800 leading-none tracking-tight">
-                  {latest != null ? Number(latest).toFixed(1) : avg != null ? Number(avg).toFixed(1) : "—"}
+                  {isCategorical
+                    ? (latestText || "—")
+                    : latest != null ? Number(latest).toFixed(1) : avg != null ? Number(avg).toFixed(1) : "—"}
                 </p>
-                <p className="text-sm font-semibold text-slate-400 mb-0.5">{activeEl.unit || ""}</p>
-                {pct != null && (
+                {!isCategorical && <p className="text-sm font-semibold text-slate-400 mb-0.5">{activeEl.unit || ""}</p>}
+                {!isCategorical && pct != null && (
                   <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full mb-0.5 ${trendBg}`}>
                     {trendLabel}
                   </span>
@@ -655,30 +809,34 @@ function OverviewTab({ elements, timeseries, loading }) {
 
           {/* Chart */}
           <div className="w-full h-52">
-            <LineChart points={points} color={trendColor} unit={activeEl.unit || ""} />
+            {isCategorical
+              ? <CategoryChart points={points} color={trendColor} />
+              : <LineChart points={points} color={trendColor} unit={activeEl.unit || ""} />}
           </div>
 
           {/* Stats row */}
-          <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-4 gap-2">
-            {[
-              { label: "Latest", val: latest, color: "text-blue-600" },
-              { label: "Average", val: avg, color: "text-slate-700" },
-              { label: "Low", val: min, color: "text-amber-500" },
-              { label: "High", val: max, color: "text-emerald-600" },
-            ].map(({ label, val, color }) => (
-              <div key={label} className="flex flex-col items-center gap-0.5 py-2.5 rounded-xl bg-slate-50 border border-slate-100 shadow-sm">
-                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">{label}</span>
-                <span className={`text-sm font-black ${color}`}>
-                  {val != null ? Number(val).toFixed(1) : "—"}
-                </span>
-                {activeEl.unit && <span className="text-[9px] text-slate-400">{activeEl.unit}</span>}
-              </div>
-            ))}
-          </div>
+          {!isCategorical && (
+            <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-4 gap-2">
+              {[
+                { label: "Latest", val: latest, color: "text-blue-600" },
+                { label: "Average", val: avg, color: "text-slate-700" },
+                { label: "Low", val: min, color: "text-amber-500" },
+                { label: "High", val: max, color: "text-emerald-600" },
+              ].map(({ label, val, color }) => (
+                <div key={label} className="flex flex-col items-center gap-0.5 py-2.5 rounded-xl bg-slate-50 border border-slate-100 shadow-sm">
+                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">{label}</span>
+                  <span className={`text-sm font-black ${color}`}>
+                    {val != null ? Number(val).toFixed(1) : "—"}
+                  </span>
+                  {activeEl.unit && <span className="text-[9px] text-slate-400">{activeEl.unit}</span>}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Entry count */}
           <p className="text-[11px] text-slate-400 text-center mt-3">
-            {vals.length} {vals.length === 1 ? "reading" : "readings"} in the selected period
+            {readingCount} {readingCount === 1 ? "reading" : "readings"} in the selected period
           </p>
         </div>
       </div>
@@ -883,7 +1041,6 @@ function ComparisonVisual({ el, tsPoints }) {
     return { color: "text-amber-600", label: "Below average", badge: "bg-amber-100 text-amber-600" };
   })();
 
-  const fmtDate = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const fmtVal = (v) => `${Number(v).toFixed(1)}${unit ? " " + unit : ""}`;
 
   // Categorical (non-numeric) fallback
@@ -1045,7 +1202,7 @@ function ComparisonVisual({ el, tsPoints }) {
             fontSize="9" fontWeight="600" fill="#475569"
             fontFamily="system-ui,sans-serif"
           >
-            {fmtDate(pts2[i].date)}
+            {fmtShortDate(pts2[i].date)}
           </text>
         ))}
 
@@ -1059,7 +1216,7 @@ function ComparisonVisual({ el, tsPoints }) {
               {fmtVal(hovered.val)}
             </text>
             <text x={tipX(hovered.x)} y={hovered.y - 15} textAnchor="middle" fontSize="8.5" fill="#94a3b8" fontFamily="system-ui,sans-serif">
-              {fmtDate(hovered.date)}
+              {fmtShortDate(hovered.date)}
             </text>
           </>
         )}

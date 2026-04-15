@@ -45,20 +45,25 @@ export default function AdminInsightsPage() {
       ] = results;
 
       const failed = [];
+      const logFailure = (label, res) => {
+        console.error(`[AdminInsights] ${label} fetch failed:`, res.reason);
+        failed.push(label);
+      };
+
       if (systemStatsRes.status === "fulfilled") setSysStats(systemStatsRes.value ?? null);
-      else { setSysStats(null); failed.push("system stats"); }
+      else { setSysStats(null); logFailure("system stats", systemStatsRes); }
 
       if (groupsRes.status === "fulfilled") setGroups(Array.isArray(groupsRes.value) ? groupsRes.value : []);
-      else { setGroups([]); failed.push("groups"); }
+      else { setGroups([]); logFailure("groups", groupsRes); }
 
       if (caretakersRes.status === "fulfilled") setCaretakers(Array.isArray(caretakersRes.value) ? caretakersRes.value : []);
-      else { setCaretakers([]); failed.push("caretakers"); }
+      else { setCaretakers([]); logFailure("caretakers", caretakersRes); }
 
       if (onboardingRes.status === "fulfilled") setOnboardingStats(onboardingRes.value ?? null);
-      else { setOnboardingStats(null); failed.push("onboarding"); }
+      else { setOnboardingStats(null); logFailure("onboarding", onboardingRes); }
 
       if (surveyRes.status === "fulfilled") setSurveyStats(surveyRes.value ?? null);
-      else { setSurveyStats(null); failed.push("surveys"); }
+      else { setSurveyStats(null); logFailure("surveys", surveyRes); }
 
       if (roleGroupRes.status === "fulfilled") {
         setRoleSummary(Array.isArray(roleGroupRes.value?.role_summary) ? roleGroupRes.value.role_summary : []);
@@ -66,7 +71,7 @@ export default function AdminInsightsPage() {
       } else {
         setRoleSummary([]);
         setParticipantCountsByGroup({});
-        failed.push("role health");
+        logFailure("role health", roleGroupRes);
       }
 
       setError(failed.length ? `Could not fully load insights: ${failed.join(", ")}.` : null);
@@ -120,12 +125,12 @@ export default function AdminInsightsPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-end justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">System Insights</h1>
           <p className="text-sm text-slate-500 mt-1">Operational analytics and group-level health.</p>
         </div>
-        <button onClick={() => navigate("/admin")} className="px-3 py-2 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">Back to Dashboard</button>
+        <button onClick={() => navigate("/admin")} className="self-start sm:self-auto px-3 py-2 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">Back to Dashboard</button>
       </div>
 
       {error && <div className="bg-rose-50 text-rose-700 border border-rose-100 rounded-xl px-4 py-3 text-sm">{error}</div>}
@@ -153,7 +158,7 @@ export default function AdminInsightsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6"><div className="flex items-center justify-between mb-4"><h2 className="text-lg font-bold text-slate-800">Onboarding Funnel</h2><span className="text-xs text-slate-400">Participants</span></div>{!onboardingStats ? (<p className="text-sm text-slate-400">{loading ? "Loading onboarding stats…" : "No onboarding data available."}</p>) : (<div className="space-y-3">{[["PENDING", onboardingStats.pending], ["BACKGROUND_READ", onboardingStats.background_read], ["CONSENT_GIVEN", onboardingStats.consent_given], ["INTAKE_SUBMITTED", onboardingStats.intake_submitted], ["COMPLETE", onboardingStats.complete]].map(([label, value]) => { const total = onboardingStats.total_participants || 1; const pct = Math.min(100, Math.round((value / total) * 100)); return (<div key={label}><div className="flex justify-between text-xs text-slate-500 mb-1"><span className="font-semibold">{label}</span><span>{value}</span></div><div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-2 bg-blue-500 rounded-full" style={{ width: `${pct}%` }} /></div></div>); })}</div>)}</div>
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6"><div className="flex items-center justify-between mb-4"><h2 className="text-lg font-bold text-slate-800">Survey Completion</h2><span className="text-xs text-slate-400">Daily participant fill-rate</span></div>{!surveyStats ? (<p className="text-sm text-slate-400">{loading ? "Loading survey stats…" : "No survey data available."}</p>) : (<><div className="flex items-end justify-between mb-4"><div><p className="text-3xl font-extrabold text-indigo-600">{surveyStats.overall?.daily_completion_rate ?? 0}%</p><p className="text-sm text-slate-500">Today's completion rate</p></div><p className="text-xs text-slate-400">{surveyStats.overall?.completed_today ?? 0} / {surveyStats.overall?.expected_today ?? 0} expected submissions</p></div><p className="text-xs text-slate-500 mb-3">Fill frequency: <span className="font-semibold text-slate-700">{surveyStats.overall?.avg_daily_submissions_7d ?? 0}</span> avg submissions/day (last 7 days)</p><div className="space-y-2 max-h-40 overflow-auto pr-1">{(surveyStats.per_group || []).slice(0, 8).map((g) => (<div key={g.group_id} className="flex items-center justify-between text-sm"><span className="text-slate-600 truncate pr-2">{g.group_name}<span className="text-xs text-slate-400 ml-2">({g.completed_today}/{g.expected_today})</span></span><span className="font-semibold text-slate-800">{g.daily_completion_rate}%</span></div>))}{(surveyStats.per_group || []).length === 0 && <p className="text-sm text-slate-400">No active group deployments.</p>}</div></>)}</div>
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6"><div className="flex items-center justify-between mb-4"><h2 className="text-lg font-bold text-slate-800">Survey Completion</h2><span className="text-xs text-slate-400">Daily participant fill-rate</span></div>{!surveyStats ? (<p className="text-sm text-slate-400">{loading ? "Loading survey stats…" : "No survey data available."}</p>) : (<><div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-4"><div><p className="text-3xl font-extrabold text-indigo-600">{surveyStats.overall?.daily_completion_rate ?? 0}%</p><p className="text-sm text-slate-500">Today's completion rate</p></div><p className="text-xs text-slate-400">{surveyStats.overall?.completed_today ?? 0} / {surveyStats.overall?.expected_today ?? 0} expected submissions</p></div><p className="text-xs text-slate-500 mb-3">Fill frequency: <span className="font-semibold text-slate-700">{surveyStats.overall?.avg_daily_submissions_7d ?? 0}</span> avg submissions/day (last 7 days)</p><div className="space-y-2 max-h-40 overflow-auto pr-1">{(surveyStats.per_group || []).slice(0, 8).map((g) => (<div key={g.group_id} className="flex items-center justify-between text-sm"><span className="text-slate-600 truncate pr-2">{g.group_name}<span className="text-xs text-slate-400 ml-2">({g.completed_today}/{g.expected_today})</span></span><span className="font-semibold text-slate-800">{g.daily_completion_rate}%</span></div>))}{(surveyStats.per_group || []).length === 0 && <p className="text-sm text-slate-400">No active group deployments.</p>}</div></>)}</div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">

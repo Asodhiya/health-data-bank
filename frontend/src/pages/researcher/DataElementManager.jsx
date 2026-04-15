@@ -1,27 +1,14 @@
 import { useState, useEffect, useMemo } from "react";
 import { api } from "../../services/api";
+import { getApiErrorMessage } from "../../utils/apiErrors";
+import { normalizeType, supportsUnit, typeLabel } from "../../utils/elementTypes";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const toTitleCase = (str = "") =>
   str.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 
-const normalizeType = (dt = "") => {
-  const d = dt.toLowerCase();
-  if (d === "boolean" || d === "bool") return "boolean";
-  if (d === "text" || d === "string") return "text";
-  if (d === "date") return "date";
-  return "number";
-};
-
-const supportsUnit = (dt = "") => normalizeType(dt) === "number";
-
-const typeLabel = (dt) => {
-  const t = normalizeType(dt);
-  return t.charAt(0).toUpperCase() + t.slice(1);
-};
-
-const TYPE_FILTERS = ["All", "Number", "Boolean", "Text", "Date"];
+const TYPE_FILTERS = ["All", "Integer", "Float", "Boolean", "Text", "Date"];
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -29,6 +16,7 @@ const DataElementManager = () => {
   const [elements, setElements]     = useState([]);
   const [loading, setLoading]       = useState(true);
   const [search, setSearch]         = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [typeFilter, setTypeFilter] = useState("All");
   const [mappingFilter, setMappingFilter] = useState("All"); // "All" | "Mapped" | "Unmapped"
   const [sort, setSort] = useState("newest"); // "newest" | "alpha"
@@ -39,8 +27,11 @@ const DataElementManager = () => {
 
   // Create modal
   const [showCreate, setShowCreate] = useState(false);
-  const [newEl, setNewEl]           = useState({ code: "", name: "", datatype: "number", unit: "", description: "" });
+  const [newEl, setNewEl]           = useState({ code: "", name: "", datatype: "float", unit: "", description: "" });
   const [creating, setCreating]     = useState(false);
+  const [showEdit, setShowEdit]     = useState(false);
+  const [editEl, setEditEl]         = useState({ id: "", name: "", datatype: "integer", unit: "", description: "" });
+  const [updating, setUpdating]     = useState(false);
 
   // Detail drawer
   const [selectedEl, setSelectedEl] = useState(null);
@@ -53,17 +44,22 @@ const DataElementManager = () => {
   const [loadError, setLoadError] = useState(false);
 
   // Mapping load error
-  const [mappingError, setMappingError] = useState(false);
+  const [mappingError, setMappingError] = useState("");
 
   // Pagination
   const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const PAGE_SIZE = 15;
 
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState(null); // element object to delete
   const [deleting, setDeleting]         = useState(false);
+  const [restoringId, setRestoringId] = useState(null);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { buildSurveyCounts(); }, []);
+  useEffect(() => { setPage(1); }, [search, showDeleted, typeFilter, mappingFilter, sort]);
+  useEffect(() => { loadData(); }, [page, search, showDeleted, typeFilter, mappingFilter, sort]);
 
   // ── Data loading ────────────────────────────────────────────────────────────
 
@@ -71,12 +67,24 @@ const DataElementManager = () => {
     setLoading(true);
     setLoadError(false);
     try {
-      const els = await api.listElements();
-      setElements(els || []);
-      await buildSurveyCounts();
+      const response = await api.listElementsPaged({
+        deleted: showDeleted,
+        page,
+        pageSize: PAGE_SIZE,
+        search,
+        typeFilter,
+        mappingFilter,
+        sort,
+      });
+      setElements(response?.items || []);
+      setTotalCount(Number(response?.total_count || 0));
+      setTotalPages(Math.max(1, Number(response?.total_pages || 1)));
     } catch (err) {
       console.error("Load error:", err);
       setLoadError(true);
+      setElements([]);
+      setTotalCount(0);
+      setTotalPages(1);
     } finally {
       setLoading(false);
     }
@@ -85,6 +93,7 @@ const DataElementManager = () => {
   const buildSurveyCounts = async () => {
     setElementLinksMap({});
     setGoalLinksMap({});
+    setMappingError("");
     try {
       const [mappingsResult, templatesResult] = await Promise.allSettled([
         api.getAllMappings(),
@@ -119,45 +128,29 @@ const DataElementManager = () => {
         setGoalLinksMap(gLinksMap);
       }
 
-      const hadError = mappingsResult.status === "rejected" || templatesResult.status === "rejected";
-      setMappingError(hadError);
+      const failedSources = [];
+      if (mappingsResult.status === "rejected") failedSources.push("survey mappings");
+      if (templatesResult.status === "rejected") failedSources.push("goal template links");
+
+      setMappingError(
+        failedSources.length
+          ? `Could not load ${failedSources.join(" and ")}. Mapped/Unmapped counts may be inaccurate.`
+          : ""
+      );
     } catch (err) {
       console.error("Survey count error:", err);
-      setMappingError(true);
+      setMappingError("Could not load data element linkage counts. Mapped/Unmapped counts may be inaccurate.");
     }
   };
 
   // ── Filtered list ───────────────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
-    const q = search.toLowerCase();
     return elements.filter((el) => {
       const id = el.element_id || el.id;
-      const isMapped = (surveyCountMap[id] || 0) > 0 || (goalCountMap[id] || 0) > 0;
-      const matchSearch =
-        !q ||
-        (el.label || "").toLowerCase().includes(q) ||
-        (el.code || "").toLowerCase().includes(q);
-      const matchType =
-        typeFilter === "All" ||
-        normalizeType(el.datatype) === typeFilter.toLowerCase();
-      const matchMapping =
-        mappingFilter === "All" ||
-        (mappingFilter === "Mapped" && isMapped) ||
-        (mappingFilter === "Unmapped" && !isMapped);
-      return matchSearch && matchType && matchMapping;
-    }).sort((a, b) => {
-      if (sort === "alpha") return (a.label || a.name || "").localeCompare(b.label || b.name || "");
-      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return tb - ta;
+      return el && id;
     });
-  }, [elements, search, typeFilter, mappingFilter, surveyCountMap, goalCountMap, sort]);
-
-  useEffect(() => { setPage(1); }, [search, typeFilter, mappingFilter, sort, goalCountMap]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  }, [elements]);
 
   // ── Create ──────────────────────────────────────────────────────────────────
 
@@ -172,11 +165,12 @@ const DataElementManager = () => {
         unit: supportsUnit(newEl.datatype) ? newEl.unit.trim() || null : null,
         description: newEl.description.trim() || null,
       });
-      setElements((p) => [...p, res]);
-      setNewEl({ code: "", name: "", datatype: "number", unit: "", description: "" });
+      setNewEl({ code: "", name: "", datatype: "float", unit: "", description: "" });
       setShowCreate(false);
+      setPage(1);
+      await loadData();
     } catch (err) {
-      alert(err.message || "Code already exists.");
+      alert(getApiErrorMessage(err, "Code already exists."));
     } finally {
       setCreating(false);
     }
@@ -192,14 +186,68 @@ const DataElementManager = () => {
     setDeleting(true);
     try {
       await api.deleteElement(id);
-      setElements((p) => p.filter((el) => (el.element_id || el.id) !== id));
       if (selectedEl && (selectedEl.element_id || selectedEl.id) === id)
         setSelectedEl(null);
       setDeleteTarget(null);
+      await loadData();
     } catch (err) {
-      alert("Delete failed: " + err.message);
+      alert(`Delete failed: ${getApiErrorMessage(err, "Unknown error")}`);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleRestore = async (el) => {
+    const id = el.element_id || el.id;
+    setRestoringId(id);
+    try {
+      const restored = await api.restoreElement(id);
+      if (selectedEl && (selectedEl.element_id || selectedEl.id) === id) {
+        setSelectedEl(restored);
+      }
+      await loadData();
+    } catch (err) {
+      alert(`Restore failed: ${getApiErrorMessage(err, "Unknown error")}`);
+    } finally {
+      setRestoringId(null);
+    }
+  };
+
+  const openEdit = (el) => {
+    setEditEl({
+      id: el.element_id || el.id,
+      name: el.label || el.name || "",
+      datatype: normalizeType(el.datatype),
+      unit: el.unit || "",
+      description: el.description || "",
+    });
+    setShowEdit(true);
+  };
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    if (!editEl.id) return;
+    setUpdating(true);
+    try {
+      const payload = {
+        label: editEl.name.trim(),
+        datatype: editEl.datatype,
+        unit: supportsUnit(editEl.datatype) ? editEl.unit.trim() || null : null,
+        description: editEl.description.trim() || null,
+      };
+      const updated = await api.updateElement(editEl.id, payload);
+      setElements((prev) => prev.map((item) => (
+        (item.element_id || item.id) === editEl.id ? updated : item
+      )));
+      if (selectedEl && (selectedEl.element_id || selectedEl.id) === editEl.id) {
+        setSelectedEl(updated);
+      }
+      setShowEdit(false);
+      await loadData();
+    } catch (err) {
+      alert(getApiErrorMessage(err, "Failed to update data element."));
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -268,15 +316,15 @@ const DataElementManager = () => {
       )}
 
       {/* ── Page header ── */}
-      <div className="px-6 pt-8 pb-2">
-        <div className="flex items-start justify-between mb-4">
+      <div className="px-4 pt-6 pb-2 sm:px-6 sm:pt-8">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Data Elements</h1>
             <p className="text-sm text-slate-500 mt-0.5">
               Browse and manage your standardized metrics library
             </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:self-start">
             <button
               onClick={() => setShowHelp(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-300 transition"
@@ -328,41 +376,65 @@ const DataElementManager = () => {
             <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             </svg>
-            <span>Could not load survey mappings. Mapped/Unmapped counts may be inaccurate.</span>
+            <span>{mappingError}</span>
             <button onClick={buildSurveyCounts} className="ml-auto text-xs font-semibold text-amber-700 hover:underline shrink-0">Retry</button>
           </div>
         )}
 
         {/* Stats row */}
         {(() => {
-          const total = elements.length;
-          const mapped = elements.filter((el) => (surveyCountMap[el.element_id || el.id] || 0) > 0 || (goalCountMap[el.element_id || el.id] || 0) > 0).length;
-          const unmapped = total - mapped;
+          const pageTotal = filtered.length;
+          const mapped = filtered.filter((el) => (surveyCountMap[el.element_id || el.id] || 0) > 0 || (goalCountMap[el.element_id || el.id] || 0) > 0).length;
+          const unmapped = pageTotal - mapped;
           return (
-            <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <div className="bg-slate-50 rounded-xl px-4 py-3">
-                <p className="text-xs text-slate-400 font-medium mb-0.5">Total elements</p>
-                <p className="text-2xl font-bold text-slate-900">{total}</p>
+                <p className="text-xs text-slate-400 font-medium mb-0.5">{showDeleted ? "Deleted total" : "Active total"}</p>
+                <p className="text-2xl font-bold text-slate-900">{totalCount}</p>
               </div>
               <div className="bg-slate-50 rounded-xl px-4 py-3">
-                <p className="text-xs text-slate-400 font-medium mb-0.5">Mapped</p>
+                <p className="text-xs text-slate-400 font-medium mb-0.5">Mapped on this page</p>
                 <p className="text-2xl font-bold text-slate-900">{mapped}</p>
               </div>
               <div className="bg-slate-100 rounded-xl px-4 py-3">
-                <p className="text-xs text-slate-400 font-medium mb-0.5">Unmapped</p>
+                <p className="text-xs text-slate-400 font-medium mb-0.5">Unmapped on this page</p>
                 <p className="text-2xl font-bold text-slate-500">{unmapped}</p>
+              </div>
+              <div className="bg-amber-50 rounded-xl px-4 py-3">
+                <p className="text-xs text-amber-700 font-medium mb-0.5">Shown on this page</p>
+                <p className="text-2xl font-bold text-amber-700">{pageTotal}</p>
               </div>
             </div>
           );
         })()}
 
-        {/* Search */}
-        <input
-          placeholder="Search by code or name..."
-          className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-slate-400 bg-white mb-4"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <div className="mb-4 flex flex-col gap-3">
+          <div className="flex items-center gap-2 rounded-xl bg-slate-100 p-1 w-fit">
+            <button
+              onClick={() => { setShowDeleted(false); setSelectedEl(null); }}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+                !showDeleted ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-white"
+              }`}
+            >
+              Active
+            </button>
+            <button
+              onClick={() => { setShowDeleted(true); setSelectedEl(null); }}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+                showDeleted ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-white"
+              }`}
+            >
+              Deleted
+            </button>
+          </div>
+
+          <input
+            placeholder={showDeleted ? "Search deleted elements..." : "Search by code or name..."}
+            className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-slate-400 bg-white"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
 
         {/* Filters */}
         <div className="flex items-center gap-2 mb-3 border border-slate-200 rounded-full px-3 py-2 w-fit">
@@ -407,7 +479,7 @@ const DataElementManager = () => {
         </div>
 
         <div className="flex items-center justify-between pb-2">
-          <p className="text-sm text-slate-400">{filtered.length} elements</p>
+          <p className="text-sm text-slate-400">{totalCount} {showDeleted ? "deleted" : "active"} elements</p>
           <div className="flex items-center gap-1 text-xs text-slate-400">
             <span>Sort:</span>
             {[{ key: "newest", label: "Newest" }, { key: "alpha", label: "A → Z" }].map(({ key, label }) => (
@@ -434,21 +506,22 @@ const DataElementManager = () => {
             <p className="text-slate-400">Failed to load data elements.</p>
             <button onClick={loadData} className="mt-2 text-xs text-blue-500 hover:underline">Retry</button>
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="py-20 text-center text-slate-300 text-sm">No elements found.</div>
+        ) : totalCount === 0 ? (
+          <div className="py-20 text-center text-slate-300 text-sm">{showDeleted ? "No deleted elements found." : "No elements found."}</div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto -mx-6 px-6">
+          <table className="w-full min-w-[520px] text-sm">
             <thead>
               <tr className="bg-slate-50 text-left">
                 <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide rounded-l-lg">Label</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Code</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Datatype</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Unit</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide rounded-r-lg"></th>
+                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide hidden sm:table-cell">Code</th>
+                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide hidden md:table-cell">Datatype</th>
+                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide hidden md:table-cell">Unit</th>
+                <th className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide rounded-r-lg">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {paginated.map((el) => {
+              {filtered.map((el) => {
                 const id = el.element_id || el.id;
                 const count = surveyCountMap[id] || 0;
                 const goalCount = goalCountMap[id] || 0;
@@ -460,38 +533,70 @@ const DataElementManager = () => {
                     onClick={() => setSelectedEl(el)}
                     className="cursor-pointer hover:bg-slate-50 transition-colors group"
                   >
-                    <td className="px-4 py-3.5 font-semibold text-slate-800">
-                      {toTitleCase(el.label || el.name)}
+                    <td className="px-4 py-3.5 font-semibold text-slate-800 max-w-[160px] sm:max-w-none">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="truncate">{toTitleCase(el.label || el.name)}</span>
+                        {showDeleted && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 w-fit">
+                            Deleted
+                          </span>
+                        )}
+                        <span className="sm:hidden font-mono text-xs text-blue-600 truncate">{el.code}</span>
+                      </div>
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3.5 hidden sm:table-cell">
                       <span className="inline-block font-mono text-sm text-blue-700 bg-blue-50 border border-blue-200 px-3 py-0.5 rounded-full">
                         {el.code}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-slate-500">
+                    <td className="px-4 py-3.5 text-slate-500 hidden md:table-cell">
                       {normalizeType(el.datatype)}
                     </td>
-                    <td className="px-4 py-3.5 text-slate-500">
+                    <td className="px-4 py-3.5 text-slate-500 hidden md:table-cell">
                       {el.unit || "—"}
                     </td>
                     <td className="px-4 py-3.5">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
                         {goalCount > 0 && (
-                          <span className="px-2 py-0.5 bg-violet-50 text-violet-700 text-xs font-semibold rounded-full border border-violet-100">
+                          <span className="px-2 py-0.5 bg-violet-50 text-violet-700 text-xs font-semibold rounded-full border border-violet-100 hidden sm:inline-block">
                             {goalCount} {goalCount === 1 ? "goal" : "goals"}
                           </span>
                         )}
                         {isMapped && (
-                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full border border-emerald-100">
+                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full border border-emerald-100 hidden sm:inline-block">
                             {count} {count === 1 ? "survey" : "surveys"}
                           </span>
                         )}
-                        <svg
-                          className="w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors"
-                          fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
+                        {showDeleted ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRestore(el);
+                            }}
+                            disabled={restoringId === id}
+                            className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
+                              restoringId === id
+                                ? "text-slate-400 bg-slate-100 cursor-not-allowed"
+                                : "text-blue-700 bg-blue-50 hover:bg-blue-100"
+                            }`}
+                          >
+                            {restoringId === id ? "Restoring..." : "Restore"}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(el);
+                            }}
+                            className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
+                              isMapped
+                                ? "text-amber-700 bg-amber-50 hover:bg-amber-100"
+                                : "text-rose-600 bg-rose-50 hover:bg-rose-100"
+                            }`}
+                          >
+                            {isMapped ? "Deactivate" : "Delete"}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -499,13 +604,14 @@ const DataElementManager = () => {
               })}
             </tbody>
           </table>
+          </div>
         )}
 
         {/* Pagination */}
         {!loading && !loadError && totalPages > 1 && (
           <div className="flex items-center justify-between pt-4 pb-2">
             <p className="text-xs text-slate-400">
-              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+              Showing {totalCount === 0 ? 0 : ((page - 1) * PAGE_SIZE + 1)}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount}
             </p>
             <div className="flex items-center gap-1">
               <button
@@ -615,13 +721,15 @@ const DataElementManager = () => {
                         }))
                       }
                     >
-                      <option value="number">Number</option>
+                      <option value="integer">Integer</option>
+                      <option value="float">Float</option>
                       <option value="string">Text</option>
                       <option value="boolean">Boolean</option>
                       <option value="date">Date</option>
                     </select>
                     <p className="text-xs text-slate-400 mt-1.5">
-                      {newEl.datatype === "number" && "Numeric values — use for measurements, counts, or scores."}
+                      {newEl.datatype === "integer" && "Whole numbers only — use for counts like steps, reps, or push-ups."}
+                      {newEl.datatype === "float" && "Decimal values allowed — use for measurements like weight, hours, or intake."}
                       {newEl.datatype === "string" && "Free-text values — use for open-ended responses."}
                       {newEl.datatype === "boolean" && "Yes/No values — use for binary questions."}
                       {newEl.datatype === "date" && "Date values — use for timestamps or date entries."}
@@ -693,6 +801,120 @@ const DataElementManager = () => {
         </div>
       )}
 
+      {showEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowEdit(false)}>
+          <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <form onSubmit={handleUpdate}>
+              <div className="border-b border-slate-100 px-7 py-6 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Edit Data Element</h2>
+                  <p className="text-sm text-slate-500 mt-1">Safely migrate older numeric elements to integer or float.</p>
+                </div>
+                <button type="button" onClick={() => setShowEdit(false)} className="text-slate-300 hover:text-slate-500 transition-colors">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="px-7 py-6 space-y-5">
+                <div>
+                  <label className="text-sm font-medium text-slate-700 flex items-center gap-1.5 mb-1.5">
+                    Label <span className="text-red-400 text-xs font-semibold">required</span>
+                  </label>
+                  <input
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition"
+                    value={editEl.name}
+                    onChange={(e) => setEditEl({ ...editEl, name: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-slate-700 flex items-center gap-1.5 mb-1.5">
+                      Data type <span className="text-red-400 text-xs font-semibold">required</span>
+                    </label>
+                    <select
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition bg-white"
+                      value={editEl.datatype}
+                      onChange={(e) =>
+                        setEditEl((prev) => ({
+                          ...prev,
+                          datatype: e.target.value,
+                          unit: supportsUnit(e.target.value) ? prev.unit : "",
+                        }))
+                      }
+                    >
+                      <option value="integer">Integer</option>
+                      <option value="float">Float</option>
+                      <option value="string">Text</option>
+                      <option value="boolean">Boolean</option>
+                      <option value="date">Date</option>
+                    </select>
+                    <p className="text-xs text-slate-400 mt-1.5">
+                      {editEl.datatype === "integer" && "Whole numbers only — best for counts like reps, steps, and pills."}
+                      {editEl.datatype === "float" && "Decimal values allowed — best for measurements like water, hours, or weight."}
+                      {editEl.datatype === "string" && "Free-text values — use for open-ended responses."}
+                      {editEl.datatype === "boolean" && "Yes/No values — use for binary questions."}
+                      {editEl.datatype === "date" && "Date values — use for timestamps or date entries."}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-slate-700 flex items-center gap-1.5 mb-1.5">
+                      Unit <span className="text-slate-400 text-xs font-normal">(optional)</span>
+                    </label>
+                    <input
+                      disabled={!supportsUnit(editEl.datatype)}
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition"
+                      value={editEl.unit}
+                      onChange={(e) => setEditEl({ ...editEl, unit: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700 flex items-center gap-1.5 mb-1.5">
+                    Description <span className="text-slate-400 text-xs font-normal">(optional)</span>
+                  </label>
+                  <textarea
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none resize-none h-24 focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition"
+                    value={editEl.description}
+                    onChange={(e) => setEditEl({ ...editEl, description: e.target.value })}
+                  />
+                </div>
+
+                <div className="flex gap-2.5 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+                  <svg className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86l-7.4 12.82A1 1 0 003.76 18h16.48a1 1 0 00.87-1.5l-7.4-12.82a1 1 0 00-1.74 0z" />
+                  </svg>
+                  <p className="text-xs text-amber-800 leading-relaxed">
+                    For elements already in use, only numeric-to-numeric migrations are allowed. This keeps existing survey mappings, goals, and health data safe.
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 px-7 py-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowEdit(false)}
+                  className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updating}
+                  className="flex-1 py-2.5 border border-slate-900 bg-white rounded-xl text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50 transition"
+                >
+                  {updating ? "Saving..." : "Save changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ── Element detail drawer ── */}
       {selectedEl && (
         <div className="fixed inset-0 z-50 flex">
@@ -700,7 +922,7 @@ const DataElementManager = () => {
           <div className="flex-1 bg-black/20" onClick={() => setSelectedEl(null)} />
 
           {/* panel */}
-          <div className="w-full max-w-lg bg-white shadow-2xl flex flex-col overflow-hidden">
+          <div className="flex h-full w-full max-w-lg flex-col overflow-hidden bg-white shadow-2xl">
 
             {/* Drawer header */}
             <div className="px-6 py-5 border-b flex items-start justify-between shrink-0">
@@ -721,12 +943,34 @@ const DataElementManager = () => {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => handleDelete(selectedEl)}
-                  className="text-xs text-red-400 hover:text-red-600 font-semibold px-2 py-1 hover:bg-red-50 rounded transition"
-                >
-                  Delete
-                </button>
+                {selectedEl.is_active === false ? (
+                  <button
+                    onClick={() => handleRestore(selectedEl)}
+                    disabled={restoringId === (selectedEl.element_id || selectedEl.id)}
+                    className={`text-xs font-semibold px-2 py-1 rounded transition ${
+                      restoringId === (selectedEl.element_id || selectedEl.id)
+                        ? "text-slate-400 bg-slate-100 cursor-not-allowed"
+                        : "text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                    }`}
+                  >
+                    {restoringId === (selectedEl.element_id || selectedEl.id) ? "Restoring..." : "Restore"}
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => openEdit(selectedEl)}
+                      className="text-xs text-blue-500 hover:text-blue-700 font-semibold px-2 py-1 hover:bg-blue-50 rounded transition"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(selectedEl)}
+                      className="text-xs text-red-400 hover:text-red-600 font-semibold px-2 py-1 hover:bg-red-50 rounded transition"
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
                 <button
                   onClick={() => setSelectedEl(null)}
                   className="text-slate-400 hover:text-slate-600 transition ml-1"
@@ -758,7 +1002,7 @@ const DataElementManager = () => {
                     <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-3">
                       Details
                     </p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="bg-slate-50 rounded-xl px-4 py-3">
                         <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-0.5">Type</p>
                         <p className="text-sm font-semibold text-slate-800">{typeLabel(selectedEl.datatype)}</p>

@@ -1,26 +1,14 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useDebounced } from "../../hooks/useDebounced";
+import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // AuditLogPage.jsx
 //
-// Placement: frontend/src/pages/admin/AuditLogPage.jsx
-//
-// API Integration:
-//   Uses GET /admin_only/audit-logs (via api.getAuditLogs)
-//   Server-side: limit, offset, action
-//   Client-side: search, date range, category, severity, role, group, user
-//
-// TODO (Backend — Phase 2): Add these query params to the audit-logs endpoint
-//   for full server-side filtering at scale:
-//     - actor_role:  filter by user role
-//     - actor_group: filter by group/cohort
-//     - user_id:     filter by specific user
-//     - date_from / date_to: filter by date range
-//     - search:      full-text search across actor_label, ip, details
-//   Also add actor_email, actor_role, actor_group to the response by extending
-//   the JOIN in admin_only.py (the User table already has role info via
-//   user_role_link, and group info via participant_profiles).
+// API Integration: GET /admin_only/audit-logs
+//   Server-side filters: search, date_from, date_to, actor_role, action, user_id
+//   Client-side filters: category (cat), severity (sev), group, specific user
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ── Action Config ──
@@ -34,6 +22,7 @@ const ACT = {
   PASSWORD_RESET_REQUESTED: { title: "Password Reset Request", type: "warning",  status: "Requested",  cat: "auth",   sev: "warning" },
   PASSWORD_RESET_SUCCESS:   { title: "Password Reset Done",    type: "success",  status: "Reset",      cat: "auth",   sev: "info" },
   INVITE_SENT:              { title: "Invite Sent",            type: "neutral",  status: "Sent",       cat: "auth",   sev: "info" },
+  ONBOARDING_COMPLETED:     { title: "Onboarding Completed",   type: "success",  status: "Completed",  cat: "auth",   sev: "info" },
   // Future event types — UI is ready, backend just needs to start writing these
   SURVEY_SUBMITTED:         { title: "Survey Submitted",       type: "success",  status: "Submitted",  cat: "data",   sev: "info" },
   DATA_EXPORTED:            { title: "Data Exported",          type: "neutral",  status: "Exported",   cat: "data",   sev: "warning" },
@@ -54,7 +43,7 @@ const STY = {
 };
 
 const DETAIL_LABELS = {
-  email_attempted: "Email Attempted", target_email: "Target Email", target_role: "Target Role",
+  email_attempted: "Email Attempted", identifier_attempted: "Identifier Attempted", target_email: "Target Email", target_role: "Target Role",
   target_group: "Target Group", invite_id: "Invite ID", invited_by: "Invited By",
   device: "Device", role: "Role", reason: "Reason",
   form_name: "Form Name", form_id: "Form ID", status: "Status", target_user: "Affected User",
@@ -101,6 +90,27 @@ function timeAgo(iso) {
 function fmtDate(iso) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
+function parseUserAgent(ua) {
+  if (!ua) return null;
+  // Browser
+  let browser = "Unknown browser";
+  if (ua.includes("Edg/"))        browser = "Edge";
+  else if (ua.includes("OPR/") || ua.includes("Opera")) browser = "Opera";
+  else if (ua.includes("Chrome/") && !ua.includes("Chromium")) browser = "Chrome";
+  else if (ua.includes("Firefox/")) browser = "Firefox";
+  else if (ua.includes("Safari/") && !ua.includes("Chrome")) browser = "Safari";
+  else if (ua.includes("MSIE") || ua.includes("Trident/")) browser = "Internet Explorer";
+  // OS
+  let os = "Unknown OS";
+  if (ua.includes("Windows NT 10"))   os = "Windows 10/11";
+  else if (ua.includes("Windows NT")) os = "Windows";
+  else if (ua.includes("Mac OS X"))   os = "macOS";
+  else if (ua.includes("Android"))    os = "Android";
+  else if (ua.includes("iPhone") || ua.includes("iPad")) os = "iOS";
+  else if (ua.includes("Linux"))      os = "Linux";
+  return `${browser} · ${os}`;
+}
+
 function fmtFull(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
@@ -115,6 +125,7 @@ function buildDesc(log) {
   if (log.action === "DATA_DELETED") return [d.target_user, d.form_name, d.reason && (d.reason.length > 35 ? d.reason.slice(0, 35) + "…" : d.reason)].filter(Boolean).join(" · ");
   const p = [];
   if (log.actor_label && log.actor_label !== "Unknown" && log.actor_label !== "System") p.push(log.actor_label);
+  else if (d.identifier_attempted) p.push(d.identifier_attempted);
   else if (d.email_attempted) p.push(d.email_attempted);
   else if (d.target_user) p.push(d.target_user);
   if (d.device) p.push(d.device);
@@ -147,6 +158,7 @@ const Ico = {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function AuditLogPage() {
+  const navigate = useNavigate();
   // ── Data state ──
   const [allLogs, setAllLogs] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -155,6 +167,7 @@ export default function AuditLogPage() {
 
   // ── Filter state ──
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounced(search, 350);
   const [catFilter, setCatFilter] = useState("all");
   const [sevFilter, setSevFilter] = useState("all");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -169,16 +182,23 @@ export default function AuditLogPage() {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(null);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFilename, setExportFilename] = useState(`audit-logs-${new Date().toISOString().split("T")[0]}`);
+  const [isExporting, setIsExporting] = useState(false);
 
-  // ── Fetch audit logs from the API ──
+  // ── Fetch audit logs — reactive to server-side filter + pagination state ──
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Fetch a large batch for client-side filtering + stats.
-      // TODO (Phase 2): When backend supports full server-side filtering,
-      //   send all filter params and use server-side pagination instead.
-      const data = await api.getAuditLogs({ limit: 100, offset: 0 });
+      const data = await api.getAuditLogs({
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+        search: debouncedSearch || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+        actor_role: roleFilter !== "all" ? roleFilter : undefined,
+      });
       setAllLogs(data.logs || []);
       setTotalCount(data.total || 0);
     } catch (err) {
@@ -187,64 +207,83 @@ export default function AuditLogPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [debouncedSearch, dateFrom, dateTo, roleFilter, page, pageSize]);
 
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
 
-  // ── Cascading dropdown options ──
-  // TODO (Phase 2): These fields (actor_role, actor_group, actor_email) are not
-  //   yet returned by the backend. They will show as "N/A" until the backend
-  //   JOIN is extended. See TODO at top of file.
-  const uniqueGroups = useMemo(() => {
-    let pool = allLogs;
-    if (roleFilter !== "all") pool = pool.filter(l => l.actor_role === roleFilter);
-    return [...new Set(pool.map(l => l.actor_group).filter(Boolean))].sort();
-  }, [allLogs, roleFilter]);
+  // ── Cascading dropdown options (derived from server-filtered allLogs) ──
+  const uniqueGroups = useMemo(() =>
+    [...new Set(allLogs.map(l => l.actor_group).filter(Boolean))].sort(),
+  [allLogs]);
 
   const uniqueUsers = useMemo(() => {
-    let pool = allLogs;
-    if (roleFilter !== "all") pool = pool.filter(l => l.actor_role === roleFilter);
-    if (groupFilter !== "all") pool = pool.filter(l => l.actor_group === groupFilter);
+    const pool = groupFilter !== "all" ? allLogs.filter(l => l.actor_group === groupFilter) : allLogs;
     return [...new Set(pool.map(l => l.actor_label).filter(l => l && l !== "Unknown" && l !== "System"))].sort();
-  }, [allLogs, roleFilter, groupFilter]);
+  }, [allLogs, groupFilter]);
 
-  // ── Category counts for pills ──
+  // ── Category counts for pills (server already applied search/date/role) ──
   const catCounts = useMemo(() => {
-    const c = { all: allLogs.length, auth: 0, data: 0, admin: 0, system: 0 };
-    allLogs.forEach(l => { const cat = ACT[l.action]?.cat; if (cat) c[cat]++; });
+    const r = sevFilter !== "all" ? allLogs.filter(l => (ACT[l.action]?.sev || "info") === sevFilter) : allLogs;
+    const c = { all: r.length, auth: 0, data: 0, admin: 0, system: 0 };
+    r.forEach(l => { const cat = ACT[l.action]?.cat; if (cat) c[cat] = (c[cat] || 0) + 1; });
     return c;
-  }, [allLogs]);
+  }, [allLogs, sevFilter]);
 
-  const activeFilterCount = [catFilter !== "all", sevFilter !== "all", roleFilter !== "all", groupFilter !== "all", userFilter !== "all", dateFrom, dateTo].filter(Boolean).length;
+  const activeFilterCount = [catFilter !== "all", sevFilter !== "all", roleFilter !== "all", groupFilter !== "all", userFilter !== "all", dateFrom, dateTo, debouncedSearch].filter(Boolean).length;
 
-  // ── Apply client-side filters ──
+  // ── Client-side filters (only cat/sev/group/user remain — server handles the rest) ──
   const filtered = useMemo(() => {
     let r = [...allLogs];
     if (catFilter !== "all") r = r.filter(l => (ACT[l.action]?.cat || "") === catFilter);
     if (sevFilter !== "all") r = r.filter(l => (ACT[l.action]?.sev || "info") === sevFilter);
-    if (roleFilter !== "all") r = r.filter(l => l.actor_role === roleFilter);
     if (groupFilter !== "all") r = r.filter(l => l.actor_group === groupFilter);
     if (userFilter !== "all") r = r.filter(l => l.actor_label === userFilter);
-    if (dateFrom) { const f = new Date(dateFrom); f.setHours(0, 0, 0, 0); r = r.filter(l => new Date(l.created_at) >= f); }
-    if (dateTo) { const t = new Date(dateTo); t.setHours(23, 59, 59, 999); r = r.filter(l => new Date(l.created_at) <= t); }
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      r = r.filter(l =>
-        (ACT[l.action]?.title || "").toLowerCase().includes(q) ||
-        l.actor_label?.toLowerCase().includes(q) || l.ip_address?.toLowerCase().includes(q) ||
-        l.details?.email_attempted?.toLowerCase().includes(q) || l.details?.target_email?.toLowerCase().includes(q) ||
-        l.details?.target_user?.toLowerCase().includes(q) || l.action?.toLowerCase().includes(q) ||
-        l.details?.form_name?.toLowerCase().includes(q) || l.details?.snapshot_name?.toLowerCase().includes(q)
-      );
-    }
     r.sort((a, b) => sort === "desc" ? new Date(b.created_at) - new Date(a.created_at) : new Date(a.created_at) - new Date(b.created_at));
     return r;
-  }, [allLogs, search, catFilter, sevFilter, roleFilter, groupFilter, userFilter, dateFrom, dateTo, sort]);
+  }, [allLogs, catFilter, sevFilter, groupFilter, userFilter, sort]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
+  // Server handles pagination; client-side filters (cat/sev/group/user) narrow the current page only.
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const paged = filtered;
+
+  // ── Export ──
+  const handleExport = () => {
+    if (filtered.length === 0) return;
+    setIsExporting(true);
+    try {
+      const defaultName = `audit-logs-${new Date().toISOString().split("T")[0]}`;
+      const filename = (exportFilename || "").trim() || defaultName;
+      const headers = ["Timestamp", "Action", "Category", "Severity", "Actor Name", "Actor Email", "Actor Role", "IP Address", "Device / Browser", "Entity Type", "Entity ID", "Details"];
+      const escape = (v) => { if (v == null) return ""; const s = String(v).replace(/"/g, '""'); return /[",\n\r]/.test(s) ? `"${s}"` : s; };
+      const rows = filtered.map(l => [
+        l.created_at ? new Date(l.created_at).toISOString() : "",
+        ACT[l.action]?.title || l.action || "",
+        ACT[l.action]?.cat || "",
+        ACT[l.action]?.sev || "",
+        l.actor_label || "",
+        l.actor_email || "",
+        l.actor_role || "",
+        l.ip_address || "",
+        parseUserAgent(l.details?.user_agent) || "",
+        l.entity_type || "",
+        l.entity_id || "",
+        l.details ? JSON.stringify(l.details) : "",
+      ].map(escape).join(","));
+      const csv = [headers.join(","), ...rows].join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${filename}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShowExportModal(false);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // ── Stats ──
   const stats = useMemo(() => {
@@ -261,10 +300,14 @@ export default function AuditLogPage() {
     return { h24, d7, d30, total: totalCount, loginOk, loginFail, loginTotal, invSent, invAccepted, invPending: Math.max(0, invPending) };
   }, [allLogs, totalCount]);
 
+  // ── Reset page when server-side filter state changes ──
+  useEffect(() => { setPage(1); }, [debouncedSearch, dateFrom, dateTo, roleFilter]);
+
   // ── Actions ──
   const clearAll = () => {
     setCatFilter("all"); setSevFilter("all"); setRoleFilter("all");
     setGroupFilter("all"); setUserFilter("all"); setDateFrom(""); setDateTo(""); setPage(1);
+    setSearch("");
   };
   const setDatePreset = (days) => {
     const now = new Date(); const from = new Date(now); from.setDate(from.getDate() - days);
@@ -320,13 +363,20 @@ export default function AuditLogPage() {
           <p className="text-sm text-slate-500 mt-1">Track all system activity — authentication, invites, data changes, and backups</p>
         </div>
         <div className="flex gap-2 shrink-0">
-          <button onClick={() => { clearAll(); setSearch(""); fetchLogs(); }} className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-600 bg-white rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors shadow-sm">
+          <button onClick={() => { clearAll(); fetchLogs(); }} className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-600 bg-white rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors shadow-sm">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
             Refresh
           </button>
-          <button className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors shadow-sm">
+          <button
+            onClick={() => {
+              setExportFilename(`audit-logs-${new Date().toISOString().split("T")[0]}`);
+              setShowExportModal(true);
+            }}
+            disabled={filtered.length === 0}
+            className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-            Export CSV
+            Export {filtered.length > 0 && `(${filtered.length})`}
           </button>
         </div>
       </div>
@@ -602,7 +652,7 @@ export default function AuditLogPage() {
                             <span className="text-[10px] font-mono text-slate-300 bg-slate-50 px-2 py-1 rounded">{log.audit_id}</span>
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                           {[["Action Code", log.action, true], ["Category", c.cat], ["Severity", c.sev], ["Entity Type", log.entity_type || "N/A"]].map(([label, value, mono]) => (
                             <div key={label} className="bg-slate-50 rounded-lg px-3 py-2">
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{label}</p>
@@ -622,30 +672,45 @@ export default function AuditLogPage() {
                               : log.actor_label === "System" ? "SY" : "?"
                             }
                           </div>
-                          <div className="flex-1 grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+                          <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
                             <div>
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Name</p>
-                              <p className="text-xs text-slate-700 mt-0.5">{log.actor_label || "N/A"}</p>
+                              {log.actor_user_id && log.actor_label && log.actor_label !== "Unknown" && log.actor_label !== "System"
+                                ? <button onClick={() => navigate(`/admin/users/${log.actor_user_id}`)} className="text-xs text-blue-600 hover:text-blue-800 hover:underline mt-0.5 text-left">{log.actor_label}</button>
+                                : <p className="text-xs text-slate-700 mt-0.5">{log.actor_label || "N/A"}</p>
+                              }
                             </div>
                             <div>
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Email</p>
-                              <p className="text-xs text-slate-700 mt-0.5 truncate">{log.actor_email || "N/A"}</p>
+                              {log.actor_email && log.actor_user_id
+                                ? <button onClick={() => navigate(`/admin/users/${log.actor_user_id}`)} className="text-xs text-blue-600 hover:text-blue-800 hover:underline mt-0.5 text-left truncate block max-w-full">{log.actor_email}</button>
+                                : <p className="text-xs text-slate-400 mt-0.5 italic">Not available</p>
+                              }
                             </div>
                             <div>
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">User ID</p>
-                              <p className="text-xs text-slate-700 font-mono mt-0.5">{log.actor_user_id || "N/A"}</p>
+                              {log.actor_user_id
+                                ? <button onClick={() => navigate(`/admin/users/${log.actor_user_id}`)} className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-mono mt-0.5 text-left break-all">{log.actor_user_id}</button>
+                                : <p className="text-xs text-slate-700 font-mono mt-0.5">N/A</p>
+                              }
                             </div>
                             <div>
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Role</p>
-                              <p className="text-xs text-slate-700 mt-0.5 capitalize">{log.actor_role || "N/A"}</p>
+                              {log.actor_role
+                                ? <p className="text-xs text-slate-700 mt-0.5 capitalize">{log.actor_role}</p>
+                                : <p className="text-xs text-slate-400 mt-0.5 italic">Not available</p>
+                              }
                             </div>
                             <div>
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Group / Cohort</p>
-                              <p className="text-xs text-slate-700 mt-0.5">{log.actor_group || "N/A"}</p>
+                              <p className="text-xs text-slate-400 mt-0.5 italic">Not available</p>
                             </div>
                             <div>
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Entity ID</p>
-                              <p className="text-xs text-slate-700 font-mono mt-0.5">{log.entity_id || "N/A"}</p>
+                              {log.entity_id && log.entity_type === "user"
+                                ? <button onClick={() => navigate(`/admin/users/${log.entity_id}`)} className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-mono mt-0.5 text-left break-all">{log.entity_id}</button>
+                                : <p className="text-xs text-slate-700 font-mono mt-0.5">{log.entity_id || "N/A"}</p>
+                              }
                             </div>
                           </div>
                         </div>
@@ -654,13 +719,20 @@ export default function AuditLogPage() {
                       {/* Section 3: Request Context */}
                       <div className="pt-4 border-t border-slate-100">
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Request Context</p>
-                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-                          {[["IP Address", log.ip_address || "N/A", true], ["Device / Browser", log.details?.device || "N/A"], ["Timestamp", fmtFull(log.created_at)]].map(([label, value, mono]) => (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {[["IP Address", log.ip_address || "N/A", true], ["Timestamp", fmtFull(log.created_at)]].map(([label, value, mono]) => (
                             <div key={label} className="bg-slate-50 rounded-lg px-3 py-2">
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{label}</p>
                               <p className={`text-xs text-slate-700 mt-0.5 ${mono ? "font-mono" : ""}`}>{value}</p>
                             </div>
                           ))}
+                          <div className="bg-slate-50 rounded-lg px-3 py-2">
+                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Device / Browser</p>
+                            {parseUserAgent(log.details?.user_agent)
+                              ? <p className="text-xs text-slate-700 mt-0.5" title={log.details.user_agent}>{parseUserAgent(log.details.user_agent)}</p>
+                              : <p className="text-xs text-slate-400 mt-0.5 italic">Not available</p>
+                            }
+                          </div>
                         </div>
                       </div>
 
@@ -669,7 +741,7 @@ export default function AuditLogPage() {
                         <div className="pt-4 border-t border-slate-100">
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Additional Details</p>
                           <div className="bg-slate-50 rounded-lg border border-slate-100 p-4">
-                            <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
                               {Object.entries(log.details).filter(([k]) => k !== "device").map(([k, v]) => (
                                 <div key={k}>
                                   <p className="text-[10px] text-slate-400 font-medium">{DETAIL_LABELS[k] || k}</p>
@@ -721,6 +793,53 @@ export default function AuditLogPage() {
           </div>
         </div>
       </div>
+
+      {/* ════════════ EXPORT MODAL ════════════ */}
+      {showExportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 mb-5">
+              <div>
+                <h2 className="text-base font-bold text-slate-800">Export Audit Logs</h2>
+                <p className="text-xs text-slate-400 mt-0.5">{filtered.length} {filtered.length === 1 ? "record" : "records"} will be exported</p>
+              </div>
+              <button onClick={() => setShowExportModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors mt-0.5">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">File name</label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={exportFilename}
+                  onChange={e => setExportFilename(e.target.value)}
+                  className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  placeholder={`audit-logs-${new Date().toISOString().split("T")[0]}`}
+                />
+                <span className="text-sm text-slate-400 shrink-0">.csv</span>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={isExporting}
+                className={`rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-colors ${isExporting ? "bg-blue-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
+              >
+                {isExporting ? "Exporting…" : "Export"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
