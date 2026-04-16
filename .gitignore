@@ -67,6 +67,5 @@ supabase/.env
 # ======================
 # Local / personal
 # ======================
-.claude/settings.local.json
 .mcp.json
 install.cmd
