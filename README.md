@@ -51,7 +51,7 @@ health-data-bank/
 │       ├── api/routes/       # API endpoints grouped by domain
 │       ├── core/             # Config, security
 │       ├── db/               # SQLAlchemy models and queries
-│       ├── middleware/       # Session, rate-limit, logging middleware
+│       ├── middleware/       # Request validation (signup, survey)
 │       ├── schemas/          # Pydantic schemas
 │       ├── seeds/            # RBAC and initial data seeds
 │       ├── services/         # Business logic
@@ -74,7 +74,7 @@ That's it. Docker Compose runs PostgreSQL, Redis, the backend, and the frontend 
 1. **Clone the repository**
 
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/Asodhiya/health-data-bank.git
    cd health-data-bank
    ```
 
@@ -205,7 +205,7 @@ Database connection vars (`user`, `password`, `host`, `port`, `dbname`) are set 
 cd backend && pytest
 
 # Frontend
-cd frontend && npm test
+cd frontend && npm run lint
 ```
 
 ## Team

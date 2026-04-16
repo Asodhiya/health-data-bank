@@ -52,7 +52,7 @@ const OnboardingManagementPage = lazy(() => import("./pages/admin/OnboardingMana
 // --- Researcher pages ---
 const ResearcherOnboardingPage = lazy(() => import("./pages/researcher/ResearcherOnboardingPage"));
 const DataElementManager = lazy(() => import("./pages/researcher/DataElementManager"));
-const Groups = lazy(() => import("./pages/researcher/Group_Chorts"));
+const Groups = lazy(() => import("./pages/researcher/Group_Cohorts"));
 const GoalTemplates = lazy(() => import("./pages/researcher/GoalTemplates"));
 const ResearcherSubmissionDetailPage = lazy(() => import("./pages/researcher/ResearcherSubmissionDetailPage"));
 

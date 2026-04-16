@@ -13,7 +13,6 @@ from app.schemas.survey_schema import SurveyDetailOut, SurveyListItem, Participa
 from app.services.participant_survey_service import (list_assigned_surveys, get_participant_survey_detail, save_survey_response, submit_survey_response, get_participant_survey_response)
 
 router = APIRouter()
-#TODO:dependencies do not work as of the moment, needs it to be initialized in the database/or when testing, remove it
 
 @router.get("/assigned", response_model=List[ParticipantSurveyItem], dependencies=[Depends(require_permissions(SURVEY_LIST_ASSIGNED))])
 async def list_assigned_surveys_route(db: AsyncSession = Depends(get_rls_db),current_user: User = Depends(check_current_user)):
@@ -64,7 +63,6 @@ async def submit_survey_response_route(form_id: UUID,answers: List[dict], db: As
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        import traceback; traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 

@@ -29,12 +29,13 @@ docs: update API documentation
 **Python (Backend):**
 - Follow PEP 8
 - Use type hints
-- Run `ruff check` before committing
+- Run `pytest` before committing
 
 **JavaScript (Frontend):**
 - Use functional components
 - Use Tailwind for styling
 - Keep components small and focused
+- Run `npm run lint` before committing
 
 ## Pull Request Process
 
